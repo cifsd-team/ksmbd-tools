@@ -11,6 +11,8 @@
 #include <stdio.h>
 #include <cifsdtools.h>
 
+#define	WIDTH	160
+
 static const char *app_name = "unknown";
 static int log_open;
 
@@ -86,7 +88,6 @@ void pr_logger_init(int flag)
 
 void pr_hex_dump(const void *mem, size_t sz)
 {
-	const int WIDTH = 160;
 	int xi = 0, si = 0, mi = 0;
 	char xline[WIDTH];
 	char sline[WIDTH];
