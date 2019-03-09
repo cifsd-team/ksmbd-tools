@@ -585,7 +585,6 @@ int ndr_write_array_of_structs(struct cifsd_rpc_pipe *pipe)
 {
 	struct cifsd_dcerpc *dce = pipe->dce;
 	int max_entry_nr;
-	int ret = CIFSD_RPC_OK;
 
 	/*
 	 * In the NDR representation of a structure that contains a
@@ -600,7 +599,7 @@ int ndr_write_array_of_structs(struct cifsd_rpc_pipe *pipe)
 
 	max_entry_nr = __max_entries(dce, pipe);
 	if (max_entry_nr != pipe->num_entries)
-		ret = CIFSD_RPC_EMORE_DATA;
+		return CIFSD_RPC_EMORE_DATA;
 
 	ndr_write_int32(dce, max_entry_nr);
 	/*

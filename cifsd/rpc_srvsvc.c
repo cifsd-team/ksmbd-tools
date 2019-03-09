@@ -313,7 +313,7 @@ static int srvsvc_share_info_invoke(struct cifsd_rpc_pipe *pipe)
 
 	if (dce->req_hdr.opnum == SRVSVC_OPNUM_GET_SHARE_INFO)
 		ret = srvsvc_share_get_info_invoke(pipe, &dce->si_req);
-	if (dce->req_hdr.opnum == SRVSVC_OPNUM_SHARE_ENUM_ALL)
+	else
 		ret = srvsvc_share_enum_all_invoke(pipe);
 	return ret;
 }
@@ -357,13 +357,12 @@ static int srvsvc_share_info_return(struct cifsd_rpc_pipe *pipe)
 	} else {
 		pr_err("Unsupported share info level (write): %d\n",
 			dce->si_req.level);
-		status = CIFSD_RPC_EINVALID_LEVEL;
 		rpc_pipe_reset(pipe);
 	}
 
 	if (dce->req_hdr.opnum == SRVSVC_OPNUM_GET_SHARE_INFO)
 		status = srvsvc_share_get_info_return(pipe);
-	if (dce->req_hdr.opnum == SRVSVC_OPNUM_SHARE_ENUM_ALL)
+	else
 		status = srvsvc_share_enum_all_return(pipe);
 
 	if (rpc_restricted_context(dce->rpc_req))
