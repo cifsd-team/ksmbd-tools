@@ -5,6 +5,7 @@
  *   linux-cifsd-devel@lists.sourceforge.net
  */
 
+#include <glib.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -25,8 +26,8 @@
 
 #define MAX_NT_PWD_LEN 129
 
-static char *arg_account;
-static char *arg_password;
+static char *arg_account = NULL;
+static char *arg_password = NULL;
 static int conf_fd = -1;
 static char wbuf[2 * MAX_NT_PWD_LEN + 2 * KSMBD_REQ_MAX_ACCOUNT_NAME_SZ];
 
@@ -135,8 +136,8 @@ static char *get_utf8_password(long *len)
 {
 	size_t raw_sz;
 	char *pswd_raw, *pswd_converted;
-	size_t bytes_read = 0;
-	size_t bytes_written = 0;
+	gsize bytes_read = 0;
+	gsize bytes_written = 0;
 
 	pswd_raw = prompt_password(&raw_sz);
 	if (!pswd_raw)
@@ -236,30 +237,30 @@ static void write_user(struct ksmbd_user *user)
 	}
 }
 
-static void write_user_cb(void *value, unsigned long long id, void *user_data)
+static void write_user_cb(gpointer key, gpointer value, gpointer user_data)
 {
 	struct ksmbd_user *user = (struct ksmbd_user *)value;
 
 	write_user(user);
 }
 
-static void write_remove_user_cb(void *value,
-				 unsigned long long key,
-				 void *user_data)
+static void write_remove_user_cb(gpointer key,
+				 gpointer value,
+				 gpointer user_data)
 {
 	struct ksmbd_user *user = (struct ksmbd_user *)value;
 
-	if (!strcasecmp(user->name, arg_account)) {
+	if (!g_ascii_strcasecmp(user->name, arg_account)) {
 		pr_info("User '%s' removed\n", user->name);
 		return;
 	}
 
-	write_user_cb(value, key, user_data);
+	write_user_cb(key, value, user_data);
 }
 
-static void lookup_can_del_user(void *value,
-				unsigned long long key,
-				void *user_data)
+static void lookup_can_del_user(gpointer key,
+				gpointer value,
+				gpointer user_data)
 {
 	struct ksmbd_share *share = (struct ksmbd_share *)value;
 	int ret = 0;
@@ -326,7 +327,7 @@ int command_add_user(char *pwddb, char *account, char *password)
 	if (__opendb_file(pwddb))
 		return -EINVAL;
 
-	foreach_ksmbd_user(write_user_cb, NULL);
+	for_each_ksmbd_user(write_user_cb, NULL);
 	close(conf_fd);
 	return 0;
 }
@@ -365,7 +366,7 @@ int command_update_user(char *pwddb, char *account, char *password)
 	if (__opendb_file(pwddb))
 		return -EINVAL;
 
-	foreach_ksmbd_user(write_user_cb, NULL);
+	for_each_ksmbd_user(write_user_cb, NULL);
 	close(conf_fd);
 	return 0;
 }
@@ -381,7 +382,7 @@ int command_del_user(char *pwddb, char *account)
 		return -EINVAL;
 	}
 
-	foreach_ksmbd_share(lookup_can_del_user, &abort_del_user);
+	for_each_ksmbd_share(lookup_can_del_user, &abort_del_user);
 
 	if (abort_del_user) {
 		pr_err("Aborting user deletion\n");
@@ -391,7 +392,7 @@ int command_del_user(char *pwddb, char *account)
 	if (__opendb_file(pwddb))
 		return -EINVAL;
 
-	foreach_ksmbd_user(write_remove_user_cb, NULL);
+	for_each_ksmbd_user(write_remove_user_cb, NULL);
 	close(conf_fd);
 	return 0;
 }

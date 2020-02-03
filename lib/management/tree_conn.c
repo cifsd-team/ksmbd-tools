@@ -7,6 +7,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <glib.h>
 #include <linux/ksmbd_server.h>
 
 #include <management/tree_conn.h>

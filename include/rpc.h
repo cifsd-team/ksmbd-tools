@@ -9,6 +9,7 @@
 #define __KSMBD_RPC_H__
 
 #include <linux/types.h>
+#include <glib.h>
 
 #define KSMBD_DCERPC_LITTLE_ENDIAN	(1 << 0)
 #define KSMBD_DCERPC_ALIGN2		(1 << 1)
@@ -250,27 +251,27 @@ struct ksmbd_dcerpc {
 	 * restriction
 	 */
 	int			(*entry_size)(struct ksmbd_dcerpc *dce,
-					      void *entry);
+					      gpointer entry);
 	/*
 	 * Entry representation under the given container level
 	 * restriction for array representation
 	 */
 	int			(*entry_rep)(struct ksmbd_dcerpc *dce,
-					      void *entry);
+					      gpointer entry);
 	/*
 	 * Entry data under the given container level restriction
 	 * for array representation
 	 */
 	int			(*entry_data)(struct ksmbd_dcerpc *dce,
-					      void *entry);
+					      gpointer entry);
 };
 
 struct ksmbd_rpc_pipe {
-	unsigned int	id;
+	unsigned int		id;
 
 	int			num_entries;
 	int			num_processed;
-	struct LIST		*entries;
+	GArray			*entries;
 
 	struct ksmbd_dcerpc	*dce;
 

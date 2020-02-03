@@ -5,8 +5,7 @@
  *   linux-cifsd-devel@lists.sourceforge.net
  */
 #include <memory.h>
-#include <pthread.h>
-#include <semaphore.h>
+#include <glib.h>
 #include <errno.h>
 #include <linux/ksmbd_server.h>
 
@@ -20,7 +19,7 @@
 #include <management/tree_conn.h>
 
 #define MAX_WORKER_THREADS	4
-static sem_t semaphore;
+static GThreadPool *pool;
 
 #define VALID_IPC_MSG(m, t)					\
 	({							\
@@ -157,7 +156,7 @@ static int rpc_request(struct ksmbd_ipc_msg *msg)
 	req = KSMBD_IPC_MSG_PAYLOAD(msg);
 	if (req->flags & KSMBD_RPC_METHOD_RETURN)
 		resp_msg = ipc_msg_alloc(KSMBD_IPC_MAX_MESSAGE_SIZE -
-					 sizeof(struct ksmbd_rpc_command));
+				sizeof(struct ksmbd_rpc_command));
 	else
 		resp_msg = ipc_msg_alloc(sizeof(struct ksmbd_rpc_command));
 	if (!resp_msg)
@@ -194,7 +193,7 @@ out:
 	return 0;
 }
 
-static void *worker_pool_fn(void *event)
+static void worker_pool_fn(gpointer event, gpointer user_data)
 {
 	struct ksmbd_ipc_msg *msg = (struct ksmbd_ipc_msg *)event;
 
@@ -233,35 +232,38 @@ static void *worker_pool_fn(void *event)
 	}
 
 	ipc_msg_free(msg);
-	sem_post(&semaphore);
-	return NULL;
 }
 
 int wp_ipc_msg_push(struct ksmbd_ipc_msg *msg)
 {
-	pthread_attr_t attr;
-	pthread_t thread;
-
-	sem_wait(&semaphore);
-	pthread_attr_init(&attr);
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	if (pthread_create(&thread, &attr, worker_pool_fn, msg) != 0) {
-		pthread_attr_destroy(&attr);
-		sem_post(&semaphore);
-		pr_err("error while creating worker thread\n");
-		return -1;
-	}
-	pthread_attr_destroy(&attr);
-	return 0;
-
-}
-
-int wp_init(void)
-{
-	return sem_init(&semaphore, 0, MAX_WORKER_THREADS);
+	return g_thread_pool_push(pool, msg, NULL);
 }
 
 void wp_destroy(void)
 {
-	sem_destroy(&semaphore);
+	if (pool)
+		g_thread_pool_free(pool, 1, 1);
+}
+
+int wp_init(void)
+{
+	GError *err;
+
+	pool = g_thread_pool_new(worker_pool_fn,
+				 NULL,
+				 MAX_WORKER_THREADS,
+				 0,
+				 &err);
+	if (!pool) {
+		if (err) {
+			pr_err("Can't create pool: %s\n", err->message);
+			g_error_free(err);
+		}
+		goto out_error;
+	}
+
+	return 0;
+out_error:
+	wp_destroy();
+	return -ENOMEM;
 }

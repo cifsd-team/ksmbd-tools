@@ -30,7 +30,7 @@
 #include <management/session.h>
 #include <management/tree_conn.h>
 
-static int no_detach;
+static int no_detach = 0;
 int ksmbd_health_status;
 static pid_t worker_pid;
 static int lock_fd = -1;
@@ -216,15 +216,15 @@ static void worker_process_free(void)
 	 */
 	ipc_destroy();
 	rpc_destroy();
-	sm_destroy();
 	wp_destroy();
+	sm_destroy();
 	shm_destroy();
 	usm_destroy();
 }
 
 static void child_sig_handler(int signo)
 {
-	static volatile int fatal_delivered;
+	static volatile int fatal_delivered = 0;
 
 	if (signo == SIGHUP) {
 		/*
@@ -240,7 +240,7 @@ static void child_sig_handler(int signo)
 	pr_err("Child received signal: %d (%s)\n",
 		signo, strsignal(signo));
 
-	if (!atomic_int_compare_and_exchange(&fatal_delivered, 0, 1))
+	if (!g_atomic_int_compare_and_exchange(&fatal_delivered, 0, 1))
 		return;
 
 	ksmbd_health_status &= ~KSMBD_HEALTH_RUNNING;
@@ -296,16 +296,13 @@ static int worker_process_init(void)
 
 	setup_signals(child_sig_handler);
 	set_logger_app_name("ksmbd-worker");
+
 	ret = usm_init();
 	if (ret) {
 		pr_err("Failed to init user management\n");
 		goto out;
 	}
-	ret = wp_init();
-	if (ret) {
-		pr_err("Failed to init worker\n");
-		goto out;
-	}
+
 	ret = shm_init();
 	if (ret) {
 		pr_err("Failed to init net share management\n");
@@ -321,6 +318,12 @@ static int worker_process_init(void)
 	ret = sm_init();
 	if (ret) {
 		pr_err("Failed to init user session management\n");
+		goto out;
+	}
+
+	ret = wp_init();
+	if (ret) {
+		pr_err("Failed to init worker threads pool\n");
 		goto out;
 	}
 
@@ -492,10 +495,10 @@ int main(int argc, char *argv[])
 			pr_debug("TCP port option override\n");
 			break;
 		case 'c':
-			smbconf = strdup(optarg);
+			smbconf = g_strdup(optarg);
 			break;
 		case 'u':
-			pwddb = strdup(optarg);
+			pwddb = g_strdup(optarg);
 			break;
 		case 'n':
 			if (!optarg)

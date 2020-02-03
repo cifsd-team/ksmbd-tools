@@ -8,7 +8,7 @@
 #ifndef __MANAGEMENT_SHARE_H__
 #define __MANAGEMENT_SHARE_H__
 
-#include <ksmbdtools.h>
+#include <glib.h>
 
 
 enum share_users {
@@ -44,7 +44,7 @@ struct ksmbd_share {
 	int		max_connections;
 	int		num_connections;
 
-	pthread_rwlock_t	update_lock;
+	GRWLock		update_lock;
 	int		ref_count;
 
 	unsigned short	create_mask;
@@ -61,19 +61,19 @@ struct ksmbd_share {
 
 	char		*guest_account;
 
-	struct LIST	*maps[KSMBD_SHARE_USERS_MAX];
+	GHashTable	*maps[KSMBD_SHARE_USERS_MAX];
 	/*
 	 * FIXME
 	 * We need to support IP ranges, netmasks, etc.
 	 * This is just a silly hostname matching, hence
 	 * these two are not in ->maps[].
 	 */
-	struct LIST	*hosts_allow_map;
+	GHashTable	*hosts_allow_map;
 	/* Deny access */
-	struct LIST	*hosts_deny_map;
+	GHashTable	*hosts_deny_map;
 
 	/* One lock to rule them all [as of now] */
-	pthread_rwlock_t maps_lock;
+	GRWLock		maps_lock;
 
 	char		*comment;
 };
@@ -158,8 +158,10 @@ int shm_lookup_hosts_map(struct ksmbd_share *share,
 int shm_open_connection(struct ksmbd_share *share);
 int shm_close_connection(struct ksmbd_share *share);
 
-typedef void (*walk_shares)(void *item, unsigned long long id, void *user_data);
-void foreach_ksmbd_share(walk_shares cb, void *user_data);
+typedef void (*walk_shares)(gpointer key,
+			    gpointer value,
+			    gpointer user_data);
+void for_each_ksmbd_share(walk_shares cb, gpointer user_data);
 
 struct ksmbd_share_config_response;
 

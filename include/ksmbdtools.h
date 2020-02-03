@@ -23,99 +23,35 @@
 #include <time.h>
 #include <poll.h>
 #include <getopt.h>
-#include <pthread.h>
+#include <glib.h>
 
 #ifdef HAVE_CONFIG_H
 #include <config.h>
 #endif
 
-char *ascii_strdown(char *str, size_t len);
-
-int atomic_int_add(volatile int *atomic, int val);
-void atomic_int_inc(volatile int *atomic);
-
-int atomic_int_compare_and_exchange(volatile int *atomic,
-				    int oldval, int newval);
-
-#define KEY_ID 0x0
-#define KEY_STRING 0x1
-struct LIST {
-	struct LIST *prev;
-	struct LIST *next;
-	int type;
-	unsigned long long id;
-	char *keystr;
-	void *item;
-};
-
-struct LIST *list_init(struct LIST **list);
-long long list_maxid(struct LIST **list);
-int list_add_str(struct LIST **list, void *item, char *str);
-int list_add(struct LIST **list, void *item, unsigned long long id);
-void list_append(struct LIST **list, void *item);
-int list_remove(struct LIST **list, unsigned long long id);
-int list_remove_dec(struct LIST **list, unsigned long long id);
-void *list_get(struct LIST **list, unsigned long long id);
-void list_clear(struct LIST **list);
-int list_foreach(struct LIST **list,
-		 void (*func)(void *item, unsigned long long id,
-			      void *user_data), void *user_data);
-
-static unsigned long long list_tokey(void *ptr)
-{
-	size_t p = (size_t)ptr;
-	return p;
-}
-
-static void *list_fromkey(unsigned long long key)
-{
-	size_t p = key;
-
-	return (void *)p;
-}
-
-typedef enum {
-	step_A, step_B, step_C
-} base64_encodestep;
-
-typedef struct {
-	base64_encodestep step;
-	char result;
-	int stepcount;
-} base64_encodestate;
-
-typedef enum {
-	step_a, step_b, step_c, step_d
-} base64_decodestep;
-
-typedef struct {
-	base64_decodestep step;
-	char plainchar;
-} base64_decodestate;
-
 struct smbconf_global {
-	int flags;
-	int map_to_guest;
-	char *guest_account;
+	int			flags;
+	int			map_to_guest;
+	char			*guest_account;
 
-	char *server_string;
-	char *work_group;
-	char *netbios_name;
-	char *server_min_protocol;
-	char *server_max_protocol;
-	char *root_dir;
-	int server_signing;
-	int sessions_cap;
-	int restrict_anon;
-	unsigned short tcp_port;
-	unsigned short ipc_timeout;
-	unsigned int deadtime;
-	int bind_interfaces_only;
-	char **interfaces;
-	unsigned long file_max;
-	unsigned int smb2_max_read;
-	unsigned int smb2_max_write;
-	unsigned int smb2_max_trans;
+	char			*server_string;
+	char			*work_group;
+	char			*netbios_name;
+	char			*server_min_protocol;
+	char			*server_max_protocol;
+	char			*root_dir;
+	int			server_signing;
+	int			sessions_cap;
+	int			restrict_anon;
+	unsigned short		tcp_port;
+	unsigned short		ipc_timeout;
+	unsigned int		deadtime;
+	int			bind_interfaces_only;
+	char			**interfaces;
+	unsigned long		file_max;
+	unsigned int		smb2_max_read;
+	unsigned int		smb2_max_write;
+	unsigned int		smb2_max_trans;
 };
 
 #define KSMBD_LOCK_FILE		"/tmp/ksmbd.lock"
@@ -177,7 +113,7 @@ static int log_level = PR_INFO;
  */
 char *strerr(int err);
 
-__attribute__((format(printf, 2, 3)))
+__attribute__ ((format (printf, 2, 3)))
 extern void __pr_log(int level, const char *fmt, ...);
 extern void set_logger_app_name(const char *an);
 extern const char *get_logger_app_name(void);
@@ -205,19 +141,20 @@ void pr_hex_dump(const void *mem, size_t sz);
 char *base64_encode(unsigned char *src, size_t srclen);
 unsigned char *base64_decode(char const *src, size_t *dstlen);
 
-char *ksmbd_gconvert(const char *str,
-		     size_t str_len,
-		     int to_codeset,
-		     int from_codeset,
-		     size_t *bytes_read, size_t *bytes_written);
+gchar *ksmbd_gconvert(const gchar *str,
+		      gssize       str_len,
+		      int          to_codeset,
+		      int          from_codeset,
+		      gsize       *bytes_read,
+		      gsize       *bytes_written);
 
 enum charset_idx {
-	KSMBD_CHARSET_UTF8 = 0,
+	KSMBD_CHARSET_UTF8		= 0,
 	KSMBD_CHARSET_UTF16LE,
 	KSMBD_CHARSET_UCS2LE,
 	KSMBD_CHARSET_UTF16BE,
 	KSMBD_CHARSET_UCS2BE,
-	KSMBD_CHARSET_MAX = 5,
+	KSMBD_CHARSET_MAX		= 5,
 };
 
 #define KSMBD_CHARSET_DEFAULT		KSMBD_CHARSET_UTF8

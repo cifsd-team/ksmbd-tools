@@ -7,6 +7,7 @@
 
 #include <memory.h>
 #include <endian.h>
+#include <glib.h>
 #include <errno.h>
 #include <linux/ksmbd_server.h>
 
@@ -35,7 +36,7 @@ static int wkssvc_clear_headers(struct ksmbd_rpc_pipe *pipe,
 }
 
 static int __netwksta_entry_rep_ctr100(struct ksmbd_dcerpc *dce,
-				       void *entry)
+				       gpointer entry)
 {
 	int ret = 0;
 
@@ -57,7 +58,7 @@ static int __netwksta_entry_rep_ctr100(struct ksmbd_dcerpc *dce,
 }
 
 static int __netwksta_entry_data_ctr100(struct ksmbd_dcerpc *dce,
-					void *entry)
+					gpointer entry)
 {
 	int ret = 0;
 

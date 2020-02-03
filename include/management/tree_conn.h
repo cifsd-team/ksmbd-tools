@@ -8,6 +8,8 @@
 #ifndef __MANAGEMENT_TREE_CONN_H__
 #define __MANAGEMENT_TREE_CONN_H__
 
+#include <glib.h>
+
 struct ksmbd_share;
 
 struct ksmbd_tree_conn {

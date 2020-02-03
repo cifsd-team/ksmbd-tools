@@ -7,6 +7,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <glib.h>
 #include <sys/types.h>
 #include <pwd.h>
 #include <grp.h>
@@ -24,39 +25,39 @@
  * Add new entries ONLY to the bottom.
  */
 char *KSMBD_SHARE_CONF[KSMBD_SHARE_CONF_MAX] = {
-	"comment",		/* 0 */
+	"comment",				/* 0 */
 	"path",
 	"guest ok",
 	"guest account",
 	"read only",
-	"browseable",		/* 5 */
+	"browseable",				/* 5 */
 	"write ok",
 	"writeable",
 	"store dos attributes",
 	"oplocks",
-	"create mask",		/* 10 */
+	"create mask",				/* 10 */
 	"directory mask",
 	"force create mode",
 	"force directory mode",
 	"force group",
-	"force user",		/* 15 */
+	"force user",				/* 15 */
 	"hide dot files",
 	"valid users",
 	"invalid users",
 	"read list",
-	"write list",		/* 20 */
+	"write list",				/* 20 */
 	"admin users",
 	"hosts allow",
 	"hosts deny",
 	"max connections",
-	"veto files",		/* 25 */
+	"veto files",				/* 25 */
 	"inherit smack",
 	"inherit owner",
 	"streams",
 };
 
-static struct LIST *shares_table;
-static pthread_rwlock_t shares_table_lock;
+static GHashTable	*shares_table;
+static GRWLock		shares_table_lock;
 
 int shm_share_config(char *k, enum KSMBD_SHARE_CONF c)
 {
@@ -66,32 +67,30 @@ int shm_share_config(char *k, enum KSMBD_SHARE_CONF c)
 	return !cp_key_cmp(k, KSMBD_SHARE_CONF[c]);
 }
 
-static void list_hosts_callback(void *item, unsigned long long id,
-				void *user_data)
+static void list_hosts_callback(gpointer k, gpointer v, gpointer user_data)
 {
-	free(item);
-	free(list_fromkey(id));
+	free(k);
+	free(v);
 }
 
-static void free_hosts_map(struct LIST *map)
+static void free_hosts_map(GHashTable *map)
 {
 	if (map) {
-		list_foreach(&map, list_hosts_callback, NULL);
-		list_clear(&map);
+		g_hash_table_foreach(map, list_hosts_callback, NULL);
+		g_hash_table_destroy(map);
 	}
 }
 
-static void list_user_callback(void *item, unsigned long long id,
-			       void *user_data)
+static void list_user_callback(gpointer k, gpointer u, gpointer user_data)
 {
-	put_ksmbd_user((struct ksmbd_user *)item);
+	put_ksmbd_user((struct ksmbd_user *)u);
 }
 
-static void free_user_map(struct LIST *map)
+static void free_user_map(GHashTable *map)
 {
 	if (map) {
-		list_foreach(&map, list_user_callback, NULL);
-		list_clear(&map);
+		g_hash_table_foreach(map, list_user_callback, NULL);
+		g_hash_table_destroy(map);
 	}
 }
 
@@ -107,14 +106,14 @@ static void kill_ksmbd_share(struct ksmbd_share *share)
 	free_hosts_map(share->hosts_allow_map);
 	free_hosts_map(share->hosts_deny_map);
 
-	pthread_rwlock_destroy(&share->maps_lock);
+	g_rw_lock_clear(&share->maps_lock);
 
 	free(share->name);
 	free(share->path);
 	free(share->comment);
 	free(share->veto_list);
 	free(share->guest_account);
-	pthread_rwlock_destroy(&share->update_lock);
+	g_rw_lock_clear(&share->update_lock);
 	free(share);
 }
 
@@ -122,10 +121,10 @@ static int __shm_remove_share(struct ksmbd_share *share)
 {
 	int ret = -EINVAL;
 
-	pthread_rwlock_wrlock(&shares_table_lock);
-	if (list_remove(&shares_table, list_tokey(share->name)))
+	g_rw_lock_writer_lock(&shares_table_lock);
+	if (g_hash_table_remove(shares_table, share->name))
 		ret = 0;
-	pthread_rwlock_unlock(&shares_table_lock);
+	g_rw_lock_writer_unlock(&shares_table_lock);
 
 	if (!ret)
 		kill_ksmbd_share(share);
@@ -134,12 +133,12 @@ static int __shm_remove_share(struct ksmbd_share *share)
 
 struct ksmbd_share *get_ksmbd_share(struct ksmbd_share *share)
 {
-	pthread_rwlock_wrlock(&share->update_lock);
+	g_rw_lock_writer_lock(&share->update_lock);
 	if (share->ref_count != 0)
 		share->ref_count++;
 	else
 		share = NULL;
-	pthread_rwlock_unlock(&share->update_lock);
+	g_rw_lock_writer_unlock(&share->update_lock);
 
 	return share;
 }
@@ -151,10 +150,10 @@ void put_ksmbd_share(struct ksmbd_share *share)
 	if (!share)
 		return;
 
-	pthread_rwlock_wrlock(&share->update_lock);
+	g_rw_lock_writer_lock(&share->update_lock);
 	share->ref_count--;
 	drop = !share->ref_count;
-	pthread_rwlock_unlock(&share->update_lock);
+	g_rw_lock_writer_unlock(&share->update_lock);
 
 	if (!drop)
 		return;
@@ -181,61 +180,61 @@ static struct ksmbd_share *new_ksmbd_share(void)
 
 	share->hosts_allow_map = NULL;
 	share->hosts_deny_map = NULL;
-	pthread_rwlock_init(&share->maps_lock, NULL);
-	pthread_rwlock_init(&share->update_lock, NULL);
+	g_rw_lock_init(&share->maps_lock);
+	g_rw_lock_init(&share->update_lock);
 
 	return share;
 }
 
-static void free_hash_entry(void *item, unsigned long long id, void *user_data)
+static void free_hash_entry(gpointer k, gpointer s, gpointer user_data)
 {
-	kill_ksmbd_share(item);
+	kill_ksmbd_share(s);
 }
 
 static void shm_clear_shares(void)
 {
-	list_foreach(&shares_table, free_hash_entry, NULL);
+	g_hash_table_foreach(shares_table, free_hash_entry, NULL);
 }
 
 void shm_destroy(void)
 {
 	if (shares_table) {
 		shm_clear_shares();
-		list_clear(&shares_table);
+		g_hash_table_destroy(shares_table);
 	}
-	pthread_rwlock_destroy(&shares_table_lock);
+	g_rw_lock_clear(&shares_table_lock);
 }
 
 int shm_init(void)
 {
-	list_init(&shares_table);
+	shares_table = g_hash_table_new(g_str_hash, g_str_equal);
 	if (!shares_table)
 		return -ENOMEM;
-	pthread_rwlock_init(&shares_table_lock, NULL);
+	g_rw_lock_init(&shares_table_lock);
 	return 0;
 }
 
 static struct ksmbd_share *__shm_lookup_share(char *name)
 {
-	return (struct ksmbd_share *)list_get(&shares_table, list_tokey(name));
+	return g_hash_table_lookup(shares_table, name);
 }
 
 struct ksmbd_share *shm_lookup_share(char *name)
 {
 	struct ksmbd_share *share, *ret;
 
-	pthread_rwlock_rdlock(&shares_table_lock);
+	g_rw_lock_reader_lock(&shares_table_lock);
 	share = __shm_lookup_share(name);
 	if (share) {
 		ret = get_ksmbd_share(share);
 		if (!ret)
 			share = NULL;
 	}
-	pthread_rwlock_unlock(&shares_table_lock);
+	g_rw_lock_reader_unlock(&shares_table_lock);
 	return share;
 }
 
-static struct LIST *parse_list(struct LIST *map, char **list)
+static GHashTable *parse_list(GHashTable *map, char **list)
 {
 	int i;
 
@@ -243,11 +242,11 @@ static struct LIST *parse_list(struct LIST *map, char **list)
 		return map;
 
 	if (!map)
-		list_init(&map);
+		map = g_hash_table_new(g_str_hash, g_str_equal);
 	if (!map)
 		return map;
 
-	for (i = 0; list[i] != NULL; i++) {
+	for (i = 0;  list[i] != NULL; i++) {
 		struct ksmbd_user *user;
 		char *p = list[i];
 
@@ -261,12 +260,12 @@ static struct LIST *parse_list(struct LIST *map, char **list)
 			continue;
 		}
 
-		if (list_get(&map, list_tokey(user->name))) {
+		if (g_hash_table_lookup(map, user->name)) {
 			pr_debug("User already exists in a map: %s\n", p);
 			continue;
 		}
 
-		list_add_str(&map, user, user->name);
+		g_hash_table_insert(map, user->name, user);
 	}
 
 	cp_group_kv_list_free(list);
@@ -312,11 +311,11 @@ static void force_user(struct ksmbd_share *share, char *name)
 	}
 }
 
-static void process_group_kv(void *_v, unsigned long long _k, void *user_data)
+static void process_group_kv(gpointer _k, gpointer _v, gpointer user_data)
 {
 	struct ksmbd_share *share = user_data;
-	char *k = (char *)list_fromkey(_k);
-	char *v = (char *)_v;
+	char *k = _k;
+	char *v = _v;
 
 	if (shm_share_config(k, KSMBD_SHARE_CONF_COMMENT)) {
 		share->comment = cp_get_group_kv_string(v);
@@ -342,7 +341,7 @@ static void process_group_kv(void *_v, unsigned long long _k, void *user_data)
 		struct ksmbd_user *user;
 
 		if (usm_add_new_user(cp_get_group_kv_string(_v),
-				     strdup("NULL"))) {
+				     g_strdup("NULL"))) {
 			pr_err("Unable to add guest account\n");
 			set_share_flag(share, KSMBD_SHARE_FLAG_INVALID);
 			return;
@@ -379,7 +378,7 @@ static void process_group_kv(void *_v, unsigned long long _k, void *user_data)
 	}
 
 	if (shm_share_config(k, KSMBD_SHARE_CONF_WRITE_OK) ||
-	    shm_share_config(k, KSMBD_SHARE_CONF_WRITEABLE)) {
+			shm_share_config(k, KSMBD_SHARE_CONF_WRITEABLE)) {
 		if (cp_get_group_kv_bool(v))
 			set_share_flag(share, KSMBD_SHARE_FLAG_WRITEABLE);
 		else
@@ -392,7 +391,7 @@ static void process_group_kv(void *_v, unsigned long long _k, void *user_data)
 			set_share_flag(share, KSMBD_SHARE_FLAG_STORE_DOS_ATTRS);
 		else
 			clear_share_flag(share,
-					 KSMBD_SHARE_FLAG_STORE_DOS_ATTRS);
+					KSMBD_SHARE_FLAG_STORE_DOS_ATTRS);
 		return;
 	}
 
@@ -439,13 +438,13 @@ static void process_group_kv(void *_v, unsigned long long _k, void *user_data)
 			set_share_flag(share, KSMBD_SHARE_FLAG_HIDE_DOT_FILES);
 		else
 			clear_share_flag(share,
-					 KSMBD_SHARE_FLAG_HIDE_DOT_FILES);
+				KSMBD_SHARE_FLAG_HIDE_DOT_FILES);
 	}
 
 	if (shm_share_config(k, KSMBD_SHARE_CONF_VALID_USERS)) {
 		share->maps[KSMBD_SHARE_VALID_USERS_MAP] =
-		    parse_list(share->maps[KSMBD_SHARE_VALID_USERS_MAP],
-			       cp_get_group_kv_list(v));
+			parse_list(share->maps[KSMBD_SHARE_VALID_USERS_MAP],
+				cp_get_group_kv_list(v));
 		if (share->maps[KSMBD_SHARE_VALID_USERS_MAP] == NULL)
 			set_share_flag(share, KSMBD_SHARE_FLAG_INVALID);
 		return;
@@ -453,8 +452,8 @@ static void process_group_kv(void *_v, unsigned long long _k, void *user_data)
 
 	if (shm_share_config(k, KSMBD_SHARE_CONF_INVALID_USERS)) {
 		share->maps[KSMBD_SHARE_INVALID_USERS_MAP] =
-		    parse_list(share->maps[KSMBD_SHARE_INVALID_USERS_MAP],
-			       cp_get_group_kv_list(v));
+			parse_list(share->maps[KSMBD_SHARE_INVALID_USERS_MAP],
+				cp_get_group_kv_list(v));
 		if (share->maps[KSMBD_SHARE_INVALID_USERS_MAP] == NULL)
 			set_share_flag(share, KSMBD_SHARE_FLAG_INVALID);
 		return;
@@ -462,8 +461,8 @@ static void process_group_kv(void *_v, unsigned long long _k, void *user_data)
 
 	if (shm_share_config(k, KSMBD_SHARE_CONF_READ_LIST)) {
 		share->maps[KSMBD_SHARE_READ_LIST_MAP] =
-		    parse_list(share->maps[KSMBD_SHARE_READ_LIST_MAP],
-			       cp_get_group_kv_list(v));
+			parse_list(share->maps[KSMBD_SHARE_READ_LIST_MAP],
+				   cp_get_group_kv_list(v));
 		if (share->maps[KSMBD_SHARE_READ_LIST_MAP] == NULL)
 			set_share_flag(share, KSMBD_SHARE_FLAG_INVALID);
 		return;
@@ -471,8 +470,8 @@ static void process_group_kv(void *_v, unsigned long long _k, void *user_data)
 
 	if (shm_share_config(k, KSMBD_SHARE_CONF_WRITE_LIST)) {
 		share->maps[KSMBD_SHARE_WRITE_LIST_MAP] =
-		    parse_list(share->maps[KSMBD_SHARE_WRITE_LIST_MAP],
-			       cp_get_group_kv_list(v));
+			parse_list(share->maps[KSMBD_SHARE_WRITE_LIST_MAP],
+				   cp_get_group_kv_list(v));
 		if (share->maps[KSMBD_SHARE_WRITE_LIST_MAP] == NULL)
 			set_share_flag(share, KSMBD_SHARE_FLAG_INVALID);
 		return;
@@ -480,8 +479,8 @@ static void process_group_kv(void *_v, unsigned long long _k, void *user_data)
 
 	if (shm_share_config(k, KSMBD_SHARE_CONF_ADMIN_USERS)) {
 		share->maps[KSMBD_SHARE_ADMIN_USERS_MAP] =
-		    parse_list(share->maps[KSMBD_SHARE_ADMIN_USERS_MAP],
-			       cp_get_group_kv_list(v));
+			parse_list(share->maps[KSMBD_SHARE_ADMIN_USERS_MAP],
+				   cp_get_group_kv_list(v));
 		if (share->maps[KSMBD_SHARE_ADMIN_USERS_MAP] == NULL)
 			set_share_flag(share, KSMBD_SHARE_FLAG_INVALID);
 		return;
@@ -523,28 +522,28 @@ static void process_group_kv(void *_v, unsigned long long _k, void *user_data)
 		if (cp_get_group_kv_bool(v))
 			set_share_flag(share, KSMBD_SHARE_FLAG_INHERIT_SMACK);
 		else
-			clear_share_flag(share, KSMBD_SHARE_FLAG_INHERIT_SMACK);
+			clear_share_flag(share,	KSMBD_SHARE_FLAG_INHERIT_SMACK);
 	}
 
 	if (shm_share_config(k, KSMBD_SHARE_CONF_INHERIT_OWNER)) {
 		if (cp_get_group_kv_bool(v))
 			set_share_flag(share, KSMBD_SHARE_FLAG_INHERIT_OWNER);
 		else
-			clear_share_flag(share, KSMBD_SHARE_FLAG_INHERIT_OWNER);
+			clear_share_flag(share,	KSMBD_SHARE_FLAG_INHERIT_OWNER);
 	}
 
 	if (shm_share_config(k, KSMBD_SHARE_CONF_STREAMS)) {
 		if (cp_get_group_kv_bool(v))
 			set_share_flag(share, KSMBD_SHARE_FLAG_STREAMS);
 		else
-			clear_share_flag(share, KSMBD_SHARE_FLAG_STREAMS);
+			clear_share_flag(share,	KSMBD_SHARE_FLAG_STREAMS);
 	}
 }
 
 static void init_share_from_group(struct ksmbd_share *share,
-				  struct smbconf_group *group)
+				 struct smbconf_group *group)
 {
-	share->name = strdup(group->name);
+	share->name = g_strdup(group->name);
 	share->create_mask = KSMBD_SHARE_DEFAULT_CREATE_MASK;
 	share->directory_mask = KSMBD_SHARE_DEFAULT_DIRECTORY_MASK;
 	share->force_create_mode = 0;
@@ -561,7 +560,7 @@ static void init_share_from_group(struct ksmbd_share *share,
 	if (!cp_key_cmp(share->name, "IPC$"))
 		set_share_flag(share, KSMBD_SHARE_FLAG_PIPE);
 
-	list_foreach(&(group->kv), process_group_kv, share);
+	g_hash_table_foreach(group->kv, process_group_kv, share);
 }
 
 int shm_add_new_share(struct smbconf_group *group)
@@ -579,24 +578,25 @@ int shm_add_new_share(struct smbconf_group *group)
 		return 0;
 	}
 
-	pthread_rwlock_wrlock(&shares_table_lock);
+	g_rw_lock_writer_lock(&shares_table_lock);
 	if (__shm_lookup_share(share->name)) {
-		pthread_rwlock_unlock(&shares_table_lock);
+		g_rw_lock_writer_unlock(&shares_table_lock);
 		pr_info("share exists %s\n", share->name);
 		kill_ksmbd_share(share);
 		return 0;
 	}
 
-	if (!list_add_str(&shares_table, share, share->name)) {
+	if (!g_hash_table_insert(shares_table, share->name, share)) {
 		kill_ksmbd_share(share);
 		ret = -EINVAL;
 	}
-	pthread_rwlock_unlock(&shares_table_lock);
+	g_rw_lock_writer_unlock(&shares_table_lock);
 	return ret;
 }
 
 int shm_lookup_users_map(struct ksmbd_share *share,
-			 enum share_users map, char *name)
+			  enum share_users map,
+			  char *name)
 {
 	int ret = -ENOENT;
 
@@ -608,10 +608,10 @@ int shm_lookup_users_map(struct ksmbd_share *share,
 	if (!share->maps[map])
 		return -EINVAL;
 
-	pthread_rwlock_rdlock(&share->maps_lock);
-	if (list_get(&share->maps[map], list_tokey(name)))
+	g_rw_lock_reader_lock(&share->maps_lock);
+	if (g_hash_table_lookup(share->maps[map], name))
 		ret = 0;
-	pthread_rwlock_unlock(&share->maps_lock);
+	g_rw_lock_reader_unlock(&share->maps_lock);
 
 	return ret;
 }
@@ -621,9 +621,10 @@ int shm_lookup_users_map(struct ksmbd_share *share,
  * Do a real hosts lookup. IP masks, etc.
  */
 int shm_lookup_hosts_map(struct ksmbd_share *share,
-			 enum share_hosts map, char *host)
+			  enum share_hosts map,
+			  char *host)
 {
-	struct LIST *lookup_map;
+	GHashTable *lookup_map;
 	int ret = -ENOENT;
 
 	if (map >= KSMBD_SHARE_HOSTS_MAX) {
@@ -639,10 +640,10 @@ int shm_lookup_hosts_map(struct ksmbd_share *share,
 	if (!lookup_map)
 		return -EINVAL;
 
-	pthread_rwlock_rdlock(&share->maps_lock);
-	if (list_get(&lookup_map, list_tokey(host)))
+	g_rw_lock_reader_lock(&share->maps_lock);
+	if (g_hash_table_lookup(lookup_map, host))
 		ret = 0;
-	pthread_rwlock_unlock(&share->maps_lock);
+	g_rw_lock_reader_unlock(&share->maps_lock);
 
 	return ret;
 }
@@ -651,13 +652,13 @@ int shm_open_connection(struct ksmbd_share *share)
 {
 	int ret = 0;
 
-	pthread_rwlock_wrlock(&share->update_lock);
+	g_rw_lock_writer_lock(&share->update_lock);
 	share->num_connections++;
 	if (share->max_connections) {
 		if (share->num_connections >= share->max_connections)
 			ret = -EINVAL;
 	}
-	pthread_rwlock_unlock(&share->update_lock);
+	g_rw_lock_writer_unlock(&share->update_lock);
 	return ret;
 }
 
@@ -666,17 +667,17 @@ int shm_close_connection(struct ksmbd_share *share)
 	if (!share)
 		return 0;
 
-	pthread_rwlock_wrlock(&share->update_lock);
+	g_rw_lock_writer_lock(&share->update_lock);
 	share->num_connections--;
-	pthread_rwlock_unlock(&share->update_lock);
+	g_rw_lock_writer_unlock(&share->update_lock);
 	return 0;
 }
 
-void foreach_ksmbd_share(walk_shares cb, void *user_data)
+void for_each_ksmbd_share(walk_shares cb, gpointer user_data)
 {
-	pthread_rwlock_rdlock(&shares_table_lock);
-	list_foreach(&shares_table, cb, user_data);
-	pthread_rwlock_unlock(&shares_table_lock);
+	g_rw_lock_reader_lock(&shares_table_lock);
+	g_hash_table_foreach(shares_table, cb, user_data);
+	g_rw_lock_reader_unlock(&shares_table_lock);
 }
 
 int shm_share_config_payload_size(struct ksmbd_share *share)
@@ -720,12 +721,16 @@ int shm_handle_share_config_request(struct ksmbd_share *share,
 
 	config_payload = KSMBD_SHARE_CONFIG_VETO_LIST(resp);
 	if (resp->veto_list_sz) {
-		memcpy(config_payload, share->veto_list, resp->veto_list_sz);
+		memcpy(config_payload,
+		       share->veto_list,
+		       resp->veto_list_sz);
 		config_payload += resp->veto_list_sz + 1;
 	}
 	if (global_conf.root_dir)
 		sprintf(config_payload,
-			"%s%s", global_conf.root_dir, share->path);
+			"%s%s",
+			global_conf.root_dir,
+			share->path);
 	else
 		sprintf(config_payload, "%s", share->path);
 	return 0;

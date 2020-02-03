@@ -7,6 +7,7 @@
 
 #include <memory.h>
 #include <endian.h>
+#include <glib.h>
 #include <errno.h>
 #include <linux/ksmbd_server.h>
 
@@ -39,19 +40,19 @@ static int __share_type(struct ksmbd_share *share)
 {
 	if (test_share_flag(share, KSMBD_SHARE_FLAG_PIPE))
 		return SHARE_TYPE_IPC;
-	if (!strncasecmp(share->name, "IPC", strlen("IPC")))
+	if (!g_ascii_strncasecmp(share->name, "IPC", strlen("IPC")))
 		return SHARE_TYPE_IPC;
 	return SHARE_TYPE_DISKTREE;
 }
 
-static int __share_entry_size_ctr0(struct ksmbd_dcerpc *dce, void *entry)
+static int __share_entry_size_ctr0(struct ksmbd_dcerpc *dce, gpointer entry)
 {
 	struct ksmbd_share *share = entry;
 
 	return strlen(share->name) * 2 + 4 * sizeof(__u32);
 }
 
-static int __share_entry_size_ctr1(struct ksmbd_dcerpc *dce, void *entry)
+static int __share_entry_size_ctr1(struct ksmbd_dcerpc *dce, gpointer entry)
 {
 	struct ksmbd_share *share = entry;
 	int sz = 0;
@@ -70,33 +71,33 @@ static int __share_entry_size_ctr1(struct ksmbd_dcerpc *dce, void *entry)
  * An embedded reference pointer is represented in two parts, a 4 octet
  * value in place and a possibly deferred representation of the referent.
  */
-static int __share_entry_rep_ctr0(struct ksmbd_dcerpc *dce, void *entry)
+static int __share_entry_rep_ctr0(struct ksmbd_dcerpc *dce, gpointer entry)
 {
 	dce->num_pointers++;
-	return ndr_write_int32(dce, dce->num_pointers);	/* ref pointer */
+	return ndr_write_int32(dce, dce->num_pointers); /* ref pointer */
 }
 
-static int __share_entry_rep_ctr1(struct ksmbd_dcerpc *dce, void *entry)
+static int __share_entry_rep_ctr1(struct ksmbd_dcerpc *dce, gpointer entry)
 {
 	struct ksmbd_share *share = entry;
 	int ret;
 
 	dce->num_pointers++;
-	ret = ndr_write_int32(dce, dce->num_pointers);	/* ref pointer */
+	ret = ndr_write_int32(dce, dce->num_pointers); /* ref pointer */
 	ret |= ndr_write_int32(dce, __share_type(share));
 	dce->num_pointers++;
-	ret |= ndr_write_int32(dce, dce->num_pointers);	/* ref pointer */
+	ret |= ndr_write_int32(dce, dce->num_pointers); /* ref pointer */
 	return ret;
 }
 
-static int __share_entry_data_ctr0(struct ksmbd_dcerpc *dce, void *entry)
+static int __share_entry_data_ctr0(struct ksmbd_dcerpc *dce, gpointer entry)
 {
 	struct ksmbd_share *share = entry;
 
 	return ndr_write_vstring(dce, share->name);
 }
 
-static int __share_entry_data_ctr1(struct ksmbd_dcerpc *dce, void *entry)
+static int __share_entry_data_ctr1(struct ksmbd_dcerpc *dce, gpointer entry)
 {
 	struct ksmbd_share *share = entry;
 	int ret;
@@ -106,18 +107,20 @@ static int __share_entry_data_ctr1(struct ksmbd_dcerpc *dce, void *entry)
 	return ret;
 }
 
-static int __share_entry_null_rep_ctr0(struct ksmbd_dcerpc *dce, void *entry)
+static int __share_entry_null_rep_ctr0(struct ksmbd_dcerpc *dce,
+				       gpointer entry)
 {
-	return ndr_write_int32(dce, 0);	/* ref pointer */
+	return ndr_write_int32(dce, 0); /* ref pointer */
 }
 
-static int __share_entry_null_rep_ctr1(struct ksmbd_dcerpc *dce, void *entry)
+static int __share_entry_null_rep_ctr1(struct ksmbd_dcerpc *dce,
+				       gpointer entry)
 {
 	int ret;
 
-	ret = ndr_write_int32(dce, 0);	/* ref pointer */
+	ret = ndr_write_int32(dce, 0); /* ref pointer */
 	ret |= ndr_write_int32(dce, 0);
-	ret |= ndr_write_int32(dce, 0);	/* ref pointer */
+	ret |= ndr_write_int32(dce, 0); /* ref pointer */
 	return ret;
 }
 
@@ -125,9 +128,8 @@ static int __share_entry_processed(struct ksmbd_rpc_pipe *pipe, int i)
 {
 	struct ksmbd_share *share;
 
-	share = list_get(&pipe->entries, i);
-
-	list_remove_dec(&pipe->entries, i);
+	share = g_array_index(pipe->entries,  gpointer, i);
+	pipe->entries = g_array_remove_index(pipe->entries, i);
 	pipe->num_entries--;
 	pipe->num_processed++;
 	put_ksmbd_share(share);
@@ -135,8 +137,7 @@ static int __share_entry_processed(struct ksmbd_rpc_pipe *pipe, int i)
 	return 0;
 }
 
-static void __enum_all_shares(void *value, unsigned long long id,
-			      void *user_data)
+static void __enum_all_shares(gpointer key, gpointer value, gpointer user_data)
 {
 	struct ksmbd_rpc_pipe *pipe = (struct ksmbd_rpc_pipe *)user_data;
 	struct ksmbd_share *share = (struct ksmbd_share *)value;
@@ -153,13 +154,14 @@ static void __enum_all_shares(void *value, unsigned long long id,
 		put_ksmbd_share(share);
 		return;
 	}
-	list_append(&pipe->entries, share);
+
+	pipe->entries = g_array_append_val(pipe->entries, share);
 	pipe->num_entries++;
 }
 
 static int srvsvc_share_enum_all_invoke(struct ksmbd_rpc_pipe *pipe)
 {
-	foreach_ksmbd_share(__enum_all_shares, pipe);
+	for_each_ksmbd_share(__enum_all_shares, pipe);
 	pipe->entry_processed = __share_entry_processed;
 	return 0;
 }
@@ -197,7 +199,7 @@ static int srvsvc_share_get_info_invoke(struct ksmbd_rpc_pipe *pipe,
 		}
 	}
 
-	list_append(&pipe->entries, share);
+	pipe->entries = g_array_append_val(pipe->entries, share);
 	pipe->num_entries++;
 	pipe->entry_processed = __share_entry_processed;
 	return 0;
@@ -251,7 +253,7 @@ static int srvsvc_share_get_info_return(struct ksmbd_rpc_pipe *pipe)
 		dce->entry_rep = __share_entry_null_rep_ctr1;
 	} else {
 		pr_err("Unsupported share info level (read): %d\n",
-		       dce->si_req.level);
+			dce->si_req.level);
 		dce->entry_rep = NULL;
 		return KSMBD_RPC_EINVALID_LEVEL;
 	}
@@ -275,12 +277,13 @@ static int srvsvc_parse_share_info_req(struct ksmbd_dcerpc *dce,
 		hdr->level = ndr_read_union_int32(dce);
 		if (hdr->level == -EINVAL)
 			return -EINVAL;
-		ndr_read_int32(dce);	// read container pointer ref id
-		ndr_read_int32(dce);	// read container array size
-		ptr = ndr_read_int32(dce);	// read container array pointer
-		// it should be null
+		ndr_read_int32(dce); // read container pointer ref id
+		ndr_read_int32(dce); // read container array size
+		ptr = ndr_read_int32(dce); // read container array pointer
+					   // it should be null
 		if (ptr != 0x00) {
-			pr_err("SRVSVC: container array pointer is %x\n", ptr);
+			pr_err("SRVSVC: container array pointer is %x\n",
+				ptr);
 			return -EINVAL;
 		}
 		hdr->max_size = ndr_read_int32(dce);
@@ -317,7 +320,8 @@ static int srvsvc_share_info_invoke(struct ksmbd_rpc_pipe *pipe)
 	return ret;
 }
 
-static int srvsvc_clear_headers(struct ksmbd_rpc_pipe *pipe, int status)
+static int srvsvc_clear_headers(struct ksmbd_rpc_pipe *pipe,
+				int status)
 {
 	if (status == KSMBD_RPC_EMORE_DATA)
 		return 0;
@@ -354,13 +358,12 @@ static int srvsvc_share_info_return(struct ksmbd_rpc_pipe *pipe)
 		dce->entry_data = __share_entry_data_ctr1;
 	} else {
 		pr_err("Unsupported share info level (write): %d\n",
-		       dce->si_req.level);
+			dce->si_req.level);
 		rpc_pipe_reset(pipe);
 	}
 
 	if (dce->req_hdr.opnum == SRVSVC_OPNUM_GET_SHARE_INFO)
 		status = srvsvc_share_get_info_return(pipe);
-
 	if (dce->req_hdr.opnum == SRVSVC_OPNUM_SHARE_ENUM_ALL)
 		status = srvsvc_share_enum_all_return(pipe);
 
@@ -401,7 +404,8 @@ static int srvsvc_invoke(struct ksmbd_rpc_pipe *pipe)
 }
 
 static int srvsvc_return(struct ksmbd_rpc_pipe *pipe,
-			 struct ksmbd_rpc_command *resp, int max_resp_sz)
+			 struct ksmbd_rpc_command *resp,
+			 int max_resp_sz)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
 	int ret;
@@ -418,7 +422,7 @@ static int srvsvc_return(struct ksmbd_rpc_pipe *pipe,
 		break;
 	default:
 		pr_err("SRVSVC: unsupported RETURN method %d\n",
-		       dce->req_hdr.opnum);
+			dce->req_hdr.opnum);
 		ret = KSMBD_RPC_EBAD_FUNC;
 		break;
 	}
@@ -426,7 +430,8 @@ static int srvsvc_return(struct ksmbd_rpc_pipe *pipe,
 }
 
 int rpc_srvsvc_read_request(struct ksmbd_rpc_pipe *pipe,
-			    struct ksmbd_rpc_command *resp, int max_resp_sz)
+			    struct ksmbd_rpc_command *resp,
+			    int max_resp_sz)
 {
 	return srvsvc_return(pipe, resp, max_resp_sz);
 }

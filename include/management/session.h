@@ -8,7 +8,7 @@
 #ifndef __MANAGEMENT_TCONNECTION_H__
 #define __MANAGEMENT_TCONNECTION_H__
 
-#include <ksmbdtools.h>
+#include <glib.h>
 
 struct ksmbd_user;
 
@@ -17,8 +17,8 @@ struct ksmbd_session {
 
 	struct ksmbd_user	*user;
 
-	pthread_rwlock_t	update_lock;
-	struct LIST		*tree_conns;
+	GRWLock			update_lock;
+	GList			*tree_conns;
 	int			ref_counter;
 };
 

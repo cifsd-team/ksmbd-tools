@@ -1,6 +1,6 @@
 AM_CFLAGS = -I$(top_srcdir)/include $(GLIB_CFLAGS) $(LIBNL_CFLAGS) -fno-common
-LIBS = $(LIBNL_LIBS)
-ksmbd_mountd_LDADD = $(top_builddir)/lib/libksmbdtools.la -lpthread
+LIBS = $(GLIB_LIBS) $(LIBNL_LIBS)
+ksmbd_mountd_LDADD = $(top_builddir)/lib/libksmbdtools.la
 
 sbin_PROGRAMS = ksmbd.mountd
 

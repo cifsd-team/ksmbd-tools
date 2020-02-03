@@ -8,15 +8,15 @@
 #ifndef __KSMBD_CONFIG_H__
 #define __KSMBD_CONFIG_H__
 
-#include <ksmbdtools.h>
+#include <glib.h>
 
 struct smbconf_group {
 	char			*name;
-	struct LIST		*kv;
+	GHashTable		*kv;
 };
 
 struct smbconf_parser {
-	struct LIST		*groups;
+	GHashTable		*groups;
 	struct smbconf_group	*current;
 };
 
