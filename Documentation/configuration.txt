@@ -110,7 +110,7 @@ Define ksmbd configuration parameters list.
 	- write ok  (default: no)
 	- writeable (default: no)
 		Inverted synonym for read only.
-	- store dos attributes (default: no)
+	- store dos attributes (default: yes)
 		If this parameter is set ksmbd attempts to first read DOS
 		attributes (SYSTEM, HIDDEN, ARCHIVE or READ-ONLY) from a
 		filesystem extended attribute, before mapping DOS attributes
