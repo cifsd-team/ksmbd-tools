@@ -107,8 +107,12 @@ static int __share_entry_data_ctr1(struct ksmbd_dcerpc *dce, gpointer entry)
 
 	len = strlen(share->name) + 1;
 	ret = ndr_write_vstring(dce, share->name, len, len);
-	len = strlen(share->comment) + 1;
-	ret |= ndr_write_vstring(dce, share->comment, len, len);
+
+	if (share->comment) {
+		len = strlen(share->comment) + 1;
+		ret |= ndr_write_vstring(dce, share->comment, len, len);
+	}
+
 	return ret;
 }
 
