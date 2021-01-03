@@ -1,0 +1,4 @@
+option('krb5', type : 'boolean',
+  value : false,
+  description : 'Build with Kerberos support',
+)

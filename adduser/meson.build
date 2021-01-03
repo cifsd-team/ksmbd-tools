@@ -1,0 +1,10 @@
+adduser = executable('ksmbd.adduser',
+  'md4_hash.c',
+  'user_admin.c',
+  'adduser.c',
+  'md4_hash.h',
+  'user_admin.h',
+  include_directories : tools_incdir,
+  link_with : libksmbdtools,
+  dependencies : [ glib_dep, netlink_dep ],
+)
