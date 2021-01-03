@@ -1,0 +1,16 @@
+mountd = executable(
+  'ksmbd.mountd',
+  'worker.c',
+  'ipc.c',
+  'rpc.c',
+  'rpc_srvsvc.c',
+  'rpc_wkssvc.c',
+  'mountd.c',
+  'smbacl.c',
+  'rpc_samr.c',
+  'rpc_lsarpc.c',
+  dependencies: [glib_dep, netlink_dep],
+  include_directories: tools_incdir,
+  link_with: libksmbdtools,
+  install: true,
+)
