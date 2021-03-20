@@ -614,7 +614,6 @@ static void init_share_from_group(struct ksmbd_share *share,
 	set_share_flag(share, KSMBD_SHARE_FLAG_READONLY);
 	set_share_flag(share, KSMBD_SHARE_FLAG_HIDE_DOT_FILES);
 	set_share_flag(share, KSMBD_SHARE_FLAG_OPLOCKS);
-	set_share_flag(share, KSMBD_SHARE_FLAG_FOLLOW_SYMLINKS);
 	set_share_flag(share, KSMBD_SHARE_FLAG_STORE_DOS_ATTRS);
 
 	if (!cp_key_cmp(share->name, "IPC$"))
