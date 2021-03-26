@@ -87,10 +87,6 @@ Define ksmbd configuration parameters list.
 		SMB2 leases on file open requests. Leasing is an SMB2-only
 		feature which allows clients to aggressively cache files
 		locally.
-	- cache read buffers (default: yes)
-	- cache trans buffers (default: yes)
-		This parameter allows ksmbd use buffer cache(pool) to avoid huge
-		alloc/dealloc pressure from read and trans response buffer.
 	- share:fake_fscaps (default: 64)
 		This is needed to support some special application that makes
 		QFSINFO calls to check whether we set
