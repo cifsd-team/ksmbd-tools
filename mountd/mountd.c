@@ -167,14 +167,17 @@ static int create_subauth_file(char *path_subauth)
 
 static int generate_sub_auth(void)
 {
-	int rc;
+	int rc = -EINVAL;
 	char *path_subauth;
 
 	path_subauth = make_path_subauth();
 	if (!path_subauth)
 		return -ENOMEM;
 retry:
-	rc = cp_parse_subauth(path_subauth);
+	if (g_file_test(path_subauth, G_FILE_TEST_EXISTS)) {
+		rc = cp_parse_subauth(path_subauth);
+	}
+
 	if (rc < 0) {
 		rc = create_subauth_file(path_subauth);
 		if (rc)
