@@ -412,7 +412,7 @@ int ndr_write_vstring(struct ksmbd_dcerpc *dce, void *value)
 	gchar *out;
 	gsize bytes_written = 0;
 
-	size_t raw_len;
+	size_t raw_len, str_len;
 	char *raw_value = value;
 	int ret;
 
@@ -425,6 +425,8 @@ int ndr_write_vstring(struct ksmbd_dcerpc *dce, void *value)
 	if (!out)
 		return -EINVAL;
 
+	str_len = g_utf8_strlen(raw_value, -1) + 1;
+
 	/*
 	 * NDR represents a conformant and varying string as an ordered
 	 * sequence of representations of the string elements, preceded
@@ -435,9 +437,9 @@ int ndr_write_vstring(struct ksmbd_dcerpc *dce, void *value)
 	 * The third integer gives the actual number of elements being
 	 * passed, including the terminator.
 	 */
-	ret = ndr_write_int32(dce, raw_len);
+	ret = ndr_write_int32(dce, str_len);
 	ret |= ndr_write_int32(dce, 0);
-	ret |= ndr_write_int32(dce, raw_len);
+	ret |= ndr_write_int32(dce, str_len);
 	ret |= ndr_write_bytes(dce, out, bytes_written);
 	auto_align_offset(dce);
 
