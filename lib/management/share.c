@@ -54,7 +54,6 @@ char *KSMBD_SHARE_CONF[KSMBD_SHARE_CONF_MAX] = {
 	"max connections",
 	"veto files",				/* 25 */
 	"inherit owner",
-	"follow symlinks",
 	"vfs objects",
 	"writable",
 };
@@ -552,14 +551,6 @@ static void process_group_kv(gpointer _k, gpointer _v, gpointer user_data)
 			set_share_flag(share, KSMBD_SHARE_FLAG_INHERIT_OWNER);
 		else
 			clear_share_flag(share,	KSMBD_SHARE_FLAG_INHERIT_OWNER);
-	}
-
-	if (shm_share_config(k, KSMBD_SHARE_CONF_FOLLOW_SYMLINKS)) {
-		if (cp_get_group_kv_bool(v))
-			set_share_flag(share, KSMBD_SHARE_FLAG_FOLLOW_SYMLINKS);
-		else
-			clear_share_flag(share,
-				KSMBD_SHARE_FLAG_FOLLOW_SYMLINKS);
 	}
 
 	if (shm_share_config(k, KSMBD_SHARE_CONF_VFS_OBJECTS)) {

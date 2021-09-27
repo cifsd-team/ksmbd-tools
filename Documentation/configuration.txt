@@ -201,9 +201,6 @@ Define ksmbd configuration parameters list.
 	- force directory mode (default: 0)
 		This parameter specifies a set of UNIX mode bit permissions
 		that will always be set on a directory created by ksmbd.
-	- follow symlinks (default: no)
-		This parameter allows to stop ksmbd from following symbolic
-		links in a particular share.
 	- vfs objects (default: no)
 		This parameter specifies the backend names which are used for
 		ksmbd VFS I/O operations. Since ksmbd is a server for Linux
