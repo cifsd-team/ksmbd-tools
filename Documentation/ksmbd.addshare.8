@@ -1,0 +1,52 @@
+.TH KSMBD.ADDSHARE "8" "October 2021" "Usage: smbshareadd" "Linux System Administration"
+.SH NAME
+ksmbd.addshare \- Adds, updates or removes (-a/-u/-d) a net share from smb.conf file.
+.SH SYNOPSIS
+.B smbshareadd
+
+.SH DESCRIPTION
+.HP
+\fB\-a\fR | \fB\-\-add\-share\fR=\fI\,share\/\fR
+.HP
+\fB\-d\fR | \fB\-\-del\-share\fR=\fI\,share\/\fR
+.HP
+\fB\-u\fR | \fB\-\-update\-share\fR=\fI\,share\/\fR
+.HP
+\fB\-o\fR | \fB\-\-options=\fR"op1=val1 op2=val2..."
+.HP
+\fB\-c\fR smb.conf
+.HP
+\fB\-V\fR | \fB\-\-version\fR
+.HP
+\fB\-v\fR | \fB\-\-verbose\fR
+.SS "Supported share options:"
+.IP
+comment
+path
+guest ok
+guest account
+read only
+browseable
+write ok
+writeable
+store dos attributes
+oplocks
+create mask
+directory mask
+force create mode
+force directory mode
+force group
+force user
+hide dot files
+valid users
+invalid users
+read list
+write list
+admin users
+hosts allow
+hosts deny
+max connections
+veto files
+inherit owner
+follow symlinks
+vfs objects
