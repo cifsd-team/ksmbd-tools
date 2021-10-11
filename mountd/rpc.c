@@ -417,7 +417,7 @@ int ndr_write_vstring(struct ksmbd_dcerpc *dce, void *value)
 	if (!value)
 		raw_value = "";
 
-	raw_len = strlen(raw_value) + 1;
+	raw_len = strlen(raw_value);
 	out = ndr_convert_char_to_unicode(dce, raw_value, raw_len,
 			&bytes_written);
 	if (!out)
