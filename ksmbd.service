@@ -10,7 +10,7 @@ Group=root
 RemainAfterExit=yes
 ExecStartPre=-/sbin/modprobe ksmbd
 ExecStart=/sbin/ksmbd.mountd -s
-ExecReload=/sbin/ksmbd.control -s && /sbin/ksmbd.mountd
+ExecReload=/bin/sh -c '/sbin/ksmbd.control -s && /sbin/ksmbd.mountd -s'
 ExecStop=/sbin/ksmbd.control -s
 
 [Install]
