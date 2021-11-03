@@ -38,12 +38,12 @@ static int ksmbd_control_shutdown(void)
 	fd = open("/sys/class/ksmbd-control/kill_server", O_WRONLY);
 	if (fd < 0) {
 		pr_err("open failed: %d\n", errno);
-		return fd;
+		return EXIT_FAILURE;
 	}
 
 	ret = write(fd, "hard", 4);
 	close(fd);
-	return ret;
+	return ret != -1 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 static int ksmbd_control_show_version(void)
@@ -54,14 +54,14 @@ static int ksmbd_control_show_version(void)
 	fd = open("/sys/module/ksmbd/version", O_RDONLY);
 	if (fd < 0) {
 		pr_err("open failed: %d\n", errno);
-		return fd;
+		return EXIT_FAILURE;
 	}
 
 	ret = read(fd, ver, 255);
 	close(fd);
 	if (ret != -1)
 		pr_info("ksmbd version : %s\n", ver);
-	return ret;
+	return ret != -1 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 static int ksmbd_control_debug(char *comp)
@@ -72,7 +72,7 @@ static int ksmbd_control_debug(char *comp)
 	fd = open("/sys/class/ksmbd-control/debug", O_RDWR);
 	if (fd < 0) {
 		pr_err("open failed: %d\n", errno);
-		return fd;
+		return EXIT_FAILURE;
 	}
 
 	ret = write(fd, comp, strlen(comp));
@@ -85,7 +85,7 @@ static int ksmbd_control_debug(char *comp)
 	pr_info("%s\n", buf);
 out:
 	close(fd);
-	return ret;
+	return ret != -1 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 int main(int argc, char *argv[])
@@ -104,7 +104,7 @@ int main(int argc, char *argv[])
 	while ((c = getopt(argc, argv, "sd:cVh")) != EOF)
 		switch (c) {
 		case 's':
-			ksmbd_control_shutdown();
+			ret = ksmbd_control_shutdown();
 			break;
 		case 'd':
 			ret = ksmbd_control_debug(optarg);
