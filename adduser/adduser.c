@@ -88,10 +88,10 @@ static int sanity_check_user_name_simple(char *uname)
 		return -EINVAL;
 
 	for (i = 0; i < sz; i++) {
-		if (isalnum(uname[i]))
-			return 0;
+		if (!isalnum(uname[i]))
+			return -EINVAL;
 	}
-	return -EINVAL;
+	return 0;
 }
 
 int main(int argc, char *argv[])
