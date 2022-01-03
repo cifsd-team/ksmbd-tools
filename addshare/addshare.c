@@ -91,10 +91,10 @@ static int sanity_check_share_name_simple(char *name)
 		return -EINVAL;
 
 	for (i = 0; i < sz; i++) {
-		if (isalnum(name[i]))
-			return 0;
+		if (!isalnum(name[i]))
+			return -EINVAL;
 	}
-	return -EINVAL;
+	return 0;
 }
 
 int main(int argc, char *argv[])
