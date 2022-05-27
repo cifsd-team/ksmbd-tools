@@ -236,7 +236,7 @@ int build_sec_desc(struct ksmbd_dcerpc *dce, __u32 *secdesclen, int rid)
 	int l_offset, acl_size_offset;
 	int acl_size;
 
-	/* NT Security Descrptor : Revision */
+	/* NT Security Descriptor : Revision */
 	ndr_write_int16(dce, 1);
 
 	/* ACL Type */
