@@ -14,8 +14,9 @@ if krb5_dep.found()
   cdata.set('CONFIG_KRB5', krb5_dep.found())
   cdata.set('HAVE_KRB5_KEYBLOCK_KEYVALUE', cc.has_member('krb5_keyblock', 'keyvalue', prefix: '#include <krb5.h>'))
   cdata.set('HAVE_KRB5_AUTHENTICATOR_CLIENT', cc.has_member('krb5_authenticator', 'client', prefix: '#include <krb5.h>'))
-  cdata.set('HAVE_KRB5_AUTH_CON_GETRECVSUBKEY', cc.has_header_symbol('krb5.h', 'krb5_auth_con_getrecvsubkey'))
-  cdata.set('HAVE_KRB5_AUTH_CON_GETAUTHENTICATOR_DOUBLE_POINTER', true)
+  cdata.set('HAVE_KRB5_AUTH_CON_GETRECVSUBKEY', cc.has_function('krb5_auth_con_getrecvsubkey', dependencies: krb5_dep))
+  cdata.set('HAVE_KRB5_AUTH_CON_GETAUTHENTICATOR_DOUBLE_POINTER', cc.compiles('''#include <krb5.h>
+    krb5_error_code krb5_auth_con_getauthenticator(krb5_context, krb5_auth_context, krb5_authenticator**);''', dependencies: krb5_dep))
 endif
 cfile = configure_file(
   output: 'config.h',
