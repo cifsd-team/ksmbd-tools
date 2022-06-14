@@ -12,18 +12,17 @@
 #define _GNU_SOURCE 1
 #endif
 
+#include <errno.h>
+#include <getopt.h>
+#include <glib.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <string.h>
-#include <errno.h>
 #include <time.h>
-#include <poll.h>
-#include <getopt.h>
-#include <glib.h>
+#include <unistd.h>
 
 #ifdef HAVE_CONFIG_H
 #include <config.h>
