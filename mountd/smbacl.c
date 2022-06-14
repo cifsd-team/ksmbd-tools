@@ -95,8 +95,7 @@ int smb_compare_sids(const struct smb_sid *ctsid, const struct smb_sid *cwsid)
 	if (ctsid->revision != cwsid->revision) {
 		if (ctsid->revision > cwsid->revision)
 			return 1;
-		else
-			return -1;
+		return -1;
 	}
 
 	/* compare all of the six auth values */
@@ -104,8 +103,7 @@ int smb_compare_sids(const struct smb_sid *ctsid, const struct smb_sid *cwsid)
 		if (ctsid->authority[i] != cwsid->authority[i]) {
 			if (ctsid->authority[i] > cwsid->authority[i])
 				return 1;
-			else
-				return -1;
+			return -1;
 		}
 	}
 
@@ -119,8 +117,7 @@ int smb_compare_sids(const struct smb_sid *ctsid, const struct smb_sid *cwsid)
 				if (ctsid->sub_auth[i] >
 					cwsid->sub_auth[i])
 					return 1;
-				else
-					return -1;
+				return -1;
 			}
 		}
 	}

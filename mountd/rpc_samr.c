@@ -628,7 +628,7 @@ static int samr_close_return(struct ksmbd_rpc_pipe *pipe)
 	ch = samr_ch_lookup(dce->sm_req.handle);
 	if (!ch)
 		return KSMBD_RPC_EBAD_FID;
-	else if (ch->refcount > 1)
+	if (ch->refcount > 1)
 		ch->refcount--;
 	else
 		samr_ch_free(ch);

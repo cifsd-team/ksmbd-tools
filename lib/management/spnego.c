@@ -104,7 +104,9 @@ static bool is_supported_mech(unsigned long *oid, unsigned int len,
 	if (!compare_oid(oid, len, MSKRB5_OID, ARRAY_SIZE(MSKRB5_OID))) {
 		*mech_type = SPNEGO_MECH_MSKRB5;
 		return true;
-	} else if (!compare_oid(oid, len, KRB5_OID, ARRAY_SIZE(KRB5_OID))) {
+	}
+
+	if (!compare_oid(oid, len, KRB5_OID, ARRAY_SIZE(KRB5_OID))) {
 		*mech_type = SPNEGO_MECH_KRB5;
 		return true;
 	}
