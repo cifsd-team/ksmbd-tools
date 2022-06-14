@@ -107,9 +107,6 @@ static int add_new_group(char *line)
 	}
 
 	group = g_malloc(sizeof(struct smbconf_group));
-	if (!group)
-		goto out_free;
-
 	group->name = name;
 	group->kv = g_hash_table_new_full(g_str_hash,
 					  g_str_equal,
@@ -232,11 +229,6 @@ static int __mmap_parse_file(const char *fname, int (*callback)(char *data))
 				break;
 
 			data = g_malloc(sz + 1);
-			if (!data) {
-				ret = -ENOMEM;
-				goto out;
-			}
-
 			strncpy(data, contents, sz);
 			data[sz] = 0x00;
 
