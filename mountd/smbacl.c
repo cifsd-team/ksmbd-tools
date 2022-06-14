@@ -131,10 +131,9 @@ int smb_compare_sids(const struct smb_sid *ctsid, const struct smb_sid *cwsid)
 static void smb_sid_to_string(char *domain, struct smb_sid *sid)
 {
 	char str[PATH_MAX];
-	int i, domain_len = 0, len;
+	int i, domain_len, len;
 
-	strncpy(domain, "S-", 2);
-	domain_len += 2;
+	domain_len = g_sprintf(domain, "S-");
 	len = g_sprintf(str, "%i", (int)sid->revision);
 	strncpy(&domain[domain_len], str, len);
 	domain_len += len;
