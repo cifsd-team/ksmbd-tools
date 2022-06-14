@@ -113,11 +113,12 @@ static int parse_service_full_name(char *service_full_name,
 	*host_name = strndup(name, delim - name);
 	if (*host_name == NULL) {
 		free(*service_name);
+		*service_name = NULL;
 		return -ENOMEM;
 	}
 out:
 	/* we assume the host name is FQDN if it has "." */
-	if (strchr(*host_name, '.'))
+	if (*host_name && strchr(*host_name, '.'))
 		return 0;
 
 	free(*service_name);

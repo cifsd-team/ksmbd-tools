@@ -671,7 +671,7 @@ int shm_lookup_hosts_map(struct ksmbd_share *share,
 			  enum share_hosts map,
 			  char *host)
 {
-	GHashTable *lookup_map;
+	GHashTable *lookup_map = NULL;
 	int ret = -ENOENT;
 
 	if (map >= KSMBD_SHARE_HOSTS_MAX) {

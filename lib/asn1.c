@@ -201,6 +201,8 @@ unsigned char asn1_read(struct asn1_ctx *ctx,
 	}
 
 	*buf = malloc(len);
+	if (!*buf)
+		return 0;
 	memcpy(*buf, ctx->pointer, len);
 	ctx->pointer += len;
 	return 1;
