@@ -228,10 +228,7 @@ static int __mmap_parse_file(const char *fname, int (*callback)(char *data))
 			if (!sz)
 				break;
 
-			data = g_malloc(sz + 1);
-			strncpy(data, contents, sz);
-			data[sz] = 0x00;
-
+			data = g_strndup(contents, sz);
 			ret = callback(data);
 			if (ret) {
 				g_free(data);
