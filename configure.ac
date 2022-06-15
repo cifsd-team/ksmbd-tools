@@ -1,8 +1,7 @@
 AC_PREREQ([2.68])
 
-m4_define([ksmbd_tools_version], m4_esyscmd_s(
-	 grep "define KSMBD_TOOLS_VERSION " include/version.h | \
-		 awk '{print $3}' | sed 's/\"//g'))
+m4_define([ksmbd_tools_version], m4_esyscmd_s([awk '/define KSMBD_TOOLS_VERSION / \
+	{ gsub(/"/,"",$3); printf "%s", $3 }' include/version.h]))
 
 AC_INIT([ksmbd-tools],
 	ksmbd_tools_version,

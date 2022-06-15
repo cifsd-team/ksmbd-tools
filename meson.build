@@ -1,4 +1,7 @@
-project('ksmbsd-tools', 'c', version: '3.3.2', default_options: 'c_std=gnu99')
+project('ksmbsd-tools', 'c',
+  version: run_command(find_program('awk'), '''/define KSMBD_TOOLS_VERSION / \
+    { gsub(/"/,"",$3); printf "%s", $3 }''', 'include/version.h', check: true).stdout(),
+  default_options: 'c_std=gnu99')
 
 tools_incdir = include_directories(['include', '.'])
 
