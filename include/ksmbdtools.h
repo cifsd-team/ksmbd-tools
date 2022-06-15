@@ -82,7 +82,7 @@ extern struct smbconf_global global_conf;
 #define KSMBD_CONF_FALLBACK_GUEST_ACCOUNT	"ftp"
 
 #define KSMBD_CONF_DEFAULT_SESS_CAP	1024
-#define KSMBD_CONF_DEFAULT_TPC_PORT	445
+#define KSMBD_CONF_DEFAULT_TCP_PORT	445
 
 #define KSMBD_CONF_FILE_MAX		10000
 

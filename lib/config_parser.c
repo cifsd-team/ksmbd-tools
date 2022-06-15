@@ -590,7 +590,7 @@ static void global_conf_fixup_missing(void)
 		global_conf.work_group =
 			cp_get_group_kv_string(KSMBD_CONF_DEFAULT_WORK_GROUP);
 	if (!global_conf.tcp_port)
-		global_conf.tcp_port = KSMBD_CONF_DEFAULT_TPC_PORT;
+		global_conf.tcp_port = KSMBD_CONF_DEFAULT_TCP_PORT;
 
 	if (global_conf.sessions_cap <= 0)
 		global_conf.sessions_cap = KSMBD_CONF_DEFAULT_SESS_CAP;
