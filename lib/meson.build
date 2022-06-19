@@ -15,4 +15,4 @@ if krb5_dep.found()
   ]
 endif
 
-libksmbdtools = static_library('ksmbdtools', core_files, include_directories: tools_incdir, dependencies: [glib_dep, krb5_dep])
+libksmbdtools = static_library('ksmbdtools', core_files, include_directories: tools_incdir, dependencies: [glib_dep, krb5_dep, asn1_lib])
