@@ -78,7 +78,7 @@ void spnego_destroy(void)
 	int i;
 
 	for (i = 0; i < SPNEGO_MAX_MECHS; i++) {
-		if (mech_ctxs[i].ops->cleanup)
+		if (mech_ctxs[i].ops && mech_ctxs[i].ops->cleanup)
 			mech_ctxs[i].ops->cleanup(&mech_ctxs[i]);
 	}
 }
