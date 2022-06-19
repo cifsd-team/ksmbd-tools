@@ -649,11 +649,7 @@ static int cp_add_ipc_share(void)
 	if (ret) {
 		pr_err("Unable to add IPC$ share\n");
 		ret = -EINVAL;
-		goto out;
 	}
-	return ret;
-
-out:
 	g_free(comment);
 	g_free(guest);
 	return ret;
