@@ -337,7 +337,7 @@ static int setup_krb5_ctx(struct spnego_mech_ctx *mech_ctx)
 	struct spnego_krb5_ctx *krb5_ctx;
 	krb5_error_code krb_retval;
 
-	krb5_ctx = calloc(1, sizeof(*krb5_ctx));
+	krb5_ctx = g_try_malloc0(sizeof(*krb5_ctx));
 	if (!krb5_ctx)
 		return -ENOMEM;
 

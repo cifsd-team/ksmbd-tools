@@ -129,7 +129,7 @@ char *make_path_subauth(void)
 			}
 	}
 
-	path = calloc(1, loc + strlen(subauth_filename) + 1);
+	path = g_try_malloc0(loc + strlen(subauth_filename) + 1);
 	if (!path)
 		return NULL;
 

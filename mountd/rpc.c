@@ -119,11 +119,11 @@ static struct ksmbd_dcerpc *dcerpc_alloc(unsigned int flags, int sz)
 {
 	struct ksmbd_dcerpc *dce;
 
-	dce = calloc(1, sizeof(struct ksmbd_dcerpc));
+	dce = g_try_malloc0(sizeof(struct ksmbd_dcerpc));
 	if (!dce)
 		return NULL;
 
-	dce->payload = calloc(1, sz);
+	dce->payload = g_try_malloc0(sz);
 	if (!dce->payload) {
 		free(dce);
 		return NULL;
@@ -144,7 +144,7 @@ static struct ksmbd_dcerpc *dcerpc_ext_alloc(unsigned int flags,
 {
 	struct ksmbd_dcerpc *dce;
 
-	dce = calloc(1, sizeof(struct ksmbd_dcerpc));
+	dce = g_try_malloc0(sizeof(struct ksmbd_dcerpc));
 	if (!dce)
 		return NULL;
 
@@ -200,7 +200,7 @@ static struct ksmbd_rpc_pipe *rpc_pipe_alloc(void)
 {
 	struct ksmbd_rpc_pipe *pipe;
 
-	pipe = calloc(1, sizeof(struct ksmbd_rpc_pipe));
+	pipe = g_try_malloc0(sizeof(struct ksmbd_rpc_pipe));
 	if (!pipe)
 		return NULL;
 
@@ -913,7 +913,7 @@ static int dcerpc_parse_bind_req(struct ksmbd_dcerpc *dce,
 	if (!hdr->num_contexts)
 		return 0;
 
-	hdr->list = calloc(hdr->num_contexts, sizeof(struct dcerpc_context));
+	hdr->list = g_try_malloc0_n(hdr->num_contexts, sizeof(struct dcerpc_context));
 	if (!hdr->list)
 		return -ENOMEM;
 
@@ -931,7 +931,7 @@ static int dcerpc_parse_bind_req(struct ksmbd_dcerpc *dce,
 
 		__dcerpc_read_syntax(dce, &ctx->abstract_syntax);
 
-		ctx->transfer_syntaxes = calloc(ctx->num_syntaxes,
+		ctx->transfer_syntaxes = g_try_malloc0_n(ctx->num_syntaxes,
 						sizeof(struct dcerpc_syntax));
 		if (!ctx->transfer_syntaxes) {
 			ret = -ENOMEM;

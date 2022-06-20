@@ -64,8 +64,8 @@ static void term_toggle_echo(int on_off)
 
 static char *__prompt_password_stdin(size_t *sz)
 {
-	char *pswd1 = calloc(1, MAX_NT_PWD_LEN + 1);
-	char *pswd2 = calloc(1, MAX_NT_PWD_LEN + 1);
+	char *pswd1 = g_try_malloc0(MAX_NT_PWD_LEN + 1);
+	char *pswd2 = g_try_malloc0(MAX_NT_PWD_LEN + 1);
 	size_t len = 0;
 	int i;
 
@@ -187,7 +187,7 @@ static char *get_hashed_b64_password(void)
 	if (!pswd_plain)
 		return NULL;
 
-	pswd_hash = calloc(1, sizeof(mctx.hash) + 1);
+	pswd_hash = g_try_malloc0(sizeof(mctx.hash) + 1);
 	if (!pswd_hash) {
 		free(pswd_plain);
 		pr_err("Out of memory\n");

@@ -250,7 +250,7 @@ static int encode_negTokenTarg(char *in_blob, int in_len,
 
 	*out_len = asn1_header_len(
 			neg_result_len + sup_mech_len + rep_token_len, 2);
-	*out_blob = calloc(1, *out_len);
+	*out_blob = g_try_malloc0(*out_len);
 	if (*out_blob == NULL)
 		return -ENOMEM;
 	buf = *out_blob;

@@ -34,7 +34,7 @@ struct ksmbd_ipc_msg *ipc_msg_alloc(size_t sz)
 	if (msg_sz > KSMBD_IPC_MAX_MESSAGE_SIZE)
 		pr_err("IPC message is too large: %zu\n", msg_sz);
 
-	msg = calloc(1, msg_sz);
+	msg = g_try_malloc0(msg_sz);
 	if (msg)
 		msg->sz = sz;
 	return msg;

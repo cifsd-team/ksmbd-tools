@@ -59,7 +59,7 @@ static struct policy_handle *lsarpc_ph_alloc(unsigned int id)
 	struct policy_handle *ph;
 	int ret;
 
-	ph = calloc(1, sizeof(struct policy_handle));
+	ph = g_try_malloc(sizeof(struct policy_handle));
 	if (!ph)
 		return NULL;
 
@@ -239,7 +239,7 @@ static int lsarpc_lookup_sid2_invoke(struct ksmbd_rpc_pipe *pipe)
 		struct passwd *passwd;
 		int rid;
 
-		ni = calloc(1, sizeof(struct lsarpc_names_info));
+		ni = g_try_malloc0(sizeof(struct lsarpc_names_info));
 		if (!ni)
 			break;
 

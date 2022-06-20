@@ -60,7 +60,7 @@ static struct connect_handle *samr_ch_alloc(unsigned int id)
 	struct connect_handle *ch;
 	int ret;
 
-	ch = calloc(1, sizeof(struct connect_handle));
+	ch = g_try_malloc0(sizeof(struct connect_handle));
 	if (!ch)
 		return NULL;
 
@@ -377,7 +377,7 @@ static int samr_query_user_info_return(struct ksmbd_rpc_pipe *pipe)
 	gethostname(hostname, NAME_MAX);
 	home_dir_len = 2 + strlen(hostname) + 1 + strlen(ch->user->name);
 
-	home_dir = calloc(1, home_dir_len);
+	home_dir = g_try_malloc0(home_dir_len);
 	if (!home_dir)
 		return KSMBD_RPC_ENOMEM;
 
@@ -387,7 +387,7 @@ static int samr_query_user_info_return(struct ksmbd_rpc_pipe *pipe)
 	strcat(home_dir, "\\");
 	strcat(home_dir, ch->user->name);
 
-	profile_path = calloc(1, home_dir_len + strlen("profile"));
+	profile_path = g_try_malloc0(home_dir_len + strlen("profile"));
 	if (!profile_path) {
 		free(home_dir);
 		return KSMBD_RPC_ENOMEM;
