@@ -35,10 +35,10 @@ All administration tasks must be done as root.
 - Install ksmbd kernel driver
 	- `modprobe ksmbd`
 - Create user/password for SMB share
-	- `mkdir /etc/ksmbd`
+	- `mkdir -p /usr/local/etc/ksmbd`
 	- `ksmbd.adduser -a <username>`
 	- Enter password for SMB share access
-- Create `/etc/ksmbd/smb.conf` file
+- Create `/usr/local/etc/ksmbd/smb.conf` file
 	- Refer `smb.conf.example`
 - Add share to `smb.conf`
 	- This can be done manually or with `ksmbd.addshare`, e.g.:
@@ -78,11 +78,11 @@ smb, auth, vfs, oplock, ipc, conn, rdma
 
 - ksmbd.adduser
   - Adds (-a), updates (-u), or deletes (-d) a user from user database.
-  - Default database file is `/etc/ksmbd/users.db`
+  - Default database file is `/usr/local/etc/ksmbd/users.db`
 
 - ksmbd.addshare
   - Adds (-a), updates (-u), or deletes (-d) a net share from config file.
-  - Default config file is `/etc/ksmbd/smb.conf`
+  - Default config file is `/usr/local/etc/ksmbd/smb.conf`
 
 `ksmbd.addshare` does not modify `[global]` section in config file; only net
 share configs are supported at the moment.

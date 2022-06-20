@@ -86,8 +86,8 @@ extern struct smbconf_global global_conf;
 
 #define KSMBD_CONF_FILE_MAX		10000
 
-#define PATH_PWDDB	"/etc/ksmbd/ksmbdpwd.db"
-#define PATH_SMBCONF	"/etc/ksmbd/smb.conf"
+#define PATH_PWDDB	SYSCONFDIR "/ksmbd/ksmbdpwd.db"
+#define PATH_SMBCONF	SYSCONFDIR "/ksmbd/smb.conf"
 
 #define KSMBD_HEALTH_START		(0)
 #define KSMBD_HEALTH_RUNNING		(1 << 0)
