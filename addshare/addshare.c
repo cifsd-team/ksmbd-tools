@@ -37,15 +37,15 @@ static void usage(int status)
 {
 	int i;
 
-	fprintf(stderr,
+	g_printerr(
 		"Usage: ksmbd.addshare {-a SHARE | -u SHARE} {-o OPTIONS} [-c SMBCONF] [-v]\n"
 		"       ksmbd.addshare {-d SHARE} [-c SMBCONF] [-v]\n"
 		"       ksmbd.addshare {-V | -h}\n");
 
 	if (status != EXIT_SUCCESS)
-		fprintf(stderr, "Try 'ksmbd.addshare --help' for more information.\n");
+		g_printerr("Try 'ksmbd.addshare --help' for more information.\n");
 	else {
-		fprintf(stderr,
+		g_printerr(
 			"Configure shares for config file of ksmbd.mountd user mode daemon.\n"
 			"\n"
 			"Mandatory arguments to long options are mandatory for short options too.\n"
@@ -68,8 +68,8 @@ static void usage(int status)
 			"\n"
 			"The following OPTIONS are supported:\n");
 		for (i = 0; i < KSMBD_SHARE_CONF_MAX; i++)
-			fprintf(stderr, "  %s\n", KSMBD_SHARE_CONF[i]);
-		fprintf(stderr,
+			g_printerr("  %s\n", KSMBD_SHARE_CONF[i]);
+		g_printerr(
 			"\n"
 			"ksmbd-tools home page: <https://github.com/cifsd-team/ksmbd-tools>\n");
 	}
@@ -89,7 +89,7 @@ static const struct option opts[] = {
 
 static int show_version(void)
 {
-	printf("ksmbd-tools version : %s\n", KSMBD_TOOLS_VERSION);
+	g_print("ksmbd-tools version : %s\n", KSMBD_TOOLS_VERSION);
 	return EXIT_SUCCESS;
 }
 

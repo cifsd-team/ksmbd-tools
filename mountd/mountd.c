@@ -41,14 +41,14 @@ typedef int (*worker_fn)(void);
 
 static void usage(int status)
 {
-	fprintf(stderr,
+	g_printerr(
 		"Usage: ksmbd.mountd [-p NUMBER] [-c SMBCONF] [-u PWDDB] [-n[WAY]] [-s]\n"
 		"       ksmbd.mountd {-V | -h}\n");
 
 	if (status != EXIT_SUCCESS)
-		fprintf(stderr, "Try 'ksmbd.mountd --help' for more information.\n");
+		g_printerr("Try 'ksmbd.mountd --help' for more information.\n");
 	else
-		fprintf(stderr,
+		g_printerr(
 			"Run ksmbd.mountd user mode and ksmbd kernel mode daemons.\n"
 			"\n"
 			"Mandatory arguments to long options are mandatory for short options too.\n"
@@ -70,13 +70,13 @@ static void usage(int status)
 
 static int show_version(void)
 {
-	printf("ksmbd-tools version : %s\n", KSMBD_TOOLS_VERSION);
+	g_print("ksmbd-tools version : %s\n", KSMBD_TOOLS_VERSION);
 	return EXIT_SUCCESS;
 }
 
 static int handle_orphaned_lock_file(void)
 {
-	char proc_ent[64] = {0, };
+	char *proc_ent = NULL;
 	char manager_pid[10] = {0, };
 	int pid = 0;
 	int fd;
@@ -94,8 +94,9 @@ static int handle_orphaned_lock_file(void)
 	close(fd);
 
 	pid = strtol(manager_pid, NULL, 10);
-	snprintf(proc_ent, sizeof(proc_ent), "/proc/%d", pid);
+	proc_ent = g_strdup_printf("/proc/%d", pid);
 	fd = open(proc_ent, O_RDONLY);
+	g_free(proc_ent);
 	if (fd < 0) {
 		pr_info("Unlink orphaned '%s'\n", KSMBD_LOCK_FILE);
 		return unlink(KSMBD_LOCK_FILE);
@@ -189,17 +190,18 @@ static int write_file_safe(char *path, char *buff, size_t length, int mode)
 	ret = 0;
 
 err_out:
+	g_free(buff);
 	g_free(path_tmp);
 	return ret;
 }
 
 static int create_subauth_file(char *path_subauth)
 {
-	char subauth_buf[35];
+	char *subauth_buf;
 	GRand *rnd;
 
 	rnd = g_rand_new();
-	sprintf(subauth_buf, "%d:%d:%d\n", g_rand_int_range(rnd, 0, INT_MAX),
+	subauth_buf = g_strdup_printf("%d:%d:%d\n", g_rand_int_range(rnd, 0, INT_MAX),
 		g_rand_int_range(rnd, 0, INT_MAX),
 		g_rand_int_range(rnd, 0, INT_MAX));
 

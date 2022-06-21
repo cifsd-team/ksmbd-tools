@@ -9,7 +9,6 @@
 #include <smbacl.h>
 #include <ksmbdtools.h>
 #include <glib.h>
-#include <glib/gprintf.h>
 
 static const struct smb_sid sid_domain = {1, 1, {0, 0, 0, 0, 0, 5},
 	{21, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} };
@@ -130,18 +129,18 @@ static void smb_sid_to_string(char *domain, struct smb_sid *sid)
 	char str[PATH_MAX];
 	int i, domain_len, len;
 
-	domain_len = g_sprintf(domain, "S-");
-	len = g_sprintf(str, "%i", (int)sid->revision);
+	domain_len = sprintf(domain, "S-");
+	len = sprintf(str, "%i", (int)sid->revision);
 	strncpy(&domain[domain_len], str, len);
 	domain_len += len;
 	domain[domain_len++] = '-';
-	len = g_sprintf(str, "%i", (int)sid->authority[5]);
+	len = sprintf(str, "%i", (int)sid->authority[5]);
 	strncpy(&domain[domain_len], str, len);
 	domain_len += len;
 
 	for (i = 0; i < sid->num_subauth; i++) {
 		domain[domain_len++] = '-';
-		len = g_sprintf(str, "%u", sid->sub_auth[i]);
+		len = sprintf(str, "%u", sid->sub_auth[i]);
 		strncpy(&domain[domain_len], str, len);
 		domain_len += len;
 	}

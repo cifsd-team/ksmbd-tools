@@ -78,7 +78,7 @@ again:
 	memset(pswd1, 0, MAX_NT_PWD_LEN + 1);
 	memset(pswd2, 0, MAX_NT_PWD_LEN + 1);
 
-	printf("New password: ");
+	g_print("New password: ");
 	term_toggle_echo(0);
 	if (fgets(pswd1, MAX_NT_PWD_LEN, stdin) == NULL) {
 		if (feof(stdin)) {
@@ -92,7 +92,7 @@ again:
 		return NULL;
 	}
 
-	printf("\nRetype new password: ");
+	g_print("\nRetype new password: ");
 	if (fgets(pswd2, MAX_NT_PWD_LEN, stdin) == NULL) {
 		if (feof(stdin)) {
 			clearerr(stdin);
@@ -107,7 +107,7 @@ again:
 
 skip:
 	term_toggle_echo(1);
-	printf("\n");
+	g_print("\n");
 
 	len = strlen(pswd1);
 	for (i = 0; i < len; i++)

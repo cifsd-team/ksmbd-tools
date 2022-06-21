@@ -36,15 +36,15 @@ enum {
 
 static void usage(int status)
 {
-	fprintf(stderr,
+	g_printerr(
 		"Usage: ksmbd.adduser {-a USER | -u USER} [-p PWD] [-i PWDDB] [-c SMBCONF] [-v]\n"
 		"       ksmbd.adduser {-d USER} [-i PWDDB] [-c SMBCONF] [-v]\n"
 		"       ksmbd.adduser {-V | -h}\n");
 
 	if (status != EXIT_SUCCESS)
-		fprintf(stderr, "Try 'ksmbd.adduser --help' for more information.\n");
+		g_printerr("Try 'ksmbd.adduser --help' for more information.\n");
 	else
-		fprintf(stderr,
+		g_printerr(
 			"Configure users for user database of ksmbd.mountd user mode daemon.\n"
 			"\n"
 			"Mandatory arguments to long options are mandatory for short options too.\n"
@@ -86,7 +86,7 @@ static const struct option opts[] = {
 
 static int show_version(void)
 {
-	printf("ksmbd-tools version : %s\n", KSMBD_TOOLS_VERSION);
+	g_print("ksmbd-tools version : %s\n", KSMBD_TOOLS_VERSION);
 	return EXIT_SUCCESS;
 }
 

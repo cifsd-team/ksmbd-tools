@@ -6,7 +6,6 @@
  */
 
 #include <syslog.h>
-#include <glib/gi18n.h>
 
 #include <unistd.h>
 #include <sys/stat.h>
