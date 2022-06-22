@@ -28,6 +28,7 @@ static const struct option opts[] = {
 	{"debug",		required_argument,	NULL,	'd' },
 	{"ksmbd-version",	no_argument,		NULL,	'c' },
 	{"version",		no_argument,		NULL,	'V' },
+	{"help",		no_argument,		NULL,	'h' },
 	{NULL,			0,			NULL,	 0  }
 };
 

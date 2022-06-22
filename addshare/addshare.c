@@ -59,8 +59,10 @@ static const struct option opts[] = {
 	{"del-share",		required_argument,	NULL,	'd' },
 	{"update-share",	required_argument,	NULL,	'u' },
 	{"options",		required_argument,	NULL,	'o' },
+	{"config",		required_argument,	NULL,	'c' },
 	{"version",		no_argument,		NULL,	'V' },
 	{"verbose",		no_argument,		NULL,	'v' },
+	{"help",		no_argument,		NULL,	'h' },
 	{NULL,			0,			NULL,	 0  }
 };
 

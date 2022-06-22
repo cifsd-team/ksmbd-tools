@@ -58,6 +58,7 @@ static const struct option opts[] = {
 	{"import-users",	required_argument,	NULL,	'i' },
 	{"version",		no_argument,		NULL,	'V' },
 	{"verbose",		no_argument,		NULL,	'v' },
+	{"help",		no_argument,		NULL,	'h' },
 	{NULL,			0,			NULL,	 0  }
 };
 

@@ -550,7 +550,6 @@ static struct option opts[] = {
 	{"systemd",	no_argument,		NULL,	's' },
 	{"nodetach",	optional_argument,	NULL,	'n' },
 	{"help",	no_argument,		NULL,	'h' },
-	{"?",		no_argument,		NULL,	'?' },
 	{"version",	no_argument,		NULL,	'V' },
 	{NULL,		0,			NULL,	 0  }
 };
