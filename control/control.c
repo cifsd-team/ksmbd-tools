@@ -87,6 +87,9 @@ static int ksmbd_control_debug(char *comp)
 	ret = write(fd, comp, strlen(comp));
 	if (ret < 0)
 		goto out;
+	ret = lseek(fd, 0, SEEK_SET);
+	if (ret < 0)
+		goto out;
 	ret = read(fd, buf, 255);
 	if (ret < 0)
 		goto out;
