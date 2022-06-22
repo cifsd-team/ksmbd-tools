@@ -566,17 +566,8 @@ int main(int argc, char *argv[])
 	pr_logger_init(PR_LOGGER_STDIO);
 
 	opterr = 0;
-	while (1) {
-		c = getopt_long(argc, argv, "n::p:c:u:sVh", opts, NULL);
-
-		if (c < 0)
-			break;
-
+	while ((c = getopt_long(argc, argv, "n::p:c:u:sVh", opts, NULL)) != EOF)
 		switch (c) {
-		case 0: /* getopt_long() set a variable, just keep going */
-			break;
-		case 1:
-			break;
 		case 'p':
 			global_conf.tcp_port = cp_get_group_kv_long(optarg);
 			pr_debug("TCP port option override\n");
@@ -599,16 +590,11 @@ int main(int argc, char *argv[])
 		case 'V':
 			show_version();
 			break;
-		case ':':
-			pr_err("Missing option argument\n");
-			/* Fall through */
 		case '?':
 		case 'h':
-			/* Fall through */
 		default:
 			usage();
 		}
-	}
 
 	if (!global_conf.smbconf || !global_conf.pwddb) {
 		pr_err("Out of memory\n");

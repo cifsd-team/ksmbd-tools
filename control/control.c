@@ -128,7 +128,7 @@ int main(int argc, char *argv[])
 		case 'h':
 		default:
 			usage();
-	}
+		}
 
 	if (argc < 2)
 		usage();

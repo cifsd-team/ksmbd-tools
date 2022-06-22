@@ -143,7 +143,7 @@ int main(int argc, char *argv[])
 		case 'h':
 		default:
 			usage();
-	}
+		}
 
 	if (sanity_check_user_name_simple(arg_account)) {
 		pr_err("User name sanity check failure\n");

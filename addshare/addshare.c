@@ -143,7 +143,7 @@ int main(int argc, char *argv[])
 		case 'h':
 		default:
 			usage();
-	}
+		}
 
 	if (cmd != COMMAND_DEL_SHARE && !arg_opts) {
 		usage();
