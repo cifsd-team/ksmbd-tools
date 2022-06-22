@@ -109,7 +109,6 @@ int main(int argc, char *argv[])
 		return ret;
 	}
 
-	opterr = 0;
 	while ((c = getopt_long(argc, argv, "sd:cVh", opts, NULL)) != EOF)
 		switch (c) {
 		case 's':

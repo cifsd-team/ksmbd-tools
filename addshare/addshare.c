@@ -113,7 +113,6 @@ int main(int argc, char *argv[])
 
 	set_logger_app_name("ksmbd.addshare");
 
-	opterr = 0;
 	while ((c = getopt_long(argc, argv, "c:a:d:u:p:o:Vvh", opts, NULL)) != EOF)
 		switch (c) {
 		case 'a':

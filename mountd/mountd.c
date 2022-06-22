@@ -565,7 +565,6 @@ int main(int argc, char *argv[])
 	global_conf.smbconf = PATH_SMBCONF;
 	pr_logger_init(PR_LOGGER_STDIO);
 
-	opterr = 0;
 	while ((c = getopt_long(argc, argv, "n::p:c:u:sVh", opts, NULL)) != EOF)
 		switch (c) {
 		case 'p':
