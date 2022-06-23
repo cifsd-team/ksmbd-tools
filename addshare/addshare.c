@@ -120,7 +120,7 @@ static int sanity_check_share_name_simple(char *name)
 	if (sz >= KSMBD_REQ_MAX_SHARE_NAME)
 		return -EINVAL;
 
-	if (!cp_key_cmp(name, "global"))
+	if (!g_ascii_strcasecmp(name, "global"))
 		return -EINVAL;
 
 	return 0;
