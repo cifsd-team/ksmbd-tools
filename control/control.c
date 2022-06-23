@@ -24,13 +24,13 @@ static void usage(int status)
 			"Control ksmbd.mountd user mode and ksmbd kernel mode daemons.\n"
 			"\n"
 			"Mandatory arguments to long options are mandatory for short options too.\n"
-			"  -s, --shutdown           shutdown ksmbd.mountd and ksmbd\n"
-			"  -d, --debug=COMPONENT    toggle debug printing for COMPONENT;\n"
+			"  -s, --shutdown           shutdown ksmbd.mountd and ksmbd and exit\n"
+			"  -d, --debug=COMPONENT    toggle debug printing for COMPONENT and exit;\n"
 			"                           COMPONENT is 'all', 'smb', 'auth', 'vfs',\n"
 			"                           'oplock', 'ipc', 'conn', or 'rdma';\n"
 			"                           output also status of all components;\n"
 			"                           enabled components are enclosed in brackets\n"
-			"  -c, --ksmbd-version      output ksmbd version information\n"
+			"  -c, --ksmbd-version      output ksmbd version information and exit\n"
 			"  -V, --version            output version information and exit\n"
 			"  -h, --help               display this help and exit\n"
 			"\n"
@@ -130,13 +130,13 @@ int main(int argc, char *argv[])
 		switch (c) {
 		case 's':
 			ret = ksmbd_control_shutdown();
-			break;
+			goto out;
 		case 'd':
 			ret = ksmbd_control_debug(optarg);
-			break;
+			goto out;
 		case 'c':
 			ret = ksmbd_control_show_version();
-			break;
+			goto out;
 		case 'V':
 			ret = show_version();
 			goto out;
