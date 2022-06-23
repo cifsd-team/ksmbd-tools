@@ -30,7 +30,7 @@ static void usage(int status)
 			"                           'oplock', 'ipc', 'conn', or 'rdma';\n"
 			"                           output also status of all components;\n"
 			"                           enabled components are enclosed in brackets\n"
-			"  -c, --ksmbd-version      output ksmbd version information and exit\n"
+			"  -c, --ksmbd-version      output ksmbd version information\n"
 			"  -V, --version            output version information and exit\n"
 			"  -h, --help               display this help and exit\n"
 			"\n"
@@ -139,18 +139,18 @@ int main(int argc, char *argv[])
 			break;
 		case 'V':
 			ret = show_version();
-			break;
+			goto out;
 		case 'h':
 			ret = EXIT_SUCCESS;
 			/* Fall through */
 		case '?':
 		default:
 			usage(ret);
-			break;
+			goto out;
 		}
 
 	if (argc < 2 || argc > optind)
 		usage(ret);
-
+out:
 	return ret;
 }
