@@ -12,15 +12,29 @@
 #include "ksmbdtools.h"
 #include "version.h"
 
-static void usage(void)
+static void usage(int status)
 {
-	fprintf(stderr, "Usage: ksmbd.control\n");
-	fprintf(stderr, "\t-s | --shutdown\n");
-	fprintf(stderr, "\t-d | --debug=all or [smb, auth, etc...]\n");
-	fprintf(stderr, "\t-c | --ksmbd-version\n");
-	fprintf(stderr, "\t-V | --version\n");
+	fprintf(stderr,
+	        "Usage: ksmbd.control {-s | -d COMPONENT | -c | -V | -h}\n");
 
-	exit(EXIT_FAILURE);
+	if (status != EXIT_SUCCESS)
+		fprintf(stderr, "Try 'ksmbd.control --help' for more information.\n");
+	else
+		fprintf(stderr,
+		        "Control ksmbd.mountd user mode and ksmbd kernel mode daemons.\n"
+		        "\n"
+		        "Mandatory arguments to long options are mandatory for short options too.\n"
+		        "  -s, --shutdown           shutdown ksmbd.mountd and ksmbd\n"
+		        "  -d, --debug=COMPONENT    toggle debug printing for COMPONENT;\n"
+		        "                           COMPONENT is 'smb', 'auth', 'vfs', 'oplock',\n"
+		        "                           'ipc', 'conn', or 'rdma';\n"
+		        "                           output also status of all components;\n"
+		        "                           enabled components are enclosed in brackets\n"
+		        "  -c, --ksmbd-version      output ksmbd version information and exit\n"
+		        "  -V, --version            output version information and exit\n"
+		        "  -h, --help               display this help and exit\n"
+		        "\n"
+		        "ksmbd-tools home page: <https://github.com/cifsd-team/ksmbd-tools>\n");
 }
 
 static const struct option opts[] = {
@@ -32,10 +46,10 @@ static const struct option opts[] = {
 	{NULL,			0,			NULL,	 0  }
 };
 
-static void show_version(void)
+static int show_version(void)
 {
 	printf("ksmbd-tools version : %s\n", KSMBD_TOOLS_VERSION);
-	exit(EXIT_FAILURE);
+	return EXIT_SUCCESS;
 }
 
 static int ksmbd_control_shutdown(void)
@@ -124,16 +138,19 @@ int main(int argc, char *argv[])
 			ret = ksmbd_control_show_version();
 			break;
 		case 'V':
-			show_version();
+			ret = show_version();
 			break;
-		case '?':
 		case 'h':
+			ret = EXIT_SUCCESS;
+			/* Fall through */
+		case '?':
 		default:
-			usage();
+			usage(ret);
+			break;
 		}
 
-	if (argc < 2)
-		usage();
+	if (argc < 2 || argc > optind)
+		usage(ret);
 
 	return ret;
 }

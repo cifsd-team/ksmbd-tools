@@ -99,6 +99,9 @@ extern int ksmbd_health_status;
 
 #define ARRAY_SIZE(X) (sizeof(X) / sizeof((X)[0]))
 
+#define STR_HELPER(x) #x
+#define STR(x) STR_HELPER(x)
+
 //---------------------------------------------------------------//
 #define LOGAPP		"[%s/%d]:"
 #define PRERR		LOGAPP" ERROR: "

@@ -33,25 +33,46 @@ enum {
 	COMMAND_UPDATE_SHARE,
 };
 
-static void usage(void)
+static void usage(int status)
 {
 	int i;
 
-	fprintf(stderr, "Usage: smbshareadd\n");
+	fprintf(stderr,
+	        "Usage: ksmbd.addshare {-a SHARE | -u SHARE} {-o OPTIONS} [-c SMBCONF] [-v]\n"
+	        "       ksmbd.addshare {-d SHARE} [-c SMBCONF] [-v]\n"
+	        "       ksmbd.addshare {-V | -h}\n");
 
-	fprintf(stderr, "\t-a | --add-share=share\n");
-	fprintf(stderr, "\t-d | --del-share=share\n");
-	fprintf(stderr, "\t-u | --update-share=share\n");
-	fprintf(stderr, "\t-o | --options=\"op1=val1 op2=val2...\"\n");
-
-	fprintf(stderr, "\t-c smb.conf\n");
-	fprintf(stderr, "\t-V | --version\n");
-	fprintf(stderr, "\t-v | --verbose\n");
-
-	fprintf(stderr, "Supported share options:\n");
-	for (i = 0; i < KSMBD_SHARE_CONF_MAX; i++)
-		fprintf(stderr, "\t%s\n", KSMBD_SHARE_CONF[i]);
-	exit(EXIT_FAILURE);
+	if (status != EXIT_SUCCESS)
+		fprintf(stderr, "Try 'ksmbd.addshare --help' for more information.\n");
+	else {
+		fprintf(stderr,
+		        "Configure shares for config file of ksmbd.mountd user mode daemon.\n"
+		        "\n"
+		        "Mandatory arguments to long options are mandatory for short options too.\n"
+		        "  -a, --add-share=SHARE       add SHARE to config file;\n"
+		        "                              SHARE is 1 to " STR(KSMBD_REQ_MAX_SHARE_NAME) " characters;\n"
+		        "                              SHARE cannot be 'global';\n"
+		        "                              you must also give option 'options'\n"
+		        "  -d, --del-share=SHARE       delete SHARE from config file;\n"
+		        "                              you must restart ksmbd for changes to take effect\n"
+		        "  -u, --update-share=SHARE    update SHARE in config file;\n"
+		        "                              you must also give option 'options';\n"
+		        "                              you must restart ksmbd for changes to take effect\n"
+		        "  -o, --options=OPTIONS       provide OPTIONS for share;\n"
+		        "                              OPTIONS has format 'key1=val1 key2=val2'\n"
+		        "  -c, --config=SMBCONF        use SMBCONF as config file instead of\n"
+		        "                              '" PATH_SMBCONF "'\n"
+		        "  -v, --verbose               be more verbose; unimplemented\n"
+		        "  -V, --version               output version information and exit\n"
+		        "  -h, --help                  display this help and exit\n"
+		        "\n"
+		        "The following OPTIONS are supported:\n");
+		for (i = 0; i < KSMBD_SHARE_CONF_MAX; i++)
+			fprintf(stderr, "  %s\n", KSMBD_SHARE_CONF[i]);
+		fprintf(stderr,
+		        "\n"
+		        "ksmbd-tools home page: <https://github.com/cifsd-team/ksmbd-tools>\n");
+	}
 }
 
 static const struct option opts[] = {
@@ -66,10 +87,10 @@ static const struct option opts[] = {
 	{NULL,			0,			NULL,	 0  }
 };
 
-static void show_version(void)
+static int show_version(void)
 {
 	printf("ksmbd-tools version : %s\n", KSMBD_TOOLS_VERSION);
-	exit(EXIT_FAILURE);
+	return EXIT_SUCCESS;
 }
 
 static int parse_configs(char *smbconf)
@@ -134,23 +155,36 @@ int main(int argc, char *argv[])
 			arg_opts = strdup(optarg);
 			break;
 		case 'V':
-			show_version();
-			break;
+			ret = show_version();
+			goto out;
 		case 'v':
 			break;
-		case '?':
 		case 'h':
+			ret = EXIT_SUCCESS;
+			/* Fall through */
+		case '?':
 		default:
-			usage();
+			usage(ret);
+			goto out;
 		}
 
+	if (argc < 2 || argc > optind) {
+		usage(ret);
+		goto out;
+	}
+
+	if (!arg_name) {
+		pr_err("No option with share name given\n");
+		goto out;
+	}
+
 	if (cmd != COMMAND_DEL_SHARE && !arg_opts) {
-		usage();
-		return -1;
+		pr_err("No options for share given\n");
+		goto out;
 	}
 
 	if (sanity_check_share_name_simple(arg_name)) {
-		pr_err("share name sanity check failure\n");
+		pr_err("Share name sanity check failure\n");
 		goto out;
 	}
 

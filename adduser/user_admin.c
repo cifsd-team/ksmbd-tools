@@ -24,8 +24,6 @@
 
 #include <linux/ksmbd_server.h>
 
-#define MAX_NT_PWD_LEN 129
-
 static char *arg_account = NULL;
 static char *arg_password = NULL;
 static int conf_fd = -1;

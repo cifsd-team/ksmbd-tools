@@ -39,24 +39,39 @@ static int lock_fd = -1;
 
 typedef int (*worker_fn)(void);
 
-static void usage(void)
+static void usage(int status)
 {
-	fprintf(stderr, "Usage: ksmbd\n");
-	fprintf(stderr, "\t--p=NUM | --port=NUM              TCP port NUM\n");
-	fprintf(stderr, "\t--c=smb.conf | --config=smb.conf  config file\n");
-	fprintf(stderr, "\t--u=pwd.db | --users=pwd.db       Users DB\n");
-	fprintf(stderr, "\t--n | --nodetach                  Don't detach\n");
-	fprintf(stderr, "\t--s | --systemd                   Service mode\n");
-	fprintf(stderr, "\t-V | --version                    Show version\n");
-	fprintf(stderr, "\t-h | --help                       Show help\n");
+	fprintf(stderr,
+	        "Usage: ksmbd.mountd [-p NUMBER] [-c SMBCONF] [-u PWDDB] [-n[WAY]] [-s]\n"
+	        "       ksmbd.mountd {-V | -h}\n");
 
-	exit(EXIT_FAILURE);
+	if (status != EXIT_SUCCESS)
+		fprintf(stderr, "Try 'ksmbd.mountd --help' for more information.\n");
+	else
+		fprintf(stderr,
+		        "Run ksmbd.mountd user mode and ksmbd kernel mode daemons.\n"
+		        "\n"
+		        "Mandatory arguments to long options are mandatory for short options too.\n"
+		        "  -p, --port=NUMBER       bind to TCP port NUMBER instead of '" STR(KSMBD_CONF_DEFAULT_TCP_PORT) "'\n"
+		        "  -c, --config=SMBCONF    use SMBCONF as config file instead of\n"
+		        "                          '" PATH_SMBCONF "'\n"
+		        "  -u, --users=PWDDB       use PWDDB as user database instead of\n"
+		        "                          '" PATH_PWDDB "'\n"
+		        "  -n, --nodetach[=WAY]    do not detach process from foreground;\n"
+		        "                          WAY is 1 by default;\n"
+		        "                          if WAY is 1 also become process group leader;\n"
+		        "                          if WAY is 0 detach\n"
+		        "  -s, --systemd           run in systemd service mode\n"
+		        "  -V, --version           output version information and exit\n"
+		        "  -h, --help              display this help and exit\n"
+		        "\n"
+		        "ksmbd-tools home page: <https://github.com/cifsd-team/ksmbd-tools>\n");
 }
 
-static void show_version(void)
+static int show_version(void)
 {
 	printf("ksmbd-tools version : %s\n", KSMBD_TOOLS_VERSION);
-	exit(EXIT_FAILURE);
+	return EXIT_SUCCESS;
 }
 
 static int handle_orphaned_lock_file(void)
@@ -556,6 +571,7 @@ static struct option opts[] = {
 
 int main(int argc, char *argv[])
 {
+	int ret = EXIT_FAILURE;
 	int systemd_service = 0;
 	int c;
 
@@ -587,21 +603,32 @@ int main(int argc, char *argv[])
 			systemd_service = 1;
 			break;
 		case 'V':
-			show_version();
-			break;
-		case '?':
+			ret = show_version();
+			goto out;
 		case 'h':
+			ret = EXIT_SUCCESS;
+			/* Fall through */
+		case '?':
 		default:
-			usage();
+			usage(ret);
+			goto out;
 		}
+
+	if (argc > optind) {
+		usage(ret);
+		goto out;
+	}
 
 	if (!global_conf.smbconf || !global_conf.pwddb) {
 		pr_err("Out of memory\n");
-		exit(EXIT_FAILURE);
+		goto out;
 	}
 
 	setup_signals(manager_sig_handler);
 	if (!systemd_service)
-		return manager_process_init();
-	return manager_systemd_service();
+		ret = manager_process_init();
+	else
+		ret = manager_systemd_service();
+out:
+	return ret;
 }
