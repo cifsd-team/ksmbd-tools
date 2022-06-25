@@ -75,9 +75,16 @@ static char *__prompt_password_stdin(size_t *sz)
 	}
 
 again:
+	memset(pswd1, 0, MAX_NT_PWD_LEN + 1);
+	memset(pswd2, 0, MAX_NT_PWD_LEN + 1);
+
 	printf("New password: ");
 	term_toggle_echo(0);
 	if (fgets(pswd1, MAX_NT_PWD_LEN, stdin) == NULL) {
+		if (feof(stdin)) {
+			clearerr(stdin);
+			goto skip;
+		}
 		term_toggle_echo(1);
 		pr_err("\nFatal error: %s\n", strerr(errno));
 		free(pswd1);
@@ -87,12 +94,18 @@ again:
 
 	printf("\nRetype new password: ");
 	if (fgets(pswd2, MAX_NT_PWD_LEN, stdin) == NULL) {
+		if (feof(stdin)) {
+			clearerr(stdin);
+			goto skip;
+		}
 		term_toggle_echo(1);
 		pr_err("\nFatal error: %s\n", strerr(errno));
 		free(pswd1);
 		free(pswd2);
 		return NULL;
 	}
+
+skip:
 	term_toggle_echo(1);
 	printf("\n");
 
@@ -112,7 +125,7 @@ again:
 	}
 
 	len = strlen(pswd1);
-	if (len <= 1) {
+	if (!len) {
 		pr_err("No password was provided\n");
 		goto again;
 	}
