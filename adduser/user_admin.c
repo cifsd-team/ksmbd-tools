@@ -125,10 +125,8 @@ skip:
 	}
 
 	len = strlen(pswd1);
-	if (!len) {
-		pr_err("No password was provided\n");
-		goto again;
-	}
+	if (!len)
+		pr_info("No password was provided\n");
 
 	*sz = len;
 	free(pswd2);
