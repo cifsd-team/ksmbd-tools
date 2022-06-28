@@ -1,88 +1,166 @@
 # ksmbd-tools
 
-### Building
+[![Build Status](https://app.travis-ci.com/cifsd-team/ksmbd-tools.svg?branch=master)](https://app.travis-ci.com/cifsd-team/ksmbd-tools)
+[![License](https://img.shields.io/badge/License-GPL_v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
 
-##### Install prerequisite packages:
+[ksmbd-tools](https://github.com/cifsd-team/ksmbd-tools)
+is a collection of userspace utilities for
+[the ksmbd kernel server](https://www.kernel.org/doc/html/latest/filesystems/cifs/ksmbd.html)
+merged to mainline in the Linux 5.15 release.
 
-- For Ubuntu:
-  - `sudo apt-get install autoconf libtool pkg-config libnl-3-dev libnl-genl-3-dev libglib2.0-dev`
+## Table of Contents
 
-- For Fedora, RHEL:
-  - `sudo yum install autoconf automake libtool glib2-devel libnl3-devel`
+- [Building and Installing](#building-and-installing)
+- [Example Usage](#example-usage)
 
-- For CentOS:
-  - `sudo yum install glib2-devel libnl3-devel`
+## Building and Installing
 
-- For openSUSE:
-  - `sudo zypper install glib2-devel libnl3-devel`
+You should first check if your distribution already packages ksmbd-tools,
+and if that is the case, consider installing it from the package manager.
+Otherwise, follow these instructions to build it yourself.
+Either the GNU Autotools or Meson build system can be used.
 
-##### Building:
+Dependencies for Debian and its derivatives:
+```
+git gcc autoconf automake libtool meson libnl-3-dev libnl-genl-3-dev libglib2.0-dev
+```
 
-- clone this repository
-- `cd ksmbd-tools`
-- `./autogen.sh`
-- `./configure`
-- `make`
-- `make install`
+Dependencies for RHEL, its derivatives, and openSUSE:
+```
+git gcc autoconf automake libtool meson libnl3-devel glib2-devel
+```
 
+Autotools build:
+```sh
+git clone https://github.com/cifsd-team/ksmbd-tools.git
+cd ksmbd-tools
+./autogen.sh
+./configure
+make
+sudo make install
+```
 
-### Usage
+Meson build:
+```sh
+git clone https://github.com/cifsd-team/ksmbd-tools.git
+cd ksmbd-tools
+mkdir build
+cd build
+meson ..
+ninja
+sudo ninja install
+```
 
-All administration tasks must be done as root.
+By default, the utilities are in `/usr/local/sbin` and the files they use by
+default are under `/usr/local/etc` in the `ksmbd` directory.
 
-##### Setup:
+If you would like to install ksmbd-tools under `/usr`, where it may conflict
+with your distribution's packages, give `--prefix=/usr` and `--sysconfdir=/etc`
+as options to `configure` or `meson`. In that case, the utilities are in
+`/usr/sbin` and the files they use by default are under `/etc` in the `ksmbd`
+directory.
 
-- Install ksmbd kernel driver
-	- `modprobe ksmbd`
-- Create user/password for SMB share
-	- `mkdir -p /usr/local/etc/ksmbd`
-	- `ksmbd.adduser -a <username>`
-	- Enter password for SMB share access
-- Create `/usr/local/etc/ksmbd/smb.conf` file
-	- Refer `smb.conf.example`
-- Add share to `smb.conf`
-	- This can be done manually or with `ksmbd.addshare`, e.g.:
-	- `ksmbd.addshare -a myshare -o "guest ok = yes, writable = yes, path = /mnt/data"`
+## Example Usage
 
-	- Note: share options (-o) must always be enclosed with double quotes ("...").
-- Start ksmbd user space daemon
-	- `ksmbd.mountd`
-- Access share from Windows or Linux using CIFS
+```sh
+# if you built and installed ksmbd-tools yourself, by default,
+# the utilities are in `/usr/local/sbin',
+# the default user database is `/usr/local/etc/ksmbd/ksmbdpwd.db', and
+# the default config file is `/usr/local/etc/ksmbd/smb.conf'
+#
+# otherwise, most likely,
+# the utilities are in `/usr/sbin',
+# the default user database is `/etc/ksmbd/ksmbdpwd.db', and
+# the default config file is `/etc/ksmbd/smb.conf'
 
+# add a share (case insensitive) to the default config file
+# `--options' takes a single argument, so quote it accordingly in your shell
+# note that the shell expands `$HOME' here, `ksmbd.addshare' will never do it
+# newline is the only safe character to use as an option separator
+sudo ksmbd.addshare --add-share=MyShare --options="
+path = $HOME/MyShare
+read only = no
+"
 
-##### Stopping and restarting the daemon:
+# create the share path directory
+# the share stores files in this directory using its underlying filesystem
+mkdir -vp $HOME/MyShare
 
-First, kill user and kernel space daemon
-  - `ksmbd.control -s`
+# the default config file now looks like this:
+#
+# [myshare]
+#         path = /home/tester/MyShare
+#         read only = no
+#
+# the `[global]' section contains options that are not share specific
+# you can set the default options for all shares by adding them to `[global]'
+# `ksmbd.addshare` cannot edit `[global]', so do it with a text editor
+# see `Documentation/configuration.txt' for more details
 
-Then, to restart the daemon, run:
-  - `ksmbd.mountd`
+# add a user to the default user database
+# you will be prompted for a password
+sudo ksmbd.adduser --add-user=MyUser
 
-Or to shut it down completely:
-  - `rmmod ksmbd`
+# there is no system user called `MyUser' so it has to be mapped to one
+# `map to guest = bad user' in `[global]' would mean map to `nobody' by default
+# or, we can force all users accessing the share to map to a system user and group
 
+# update the options of a share in the default config file
+sudo ksmbd.addshare --update-share=MyShare --options="
+force user = $USER
+force group = $USER
+"
 
-### Debugging
+# the default config file now looks like this:
+#
+# [myshare]
+#         force user = tester
+#         path = /home/tester/MyShare
+#         force group = tester
+#         read only = no
+#
 
-- Enable all component prints
-  - `ksmbd.control -d "all"`
-- Enable a single component (see below)
-  - `ksmbd.control -d "smb"`
-- Run the command with the same component name again to disable it
+# load the kernel module if it is not already loaded
+sudo modprobe ksmbd
 
-Currently available debug components:
-smb, auth, vfs, oplock, ipc, conn, rdma
+# run the user mode and kernel mode daemons
+# all interfaces are listened to by default
+sudo ksmbd.mountd
 
+# mount the new share with cifs-utils and authenticate as the new user
+# you will be prompted for a password
+sudo mount -o user=MyUser //127.0.0.1/MyShare /mnt
 
-### More...
+# you can now access the share at `/mnt'
+sudo touch /mnt/hello_from_cifs_utils
 
-- ksmbd.adduser
-  - Adds (-a), updates (-u), or deletes (-d) a user from user database.
-  - Default database file is `/usr/local/etc/ksmbd/users.db`
+# unmount the share
+sudo umount /mnt
 
-- ksmbd.addshare
-  - Adds (-a), updates (-u), or deletes (-d) a net share from config file.
-  - Default config file is `/usr/local/etc/ksmbd/smb.conf`
+# update the password of a user in the default user database
+# `--password' can be used to give the password instead of prompting
+sudo ksmbd.adduser --update-user=MyUser --password=MyNewPassword
 
-`ksmbd.addshare` does not modify `[global]` section in config file; only net
-share configs are supported at the moment.
+# authenticating with the new password will *not* work unless ksmbd is restarted
+sudo mount -o user=MyUser,pass=MyNewPassword //127.0.0.1/MyShare /mnt
+
+# delete a user from the default user database
+sudo ksmbd.adduser --del-user=MyUser
+
+# authenticating as the deleted user *will* work until ksmbd is restarted
+sudo mount -o user=MyUser //127.0.0.1/MyShare /mnt
+sudo umount /mnt
+
+# this need to restart when updating and deleting users applies to shares as well
+# however, adding new users and shares does not require a restart
+# restarting ksmbd means you run `ksmbd.mountd' again after you shut it down.
+
+# toggle printing of the `all' debug component
+sudo ksmbd.control --debug=all
+
+# shutdown the user and kernel mode daemons
+sudo ksmbd.control --shutdown
+
+# remove the kernel module
+sudo rmmod ksmbd
+```
