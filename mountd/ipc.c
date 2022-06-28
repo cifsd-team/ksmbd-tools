@@ -71,8 +71,8 @@ static int parse_reload_configs(const char *pwddb, const char *smbconf)
 	usm_remove_all_users();
 	ret = cp_parse_pwddb(pwddb);
 	if (ret == -ENOENT) {
-		pr_err("User database file does not exist. %s\n",
-		       "Only guest sessions (if permitted) will work.");
+		pr_info("User database does not exist, "
+			"only guest sessions (if permitted) will work\n");
 	} else if (ret) {
 		pr_err("Unable to parse user database\n");
 		return ret;
@@ -81,7 +81,7 @@ static int parse_reload_configs(const char *pwddb, const char *smbconf)
 	shm_remove_all_shares();
 	ret = cp_parse_reload_smbconf(smbconf);
 	if (ret)
-		pr_err("Unable to parse smb configuration file\n");
+		pr_err("Unable to parse config file\n");
 	return ret;
 }
 

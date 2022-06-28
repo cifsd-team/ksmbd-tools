@@ -309,19 +309,17 @@ static int parse_configs(char *pwddb, char *smbconf)
 
 	ret = cp_parse_pwddb(pwddb);
 	if (ret == -ENOENT) {
-		pr_err("User database file does not exist. %s\n",
-			"Only guest sessions (if permitted) will work.");
+		pr_info("User database does not exist, "
+			"only guest sessions (if permitted) will work\n");
 	} else if (ret) {
 		pr_err("Unable to parse user database\n");
 		return ret;
 	}
 
 	ret = cp_parse_smbconf(smbconf);
-	if (ret) {
-		pr_err("Unable to parse smb configuration file\n");
-		return ret;
-	}
-	return 0;
+	if (ret)
+		pr_err("Unable to parse config file\n");
+	return ret;
 }
 
 static void worker_process_free(void)

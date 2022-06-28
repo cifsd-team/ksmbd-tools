@@ -37,8 +37,8 @@ enum {
 static void usage(int status)
 {
 	fprintf(stderr,
-		"Usage: ksmbd.adduser {-a USER | -u USER} [-p PWD] [-i PWDDB] [-v]\n"
-		"       ksmbd.adduser {-d USER} [-i PWDDB] [-v]\n"
+		"Usage: ksmbd.adduser {-a USER | -u USER} [-p PWD] [-i PWDDB] [-c SMBCONF] [-v]\n"
+		"       ksmbd.adduser {-d USER} [-i PWDDB] [-c SMBCONF] [-v]\n"
 		"       ksmbd.adduser {-V | -h}\n");
 
 	if (status != EXIT_SUCCESS)
@@ -62,6 +62,8 @@ static void usage(int status)
 			"  -i, --import-users=PWDDB    use PWDDB as user database instead of\n"
 			"                              '" PATH_PWDDB "';\n"
 			"                              this option does nothing by itself\n"
+			"  -c, --config=SMBCONF        use SMBCONF as config file instead of\n"
+			"                              '" PATH_SMBCONF "'\n"
 			"  -v, --verbose               be more verbose; unimplemented\n"
 			"  -V, --version               output version information and exit\n"
 			"  -h, --help                  display this help and exit\n"
@@ -75,6 +77,7 @@ static const struct option opts[] = {
 	{"update-user",		required_argument,	NULL,	'u' },
 	{"password",		required_argument,	NULL,	'p' },
 	{"import-users",	required_argument,	NULL,	'i' },
+	{"config",		required_argument,	NULL,	'c' },
 	{"version",		no_argument,		NULL,	'V' },
 	{"verbose",		no_argument,		NULL,	'v' },
 	{"help",		no_argument,		NULL,	'h' },
@@ -87,7 +90,7 @@ static int show_version(void)
 	return EXIT_SUCCESS;
 }
 
-static int parse_configs(char *pwddb)
+static int parse_configs(char *pwddb, char *smbconf)
 {
 	int ret;
 
@@ -98,7 +101,14 @@ static int parse_configs(char *pwddb)
 	ret = cp_parse_pwddb(pwddb);
 	if (ret)
 		return ret;
-	return 0;
+
+	ret = cp_parse_smbconf(smbconf);
+	if (ret == -ENOENT) {
+		pr_info("Config file does not exist, "
+			"cannot check if user is a global guest account\n");
+		return 0;
+	}
+	return ret;
 }
 
 static int sanity_check_user_name_simple(char *uname)
@@ -128,6 +138,7 @@ int main(int argc, char *argv[])
 {
 	int ret = EXIT_FAILURE;
 	char *pwddb = PATH_PWDDB;
+	char *smbconf = PATH_SMBCONF;
 	int c, cmd = 0;
 
 	set_logger_app_name("ksmbd.adduser");
@@ -151,6 +162,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'i':
 			pwddb = g_strdup(optarg);
+			break;
+		case 'c':
+			smbconf = g_strdup(optarg);
 			break;
 		case 'V':
 			ret = show_version();
@@ -198,7 +212,7 @@ int main(int argc, char *argv[])
 		goto out;
 	}
 
-	ret = parse_configs(pwddb);
+	ret = parse_configs(pwddb, smbconf);
 	if (ret) {
 		pr_err("Unable to parse configuration files\n");
 		goto out;

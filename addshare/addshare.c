@@ -102,9 +102,7 @@ static int parse_configs(char *smbconf)
 		return ret;
 
 	ret = cp_smbconfig_hash_create(smbconf);
-	if (ret)
-		return ret;
-	return 0;
+	return ret;
 }
 
 static int sanity_check_share_name_simple(char *name)
