@@ -33,12 +33,12 @@ static int __opendb_file(char *pwddb)
 {
 	conf_fd = open(pwddb, O_WRONLY);
 	if (conf_fd == -1) {
-		pr_err("%s %s\n", strerr(errno), pwddb);
+		pr_err("%m %s\n", pwddb);
 		return -EINVAL;
 	}
 
 	if (ftruncate(conf_fd, 0)) {
-		pr_err("%s %s\n", strerr(errno), pwddb);
+		pr_err("%m %s\n", pwddb);
 		close(conf_fd);
 		return -EINVAL;
 	}
@@ -86,7 +86,7 @@ again:
 			goto skip;
 		}
 		term_toggle_echo(1);
-		pr_err("\nFatal error: %s\n", strerr(errno));
+		pr_err("\nFatal error: %m\n");
 		free(pswd1);
 		free(pswd2);
 		return NULL;
@@ -99,7 +99,7 @@ again:
 			goto skip;
 		}
 		term_toggle_echo(1);
-		pr_err("\nFatal error: %s\n", strerr(errno));
+		pr_err("\nFatal error: %m\n");
 		free(pswd1);
 		free(pswd2);
 		return NULL;
@@ -237,7 +237,7 @@ static void write_user(struct ksmbd_user *user)
 		if (ret == -1) {
 			if (errno == EINTR)
 				continue;
-			pr_err("%s\n", strerr(errno));
+			pr_err("%m\n");
 			exit(EXIT_FAILURE);
 		}
 

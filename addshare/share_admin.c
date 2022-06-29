@@ -44,12 +44,12 @@ static int __open_smbconf(char *smbconf)
 {
 	conf_fd = open(smbconf, O_WRONLY);
 	if (conf_fd == -1) {
-		pr_err("%s %s\n", strerr(errno), smbconf);
+		pr_err("%m %s\n", smbconf);
 		return -EINVAL;
 	}
 
 	if (ftruncate(conf_fd, 0)) {
-		pr_err("%s %s\n", strerr(errno), smbconf);
+		pr_err("%m %s\n", smbconf);
 		close(conf_fd);
 		return -EINVAL;
 	}
@@ -66,7 +66,7 @@ static void __write(void)
 		if (ret == -1) {
 			if (errno == EINTR)
 				continue;
-			pr_err("%s\n", strerr(errno));
+			pr_err("%m\n");
 			exit(EXIT_FAILURE);
 		}
 

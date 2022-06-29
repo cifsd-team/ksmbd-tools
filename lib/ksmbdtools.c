@@ -229,7 +229,7 @@ static void send_signal_to_ksmbd_daemon(int signo)
 		return;
 
 	if (read(lock_fd, &manager_pid, sizeof(manager_pid)) == -1) {
-		pr_debug("Unable to read main PID: %s\n", strerr(errno));
+		pr_debug("Unable to read main PID: %m\n");
 		close(lock_fd);
 		return;
 	}
@@ -240,8 +240,7 @@ static void send_signal_to_ksmbd_daemon(int signo)
 
 	pr_debug("Send %d to pid %d\n", signo, pid);
 	if (kill(pid, signo))
-		pr_debug("Unable to send signal to pid %d: %s\n",
-			 pid, strerr(errno));
+		pr_debug("Unable to send signal to pid %d: %m\n", pid);
 }
 
 void notify_ksmbd_daemon(void)
@@ -263,6 +262,6 @@ int test_file_access(char *conf)
 		return 0;
 	}
 
-	pr_err("%s %s\n", conf, strerr(errno));
+	pr_err("%s %m\n", conf);
 	return -EINVAL;
 }
