@@ -85,11 +85,28 @@ again:
 			clearerr(stdin);
 			goto skip;
 		}
+
 		term_toggle_echo(1);
-		pr_err("\nFatal error: %s\n", strerr(errno));
+		g_print("\n");
+		pr_err("Fatal error: %s\n", strerr(errno));
 		free(pswd1);
 		free(pswd2);
 		return NULL;
+	}
+
+	if (pswd1[MAX_NT_PWD_LEN - 1] != 0x00 &&
+		pswd1[MAX_NT_PWD_LEN - 1] != '\n') {
+		int c;
+
+		while ((c = fgetc(stdin)) != '\n')
+			if (c == EOF)
+				break;
+
+		term_toggle_echo(1);
+		g_print("\n");
+		pr_err("Password exceeds maximum length %d\n",
+		       MAX_NT_PWD_LEN - 1);
+		goto again;
 	}
 
 	g_print("\nRetype new password: ");
@@ -98,11 +115,28 @@ again:
 			clearerr(stdin);
 			goto skip;
 		}
+
 		term_toggle_echo(1);
-		pr_err("\nFatal error: %s\n", strerr(errno));
+		g_print("\n");
+		pr_err("Fatal error: %s\n", strerr(errno));
 		free(pswd1);
 		free(pswd2);
 		return NULL;
+	}
+
+	if (pswd2[MAX_NT_PWD_LEN - 1] != 0x00 &&
+		pswd2[MAX_NT_PWD_LEN - 1] != '\n') {
+		int c;
+
+		while ((c = fgetc(stdin)) != '\n')
+			if (c == EOF)
+				break;
+
+		term_toggle_echo(1);
+		g_print("\n");
+		pr_err("Password exceeds maximum length %d\n",
+		       MAX_NT_PWD_LEN - 1);
+		goto again;
 	}
 
 skip:
