@@ -46,17 +46,17 @@ static void usage(int status)
 		"       ksmbd.mountd {-V | -h}\n");
 
 	if (status != EXIT_SUCCESS)
-		g_printerr("Try 'ksmbd.mountd --help' for more information.\n");
+		g_printerr("Try `ksmbd.mountd --help' for more information.\n");
 	else
 		g_printerr(
 			"Run ksmbd.mountd user mode and ksmbd kernel mode daemons.\n"
 			"\n"
 			"Mandatory arguments to long options are mandatory for short options too.\n"
-			"  -p, --port=NUMBER       bind to TCP port NUMBER instead of '" STR(KSMBD_CONF_DEFAULT_TCP_PORT) "'\n"
+			"  -p, --port=NUMBER       bind to TCP port NUMBER instead of " STR(KSMBD_CONF_DEFAULT_TCP_PORT) "\n"
 			"  -c, --config=SMBCONF    use SMBCONF as config file instead of\n"
-			"                          '" PATH_SMBCONF "'\n"
+			"                          `" PATH_SMBCONF "'\n"
 			"  -u, --users=PWDDB       use PWDDB as user database instead of\n"
-			"                          '" PATH_PWDDB "'\n"
+			"                          `" PATH_PWDDB "'\n"
 			"  -n, --nodetach[=WAY]    do not detach process from foreground;\n"
 			"                          WAY is 1 by default;\n"
 			"                          if WAY is 1 also become process group leader;\n"

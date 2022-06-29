@@ -43,7 +43,7 @@ static void usage(int status)
 		"       ksmbd.addshare {-V | -h}\n");
 
 	if (status != EXIT_SUCCESS)
-		g_printerr("Try 'ksmbd.addshare --help' for more information.\n");
+		g_printerr("Try `ksmbd.addshare --help' for more information.\n");
 	else {
 		g_printerr(
 			"Configure shares for config file of ksmbd.mountd user mode daemon.\n"
@@ -51,22 +51,24 @@ static void usage(int status)
 			"Mandatory arguments to long options are mandatory for short options too.\n"
 			"  -a, --add-share=SHARE       add SHARE to config file;\n"
 			"                              SHARE is 1 to " STR(KSMBD_REQ_MAX_SHARE_NAME) " characters;\n"
-			"                              SHARE cannot be 'global';\n"
-			"                              you must also give option 'options'\n"
+			"                              SHARE cannot be `global';\n"
+			"                              you must also give option `options'\n"
 			"  -d, --del-share=SHARE       delete SHARE from config file;\n"
 			"                              you must restart ksmbd for changes to take effect\n"
 			"  -u, --update-share=SHARE    update SHARE in config file;\n"
-			"                              you must also give option 'options';\n"
+			"                              you must also give option `options';\n"
 			"                              you must restart ksmbd for changes to take effect\n"
 			"  -o, --options=OPTIONS       provide OPTIONS for share;\n"
-			"                              OPTIONS has format 'key1=val1 key2=val2'\n"
+			"                              OPTIONS is one argument and has format\n"
+			"                              `1st op = 1st val<newline>2nd op = 2nd val...';\n"
+			"                              separators other than newline create ambiguity\n"
 			"  -c, --config=SMBCONF        use SMBCONF as config file instead of\n"
-			"                              '" PATH_SMBCONF "'\n"
+			"                              `" PATH_SMBCONF "'\n"
 			"  -v, --verbose               be more verbose; unimplemented\n"
 			"  -V, --version               output version information and exit\n"
 			"  -h, --help                  display this help and exit\n"
 			"\n"
-			"The following OPTIONS are supported:\n");
+			"Following options are supported for use in OPTIONS:\n");
 		for (i = 0; i < KSMBD_SHARE_CONF_MAX; i++)
 			g_printerr("  %s\n", KSMBD_SHARE_CONF[i]);
 		g_printerr(

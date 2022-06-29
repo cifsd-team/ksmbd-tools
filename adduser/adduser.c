@@ -42,7 +42,7 @@ static void usage(int status)
 		"       ksmbd.adduser {-V | -h}\n");
 
 	if (status != EXIT_SUCCESS)
-		g_printerr("Try 'ksmbd.adduser --help' for more information.\n");
+		g_printerr("Try `ksmbd.adduser --help' for more information.\n");
 	else
 		g_printerr(
 			"Configure users for user database of ksmbd.mountd user mode daemon.\n"
@@ -50,20 +50,20 @@ static void usage(int status)
 			"Mandatory arguments to long options are mandatory for short options too.\n"
 			"  -a, --add-user=USER         add USER to user database;\n"
 			"                              USER is 1 to " STR(KSMBD_REQ_MAX_ACCOUNT_NAME_SZ) " characters;\n"
-			"                              USER cannot contain ':' or '\\n';\n"
-			"                              USER cannot be 'root'\n"
+			"                              USER cannot contain `:' or newline;\n"
+			"                              USER cannot be `root'\n"
 			"  -d, --del-user=USER         delete USER from user database;\n"
 			"                              you must restart ksmbd for changes to take effect\n"
 			"  -u, --update-user=USER      update USER in user database;\n"
 			"                              you must restart ksmbd for changes to take effect\n"
 			"  -p, --password=PWD          provide PWD for user;\n"
 			"                              PWD is 0 to " STR(MAX_NT_PWD_LEN) " characters;\n"
-			"                              PWD cannot contain '\\n'\n"
+			"                              PWD cannot contain newline\n"
 			"  -i, --import-users=PWDDB    use PWDDB as user database instead of\n"
-			"                              '" PATH_PWDDB "';\n"
+			"                              `" PATH_PWDDB "';\n"
 			"                              this option does nothing by itself\n"
 			"  -c, --config=SMBCONF        use SMBCONF as config file instead of\n"
-			"                              '" PATH_SMBCONF "'\n"
+			"                              `" PATH_SMBCONF "'\n"
 			"  -v, --verbose               be more verbose; unimplemented\n"
 			"  -V, --version               output version information and exit\n"
 			"  -h, --help                  display this help and exit\n"

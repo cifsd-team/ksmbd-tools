@@ -17,7 +17,7 @@ static void usage(int status)
 	g_printerr("Usage: ksmbd.control {-s | -d COMPONENT | -c | -V | -h}\n");
 
 	if (status != EXIT_SUCCESS)
-		g_printerr("Try 'ksmbd.control --help' for more information.\n");
+		g_printerr("Try `ksmbd.control --help' for more information.\n");
 	else
 		g_printerr(
 			"Control ksmbd.mountd user mode and ksmbd kernel mode daemons.\n"
@@ -25,8 +25,8 @@ static void usage(int status)
 			"Mandatory arguments to long options are mandatory for short options too.\n"
 			"  -s, --shutdown           shutdown ksmbd.mountd and ksmbd and exit\n"
 			"  -d, --debug=COMPONENT    toggle debug printing for COMPONENT and exit;\n"
-			"                           COMPONENT is 'all', 'smb', 'auth', 'vfs',\n"
-			"                           'oplock', 'ipc', 'conn', or 'rdma';\n"
+			"                           COMPONENT is `all', `smb', `auth', `vfs',\n"
+			"                           `oplock', `ipc', `conn', or `rdma';\n"
 			"                           output also status of all components;\n"
 			"                           enabled components are enclosed in brackets\n"
 			"  -c, --ksmbd-version      output ksmbd version information and exit\n"
