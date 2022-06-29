@@ -43,6 +43,7 @@ int smb_read_sid(struct ksmbd_dcerpc *dce, struct smb_sid *sid)
 	for (i = 0; i < sid->num_subauth; ++i)
 		if (ndr_read_int32(dce, &sid->sub_auth[i]))
 			return -EINVAL;
+	return 0;
 }
 
 void smb_write_sid(struct ksmbd_dcerpc *dce, const struct smb_sid *src)
