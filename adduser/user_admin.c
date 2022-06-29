@@ -80,7 +80,7 @@ again:
 
 	g_print("New password: ");
 	term_toggle_echo(0);
-	if (fgets(pswd1, MAX_NT_PWD_LEN, stdin) == NULL) {
+	if (fgets(pswd1, MAX_NT_PWD_LEN + 1, stdin) == NULL) {
 		if (feof(stdin)) {
 			clearerr(stdin);
 			goto skip;
@@ -93,7 +93,7 @@ again:
 	}
 
 	g_print("\nRetype new password: ");
-	if (fgets(pswd2, MAX_NT_PWD_LEN, stdin) == NULL) {
+	if (fgets(pswd2, MAX_NT_PWD_LEN + 1, stdin) == NULL) {
 		if (feof(stdin)) {
 			clearerr(stdin);
 			goto skip;
