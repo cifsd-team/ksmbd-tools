@@ -123,7 +123,7 @@ static int log_level = PR_INFO;
  */
 char *strerr(int err);
 
-__attribute__ ((format (printf, 2, 3)))
+G_GNUC_PRINTF(2, 3)
 extern void __pr_log(int level, const char *fmt, ...);
 extern void set_logger_app_name(const char *an);
 extern const char *get_logger_app_name(void);

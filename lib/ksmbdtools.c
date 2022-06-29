@@ -40,6 +40,7 @@ static int syslog_level(int level)
 	return LOG_ERR;
 }
 
+G_GNUC_PRINTF(2, 0)
 static void __pr_log_stdio(int level, const char *fmt, va_list list)
 {
 	char buf[1024];
@@ -48,6 +49,7 @@ static void __pr_log_stdio(int level, const char *fmt, va_list list)
 	printf("%s", buf);
 }
 
+G_GNUC_PRINTF(2, 0)
 static void __pr_log_syslog(int level, const char *fmt, va_list list)
 {
 	vsyslog(syslog_level(level), fmt, list);
