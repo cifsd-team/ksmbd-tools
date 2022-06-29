@@ -65,15 +65,6 @@ const char *get_logger_app_name(void)
 	return app_name;
 }
 
-char *strerr(int err)
-{
-	static char __thread buf[64];
-
-	strerror_r(err, buf, sizeof(buf));
-	buf[sizeof(buf) - 1] = 0x00;
-	return buf;
-}
-
 void __pr_log(int level, const char *fmt, ...)
 {
 	va_list list;

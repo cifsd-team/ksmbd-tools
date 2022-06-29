@@ -116,13 +116,6 @@ static int log_level = PR_INFO;
 #define PR_LOGGER_STDIO         0
 #define PR_LOGGER_SYSLOG        1
 
-/*
- * A thread-safe strerror() wrapper, uses static TLS buffer.
- * NOTE: a signal handler can concurrent modify the buffer,
- * but the buffer should always be nul-terminated.
- */
-char *strerr(int err);
-
 __attribute__ ((format (printf, 2, 3)))
 extern void __pr_log(int level, const char *fmt, ...);
 extern void set_logger_app_name(const char *an);
