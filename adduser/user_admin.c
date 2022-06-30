@@ -160,7 +160,7 @@ skip:
 
 	len = strlen(pswd1);
 	if (!len)
-		pr_info("No password was provided\n");
+		pr_info("Empty password was provided\n");
 
 	*sz = len;
 	free(pswd2);
@@ -173,6 +173,13 @@ static char *prompt_password(size_t *sz)
 		return __prompt_password_stdin(sz);
 
 	*sz = strlen(arg_password);
+	if (!*sz)
+		pr_info("Empty password was provided\n");
+	else if (*sz >= MAX_NT_PWD_LEN) {
+		pr_err("Password exceeds maximum length %d\n",
+				MAX_NT_PWD_LEN - 1);
+		exit(EXIT_FAILURE);
+	}
 	return arg_password;
 }
 
