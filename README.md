@@ -101,9 +101,8 @@ mkdir -vp $HOME/MyShare
 # you will be prompted for a password
 sudo ksmbd.adduser --add-user=MyUser
 
-# there is no system user called `MyUser' so it has to be mapped to one
-# `map to guest = bad user' in `[global]' would mean map to `nobody' by default
-# or, we can force all users accessing the share to map to a system user and group
+# there is no UNIX user called `MyUser' so it has to be mapped to one
+# we can force all users accessing the share to map to a UNIX user and group
 
 # update the options of a share in the default config file
 sudo ksmbd.addshare --update-share=MyShare --options="
@@ -152,8 +151,8 @@ sudo mount -o user=MyUser //127.0.0.1/MyShare /mnt
 sudo umount /mnt
 
 # this need to restart when updating and deleting users applies to shares as well
-# however, adding new users and shares does not require a restart
-# restarting ksmbd means you run `ksmbd.mountd' again after you shut it down.
+# however, adding new users and shares does *not* require a restart
+# restarting ksmbd means you run `ksmbd.mountd' again after you shut it down
 
 # toggle printing of the `all' debug component
 sudo ksmbd.control --debug=all
