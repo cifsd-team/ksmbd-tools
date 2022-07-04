@@ -35,3 +35,5 @@ subdir('addshare')
 subdir('adduser')
 subdir('control')
 subdir('mountd')
+
+install_data(sources: 'smb.conf.example', install_dir: get_option('sysconfdir') / 'ksmbd')

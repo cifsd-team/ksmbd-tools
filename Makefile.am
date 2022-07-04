@@ -8,6 +8,8 @@ SUBDIRS = lib mountd adduser addshare control
 EXTRA_DIST =			\
 	include			\
 	Documentation		\
-	smb.conf.example	\
 	ksmbd-tools.spec	\
 	ksmbd.service
+
+pkgsysconfdir = $(sysconfdir)/ksmbd
+dist_pkgsysconf_DATA = smb.conf.example
