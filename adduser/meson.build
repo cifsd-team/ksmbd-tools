@@ -5,7 +5,10 @@ adduser = executable(
   'adduser.c',
   'md4_hash.h',
   'user_admin.h',
-  dependencies: [glib_dep, netlink_dep],
+  dependencies: [
+    glib_dep,
+    libnl_dep,
+  ],
   include_directories: tools_incdir,
   link_with: libksmbdtools,
   install: true,

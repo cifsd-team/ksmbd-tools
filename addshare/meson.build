@@ -3,7 +3,10 @@ addshare = executable(
   'share_admin.c',
   'addshare.c',
   'share_admin.h',
-  dependencies: [glib_dep, netlink_dep],
+  dependencies: [
+    glib_dep,
+    libnl_dep,
+  ],
   include_directories: tools_incdir,
   link_with: libksmbdtools,
   install: true,

@@ -9,7 +9,10 @@ mountd = executable(
   'smbacl.c',
   'rpc_samr.c',
   'rpc_lsarpc.c',
-  dependencies: [glib_dep, netlink_dep],
+  dependencies: [
+    glib_dep,
+    libnl_dep,
+  ],
   include_directories: tools_incdir,
   link_with: libksmbdtools,
   install: true,
