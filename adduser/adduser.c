@@ -52,10 +52,8 @@ static void usage(int status)
 			"                              USER is 1 to " STR(KSMBD_REQ_MAX_ACCOUNT_NAME_SZ) " characters;\n"
 			"                              USER cannot contain `:' or newline;\n"
 			"                              USER cannot be `root'\n"
-			"  -d, --del-user=USER         delete USER from user database;\n"
-			"                              you must restart ksmbd for changes to take effect\n"
-			"  -u, --update-user=USER      update USER in user database;\n"
-			"                              you must restart ksmbd for changes to take effect\n"
+			"  -d, --del-user=USER         delete USER from user database\n"
+			"  -u, --update-user=USER      update USER in user database\n"
 			"  -p, --password=PWD          provide PWD for user;\n"
 			"                              PWD is 0 to " STR(MAX_NT_PWD_LEN) " characters;\n"
 			"                              PWD cannot contain newline\n"
@@ -225,10 +223,7 @@ int main(int argc, char *argv[])
 	if (cmd == COMMAND_UPDATE_USER)
 		ret = command_update_user(pwddb, arg_account, arg_password);
 
-	/*
-	 * We support only ADD_USER command at this moment
-	 */
-	if (ret == 0 && cmd == COMMAND_ADD_USER)
+	if (cmd && !ret)
 		notify_ksmbd_daemon();
 out:
 	shm_destroy();

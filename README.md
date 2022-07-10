@@ -82,6 +82,10 @@ respectively.
 # the default user database is `/etc/ksmbd/ksmbdpwd.db', and
 # the default config file is `/etc/ksmbd/smb.conf'
 
+# create the share path directory
+# the share stores files in this directory using its underlying filesystem
+mkdir -vp $HOME/MyShare
+
 # add a share (case insensitive) to the default config file
 # `--options' takes a single argument, so quote it accordingly in your shell
 # note that the shell expands `$HOME' here, `ksmbd.addshare' will never do it
@@ -91,10 +95,6 @@ path = $HOME/MyShare
 read only = no
 "
 
-# create the share path directory
-# the share stores files in this directory using its underlying filesystem
-mkdir -vp $HOME/MyShare
-
 # the default config file now looks like this:
 #
 # [myshare]
@@ -103,7 +103,7 @@ mkdir -vp $HOME/MyShare
 #
 # the `[global]' section contains options that are not share specific
 # you can set the default options for all shares by adding them to `[global]'
-# `ksmbd.addshare` cannot edit `[global]', so do it with a text editor
+# `ksmbd.addshare' cannot edit `[global]', so do it with a text editor
 # see `Documentation/configuration.txt' for more details
 
 # add a user to the default user database
@@ -149,22 +149,18 @@ sudo umount /mnt
 # `--password' can be used to give the password instead of prompting
 sudo ksmbd.adduser --update-user=MyUser --password=MyNewPassword
 
-# authenticating with the new password will *not* work unless ksmbd is restarted
-sudo mount -o user=MyUser,pass=MyNewPassword //127.0.0.1/MyShare /mnt
-
 # delete a user from the default user database
 sudo ksmbd.adduser --del-user=MyUser
 
-# authenticating as the deleted user *will* work until ksmbd is restarted
-sudo mount -o user=MyUser //127.0.0.1/MyShare /mnt
-sudo umount /mnt
+# utilities notify ksmbd of changes by sending SIGHUP to the manager process
+# you can do this manually as well
+sudo kill -HUP $(cat /tmp/ksmbd.lock)
 
-# this need to restart when updating and deleting users applies to shares as well
-# however, adding new users and shares does *not* require a restart
-# restarting ksmbd means you run `ksmbd.mountd' again after you shut it down
-
-# toggle printing of the `all' debug component
+# toggle debug printing of the `all' component
 sudo ksmbd.control --debug=all
+
+# some config file changes require restarting ksmbd
+# restarting ksmbd means you run `ksmbd.mountd' again after you shut it down
 
 # shutdown the user and kernel mode daemons
 sudo ksmbd.control --shutdown

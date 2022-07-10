@@ -53,11 +53,9 @@ static void usage(int status)
 			"                              SHARE is 1 to " STR(KSMBD_REQ_MAX_SHARE_NAME) " characters;\n"
 			"                              SHARE cannot be `global';\n"
 			"                              you must also give option `options'\n"
-			"  -d, --del-share=SHARE       delete SHARE from config file;\n"
-			"                              you must restart ksmbd for changes to take effect\n"
+			"  -d, --del-share=SHARE       delete SHARE from config file\n"
 			"  -u, --update-share=SHARE    update SHARE in config file;\n"
-			"                              you must also give option `options';\n"
-			"                              you must restart ksmbd for changes to take effect\n"
+			"                              you must also give option `options'\n"
 			"  -o, --options=OPTIONS       provide OPTIONS for share;\n"
 			"                              OPTIONS is one argument and has format\n"
 			"                              `1st op = 1st val<newline>2nd op = 2nd val...';\n"
@@ -206,10 +204,7 @@ int main(int argc, char *argv[])
 	if (cmd == COMMAND_UPDATE_SHARE)
 		ret = command_update_share(smbconf, arg_name, arg_opts);
 
-	/*
-	 * We support only ADD_SHARE command for the time being
-	 */
-	if (ret == 0 && cmd == COMMAND_ADD_SHARE)
+	if (cmd && !ret)
 		notify_ksmbd_daemon();
 out:
 	cp_smbconfig_destroy();
