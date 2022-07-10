@@ -26,6 +26,11 @@ libnl_dep = dependency(
   'libnl-genl-3.0',
   version: '>= 3.0',
 )
+systemd_dep = dependency(
+  'systemd',
+  required: false,
+  version: '>= 245',
+)
 krb5_dep = dependency(
   get_option('krb5_name'),
   required: get_option('krb5'),
@@ -103,4 +108,19 @@ subdir('mountd')
 install_data(
   sources: 'smb.conf.example',
   install_dir: get_option('sysconfdir') / 'ksmbd',
+)
+
+systemdsystemunitdir = get_option('systemdsystemunitdir')
+if systemdsystemunitdir == ''
+  systemdsystemunitdir = systemd_dep.get_variable(
+    pkgconfig: 'systemdsystemunitdir',
+    default_value: '',
+  )
+endif
+
+configure_file(
+  input: 'ksmbd.service.in',
+  output: 'ksmbd.service',
+  configuration: {'sbindir': get_option('prefix') / get_option('sbindir')},
+  install_dir: systemdsystemunitdir,
 )

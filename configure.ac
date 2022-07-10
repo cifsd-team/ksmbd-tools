@@ -21,6 +21,7 @@ AC_PROG_CC
 AC_PROG_CC_STDC
 AM_SILENT_RULES([yes])
 AC_PROG_LIBTOOL
+AC_PROG_SED
 
 AC_ARG_ENABLE([krb5],
               [AC_HELP_STRING([--enable-krb5], [Enable Kerberos 5 authentication @<:@default=no@:>@])],
@@ -44,6 +45,22 @@ AS_IF([test "x$enable_krb5" != xno], [
 		])
 	])
 ])
+
+AC_ARG_WITH([systemdsystemunitdir],
+            [AC_HELP_STRING([--with-systemdsystemunitdir@<:@=DIR@:>@],
+                            [Install systemd unit file to DIR (query pkg-config by default)])],
+            [with_systemdsystemunitdir=$withval],
+            [with_systemdsystemunitdir=yes])
+
+AS_IF([test "x$with_systemdsystemunitdir" != xno], [
+	AS_IF([test "x$with_systemdsystemunitdir" = xyes], [
+		PKG_CHECK_VAR([systemdsystemunitdir], [systemd >= 245], [systemdsystemunitdir], [], [])
+	], [
+		systemdsystemunitdir=$with_systemdsystemunitdir
+	])
+])
+
+AC_SUBST([systemdsystemunitdir])
 
 PKG_CHECK_MODULES([GLIB], [glib-2.0 >= 2.40], [have_glib=yes], [have_glib=no])
 AS_IF([test "x$have_glib" != xyes], [

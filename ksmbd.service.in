@@ -7,9 +7,9 @@ After=modprobe@ksmbd.service network.target network-online.target
 [Service]
 Type=forking
 PIDFile=/tmp/ksmbd.lock
-ExecStart=/usr/local/sbin/ksmbd.mountd
+ExecStart=@sbindir@/ksmbd.mountd
 ExecReload=/bin/kill -HUP $MAINPID
-ExecStop=/usr/local/sbin/ksmbd.control --shutdown
+ExecStop=@sbindir@/ksmbd.control --shutdown
 
 [Install]
 WantedBy=multi-user.target

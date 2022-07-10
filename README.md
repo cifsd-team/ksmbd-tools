@@ -60,6 +60,15 @@ as options to `configure` or `meson`. In that case, the utilities are in
 `/usr/sbin` and the files they use by default are under `/etc` in the `ksmbd`
 directory.
 
+If you have systemd and it meets at least the minimum version required, the
+build will install the `ksmbd.service` unit file. The unit file supports the
+usual unit commands and handles loading of the kernel module. Note that the
+location of the unit file may conflict with ksmbd-tools installed using the
+package manager. You can bypass the version check and choose the unit file
+directory yourself by giving `--with-systemdsystemunitdir=DIR` and
+`-Dsystemdsystemunitdir=DIR` as an option to `configure` or `meson`,
+respectively.
+
 ## Example Usage
 
 ```sh

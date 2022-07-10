@@ -1,4 +1,10 @@
 option(
+  'systemdsystemunitdir',
+  type: 'string',
+  description: 'Directory to install systemd unit file (query pkg-config by default)',
+)
+
+option(
   'krb5',
   type: 'feature',
   value: 'disabled',
