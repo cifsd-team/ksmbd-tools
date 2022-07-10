@@ -61,7 +61,6 @@ static void usage(int status)
 			"                          WAY is 1 by default;\n"
 			"                          if WAY is 1 also become process group leader;\n"
 			"                          if WAY is 0 detach\n"
-			"  -s, --systemd           run in systemd service mode\n"
 			"  -V, --version           output version information and exit\n"
 			"  -h, --help              display this help and exit\n"
 			"\n"
@@ -546,22 +545,10 @@ out:
 	return 0;
 }
 
-static int manager_systemd_service(void)
-{
-	pid_t __pid;
-
-	__pid = start_worker_process(manager_process_init);
-	if (__pid < 0)
-		return -EINVAL;
-
-	return 0;
-}
-
 static struct option opts[] = {
 	{"port",	required_argument,	NULL,	'p' },
 	{"config",	required_argument,	NULL,	'c' },
 	{"users",	required_argument,	NULL,	'u' },
-	{"systemd",	no_argument,		NULL,	's' },
 	{"nodetach",	optional_argument,	NULL,	'n' },
 	{"help",	no_argument,		NULL,	'h' },
 	{"version",	no_argument,		NULL,	'V' },
@@ -571,7 +558,6 @@ static struct option opts[] = {
 int main(int argc, char *argv[])
 {
 	int ret = EXIT_FAILURE;
-	int systemd_service = 0;
 	int c;
 
 	set_logger_app_name("ksmbd.mountd");
@@ -580,7 +566,7 @@ int main(int argc, char *argv[])
 	global_conf.smbconf = PATH_SMBCONF;
 	pr_logger_init(PR_LOGGER_STDIO);
 
-	while ((c = getopt_long(argc, argv, "n::p:c:u:sVh", opts, NULL)) != EOF)
+	while ((c = getopt_long(argc, argv, "n::p:c:u:Vh", opts, NULL)) != EOF)
 		switch (c) {
 		case 'p':
 			global_conf.tcp_port = cp_get_group_kv_long(optarg);
@@ -597,9 +583,6 @@ int main(int argc, char *argv[])
 				no_detach = 1;
 			else
 				no_detach = cp_get_group_kv_long(optarg);
-			break;
-		case 's':
-			systemd_service = 1;
 			break;
 		case 'V':
 			ret = show_version();
@@ -624,10 +607,7 @@ int main(int argc, char *argv[])
 	}
 
 	setup_signals(manager_sig_handler);
-	if (!systemd_service)
-		ret = manager_process_init();
-	else
-		ret = manager_systemd_service();
+	ret = manager_process_init();
 out:
 	return ret;
 }
