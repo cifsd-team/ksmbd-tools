@@ -42,7 +42,7 @@ typedef int (*worker_fn)(void);
 static void usage(int status)
 {
 	g_printerr(
-		"Usage: ksmbd.mountd [-p NUMBER] [-c SMBCONF] [-u PWDDB] [-n[WAY]] [-s]\n"
+		"Usage: ksmbd.mountd [-p NUMBER] [-c SMBCONF] [-u PWDDB] [-n[WAY]]\n"
 		"       ksmbd.mountd {-V | -h}\n");
 
 	if (status != EXIT_SUCCESS)
@@ -58,9 +58,8 @@ static void usage(int status)
 			"  -u, --users=PWDDB       use PWDDB as user database instead of\n"
 			"                          `" PATH_PWDDB "'\n"
 			"  -n, --nodetach[=WAY]    do not detach process from foreground;\n"
-			"                          WAY is 1 by default;\n"
-			"                          if WAY is 1 also become process group leader;\n"
-			"                          if WAY is 0 detach\n"
+			"                          if WAY is 1, become process group leader (default);\n"
+			"                          if WAY is 0, detach\n"
 			"  -V, --version           output version information and exit\n"
 			"  -h, --help              display this help and exit\n"
 			"\n"
@@ -487,15 +486,8 @@ static int manager_process_init(void)
 			pr_err("Daemonization failed\n");
 			goto out;
 		}
-	} else {
-		/*
-		 * Make ourselves a process group leader; if we are
-		 * the group leader already then the function will do
-		 * nothing (apart from setting errnor to EPERM).
-		 */
-		if (no_detach == 1)
-			setsid();
-	}
+	} else if (no_detach == 1)
+		setpgid(0, 0);
 
 	if (create_lock_file()) {
 		pr_err("Failed to create lock file: %m\n");
