@@ -364,7 +364,7 @@ int command_add_user(char *pwddb, char *account, char *password)
 	pswd = get_hashed_b64_password();
 	if (!pswd) {
 		pr_err("Out of memory\n");
-		return -EINVAL;
+		return -ENOMEM;
 	}
 
 	/* pswd is already g_strdup-ed */
@@ -400,7 +400,7 @@ int command_update_user(char *pwddb, char *account, char *password)
 	if (!pswd) {
 		pr_err("Out of memory\n");
 		put_ksmbd_user(user);
-		return -EINVAL;
+		return -ENOMEM;
 	}
 
 	if (usm_update_user_password(user, pswd)) {

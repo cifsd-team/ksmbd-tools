@@ -70,7 +70,7 @@ static void usage(int status)
 static int show_version(void)
 {
 	g_print("ksmbd-tools version : %s\n", KSMBD_TOOLS_VERSION);
-	return EXIT_SUCCESS;
+	return 0;
 }
 
 static int handle_orphaned_lock_file(void)
@@ -467,7 +467,7 @@ static pid_t start_worker_process(worker_fn fn)
 		return -EINVAL;
 	}
 	if (__pid == 0) {
-		status = fn();
+		status = fn() ? EXIT_FAILURE : EXIT_SUCCESS;
 		exit(status);
 	}
 	return __pid;
@@ -557,7 +557,7 @@ static struct option opts[] = {
 
 int main(int argc, char *argv[])
 {
-	int ret = EXIT_FAILURE;
+	int ret = -EINVAL;
 	int c;
 
 	set_logger_app_name("ksmbd.mountd");
@@ -588,16 +588,16 @@ int main(int argc, char *argv[])
 			ret = show_version();
 			goto out;
 		case 'h':
-			ret = EXIT_SUCCESS;
+			ret = 0;
 			/* Fall through */
 		case '?':
 		default:
-			usage(ret);
+			usage(ret ? EXIT_FAILURE : EXIT_SUCCESS);
 			goto out;
 		}
 
 	if (argc > optind) {
-		usage(ret);
+		usage(ret ? EXIT_FAILURE : EXIT_SUCCESS);
 		goto out;
 	}
 
@@ -609,5 +609,5 @@ int main(int argc, char *argv[])
 	setup_signals(manager_sig_handler);
 	ret = manager_process_init();
 out:
-	return ret;
+	return ret ? EXIT_FAILURE : EXIT_SUCCESS;
 }

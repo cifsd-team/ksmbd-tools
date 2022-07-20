@@ -90,7 +90,7 @@ static const struct option opts[] = {
 static int show_version(void)
 {
 	g_print("ksmbd-tools version : %s\n", KSMBD_TOOLS_VERSION);
-	return EXIT_SUCCESS;
+	return 0;
 }
 
 static int parse_configs(char *smbconf)
@@ -126,7 +126,7 @@ static int sanity_check_share_name_simple(char *name)
 
 int main(int argc, char *argv[])
 {
-	int ret = EXIT_FAILURE;
+	int ret = -EINVAL;
 	char *smbconf = PATH_SMBCONF;
 	int c, cmd = 0;
 
@@ -158,16 +158,16 @@ int main(int argc, char *argv[])
 		case 'v':
 			break;
 		case 'h':
-			ret = EXIT_SUCCESS;
+			ret = 0;
 			/* Fall through */
 		case '?':
 		default:
-			usage(ret);
+			usage(ret ? EXIT_FAILURE : EXIT_SUCCESS);
 			goto out;
 		}
 
 	if (argc < 2 || argc > optind) {
-		usage(ret);
+		usage(ret ? EXIT_FAILURE : EXIT_SUCCESS);
 		goto out;
 	}
 
@@ -208,5 +208,5 @@ int main(int argc, char *argv[])
 		notify_ksmbd_daemon();
 out:
 	cp_smbconfig_destroy();
-	return ret;
+	return ret ? EXIT_FAILURE : EXIT_SUCCESS;
 }

@@ -48,74 +48,82 @@ static const struct option opts[] = {
 static int show_version(void)
 {
 	g_print("ksmbd-tools version : %s\n", KSMBD_TOOLS_VERSION);
-	return EXIT_SUCCESS;
+	return 0;
 }
 
 static int ksmbd_control_shutdown(void)
 {
-	int fd, ret;
+	int fd, ret = -EINVAL;
+	const char *path = "/sys/class/ksmbd-control/kill_server";
 
 	terminate_ksmbd_daemon();
 
-	fd = open("/sys/class/ksmbd-control/kill_server", O_WRONLY);
+	fd = open(path, O_WRONLY);
 	if (fd < 0) {
-		pr_err("open failed: %d\n", errno);
-		return EXIT_FAILURE;
+		pr_err("Can't open `%s': %m\n", path);
+		return ret;
 	}
 
-	ret = write(fd, "hard", 4);
+	if (write(fd, "hard", 4) == -1)
+		goto out;
+
+	ret = 0;
+out:
 	close(fd);
-	return ret != -1 ? EXIT_SUCCESS : EXIT_FAILURE;
+	return ret;
 }
 
 static int ksmbd_control_show_version(void)
 {
-	int fd, ret;
+	int fd, ret = -EINVAL;
+	const char *path = "/sys/module/ksmbd/version";
 	char ver[255] = {0};
 
-	fd = open("/sys/module/ksmbd/version", O_RDONLY);
+	fd = open(path, O_RDONLY);
 	if (fd < 0) {
-		pr_err("open failed: %d\n", errno);
-		return EXIT_FAILURE;
+		pr_err("Can't open `%s': %m\n", path);
+		return ret;
 	}
 
-	ret = read(fd, ver, 255);
+	if (read(fd, ver, 255) == -1)
+		goto out;
+
+	pr_info("ksmbd version : %s\n", ver);
+	ret = 0;
+out:
 	close(fd);
-	if (ret != -1)
-		pr_info("ksmbd version : %s\n", ver);
-	return ret != -1 ? EXIT_SUCCESS : EXIT_FAILURE;
+	return ret;
 }
 
 static int ksmbd_control_debug(char *comp)
 {
-	int fd, ret;
+	int fd, ret = -EINVAL;
+	const char *path = "/sys/class/ksmbd-control/debug";
 	char buf[255] = {0};
 
-	fd = open("/sys/class/ksmbd-control/debug", O_RDWR);
+	fd = open(path, O_RDWR);
 	if (fd < 0) {
-		pr_err("open failed: %d\n", errno);
-		return EXIT_FAILURE;
+		pr_err("Can't open `%s': %m\n", path);
+		return ret;
 	}
 
-	ret = write(fd, comp, strlen(comp));
-	if (ret < 0)
+	if (write(fd, comp, strlen(comp)) == -1)
 		goto out;
-	ret = lseek(fd, 0, SEEK_SET);
-	if (ret < 0)
+	if (lseek(fd, 0, SEEK_SET) == -1)
 		goto out;
-	ret = read(fd, buf, 255);
-	if (ret < 0)
+	if (read(fd, buf, 255) == -1)
 		goto out;
 
 	pr_info("%s\n", buf);
+	ret = 0;
 out:
 	close(fd);
-	return ret != -1 ? EXIT_SUCCESS : EXIT_FAILURE;
+	return ret;
 }
 
 int main(int argc, char *argv[])
 {
-	int ret = EXIT_FAILURE;
+	int ret = -EINVAL;
 	int c;
 
 	set_logger_app_name("ksmbd.control");
@@ -140,16 +148,16 @@ int main(int argc, char *argv[])
 			ret = show_version();
 			goto out;
 		case 'h':
-			ret = EXIT_SUCCESS;
+			ret = 0;
 			/* Fall through */
 		case '?':
 		default:
-			usage(ret);
+			usage(ret ? EXIT_FAILURE : EXIT_SUCCESS);
 			goto out;
 		}
 
 	if (argc < 2 || argc > optind)
-		usage(ret);
+		usage(ret ? EXIT_FAILURE : EXIT_SUCCESS);
 out:
-	return ret;
+	return ret ? EXIT_FAILURE : EXIT_SUCCESS;
 }
