@@ -156,7 +156,7 @@ sudo ksmbd.adduser --del-user=MyUser
 
 # utilities notify ksmbd of changes by sending SIGHUP to the manager process
 # you can do this manually as well when you have e.g. edited the config file
-sudo kill -HUP $(cat /tmp/ksmbd.lock)
+sudo ksmbd.control --reload
 
 # toggle debug printing of the `all' component
 sudo ksmbd.control --debug=all

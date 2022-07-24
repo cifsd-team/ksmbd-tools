@@ -14,7 +14,7 @@
 
 static void usage(int status)
 {
-	g_printerr("Usage: ksmbd.control {-s | -d COMPONENT | -c | -V | -h}\n");
+	g_printerr("Usage: ksmbd.control {-s | -r | -d COMPONENT | -c | -V | -h}\n");
 
 	if (status != EXIT_SUCCESS)
 		g_printerr("Try `ksmbd.control --help' for more information.\n");
@@ -24,6 +24,7 @@ static void usage(int status)
 			"\n"
 			"Mandatory arguments to long options are mandatory for short options too.\n"
 			"  -s, --shutdown           shutdown ksmbd.mountd and ksmbd and exit\n"
+			"  -r, --reload             reload configuration and exit\n"
 			"  -d, --debug=COMPONENT    toggle debug printing for COMPONENT and exit;\n"
 			"                           COMPONENT is `all', `smb', `auth', `vfs',\n"
 			"                           `oplock', `ipc', `conn', or `rdma';\n"
@@ -38,6 +39,7 @@ static void usage(int status)
 
 static const struct option opts[] = {
 	{"shutdown",		no_argument,		NULL,	's' },
+	{"reload",		no_argument,		NULL,	'r' },
 	{"debug",		required_argument,	NULL,	'd' },
 	{"ksmbd-version",	no_argument,		NULL,	'c' },
 	{"version",		no_argument,		NULL,	'V' },
@@ -71,6 +73,12 @@ static int ksmbd_control_shutdown(void)
 out:
 	close(fd);
 	return ret;
+}
+
+static int ksmbd_control_reload(void)
+{
+	notify_ksmbd_daemon();
+	return 0;
 }
 
 static int ksmbd_control_show_version(void)
@@ -133,10 +141,13 @@ int main(int argc, char *argv[])
 		return ret;
 	}
 
-	while ((c = getopt_long(argc, argv, "sd:cVh", opts, NULL)) != EOF)
+	while ((c = getopt_long(argc, argv, "srd:cVh", opts, NULL)) != EOF)
 		switch (c) {
 		case 's':
 			ret = ksmbd_control_shutdown();
+			goto out;
+		case 'r':
+			ret = ksmbd_control_reload();
 			goto out;
 		case 'd':
 			ret = ksmbd_control_debug(optarg);
