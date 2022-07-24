@@ -61,7 +61,7 @@ struct smbconf_global {
 	char			*smbconf;
 };
 
-#define KSMBD_LOCK_FILE		"/tmp/ksmbd.lock"
+#define KSMBD_LOCK_FILE		RUNSTATEDIR "/ksmbd.lock"
 
 #define KSMBD_RESTRICT_ANON_TYPE_1	1
 #define KSMBD_RESTRICT_ANON_TYPE_2	2

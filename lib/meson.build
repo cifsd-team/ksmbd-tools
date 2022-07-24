@@ -24,4 +24,8 @@ libksmbdtools = static_library(
     krb5_dep,
     asn1_lib,
   ],
+  c_args: [
+    '-DSYSCONFDIR="@0@"'.format(get_option('prefix') / get_option('sysconfdir')),
+    '-DRUNSTATEDIR="@0@"'.format(runstatedir),
+  ],
 )

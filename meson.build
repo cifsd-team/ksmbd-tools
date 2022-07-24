@@ -99,6 +99,17 @@ add_project_arguments(
   language: 'c',
 )
 
+rundir = get_option('rundir')
+if rundir == ''
+  if false # meson.version().version_compare('>= ')
+    runstatedir = get_option('prefix') / get_option('runstatedir')
+  else
+    runstatedir = get_option('prefix') / get_option('localstatedir') / 'run'
+  endif
+else
+  runstatedir = rundir
+endif
+
 subdir('lib')
 subdir('addshare')
 subdir('adduser')
@@ -121,6 +132,9 @@ endif
 configure_file(
   input: 'ksmbd.service.in',
   output: 'ksmbd.service',
-  configuration: {'sbindir': get_option('prefix') / get_option('sbindir')},
   install_dir: systemdsystemunitdir,
+  configuration: {
+    'sbindir': get_option('prefix') / get_option('sbindir'),
+    'runstatedir': runstatedir,
+  },
 )

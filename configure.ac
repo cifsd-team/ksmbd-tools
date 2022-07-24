@@ -46,6 +46,22 @@ AS_IF([test "x$enable_krb5" != xno], [
 	])
 ])
 
+AC_ARG_WITH([rundir],
+            [AC_HELP_STRING([--with-rundir=DIR],
+                            [Store modifiable per-process data in DIR @<:@LOCALSTATEDIR/run@:>@])],
+            [with_rundir=$withval],
+            [with_rundir=no])
+
+AS_IF([test "x$with_rundir" = xno], [
+	AS_IF([test "x$runstatedir" = x], [
+		runstatedir='${localstatedir}/run'
+	], [])
+], [
+	runstatedir=$with_rundir
+])
+
+AC_SUBST([runstatedir])
+
 AC_ARG_WITH([systemdsystemunitdir],
             [AC_HELP_STRING([--with-systemdsystemunitdir@<:@=DIR@:>@],
                             [Install systemd unit file to DIR (query pkg-config by default)])],

@@ -1,4 +1,10 @@
 option(
+  'rundir',
+  type: 'string',
+  description: 'Directory to store modifiable per-process data (LOCALSTATEDIR/run by default)',
+)
+
+option(
   'systemdsystemunitdir',
   type: 'string',
   description: 'Directory to install systemd unit file (query pkg-config by default)',

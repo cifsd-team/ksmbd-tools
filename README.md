@@ -35,7 +35,7 @@ cd ksmbd-tools
 # autotools build
 
 ./autogen.sh
-./configure
+./configure --with-rundir=/run
 
 make
 sudo make install
@@ -47,7 +47,7 @@ cd ksmbd-tools
 
 mkdir build
 cd build
-meson ..
+meson -Drundir=/run ..
 
 ninja
 sudo ninja install
