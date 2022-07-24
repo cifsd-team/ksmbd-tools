@@ -5,7 +5,7 @@
 
 [ksmbd-tools](https://github.com/cifsd-team/ksmbd-tools)
 is a collection of userspace utilities for
-[the ksmbd kernel server](https://www.kernel.org/doc/html/latest/filesystems/cifs/ksmbd.html)
+[the ksmbd kernel server](https://www.kernel.org/doc/html/latest/filesystems/cifs/ksmbd.html)  
 merged to mainline in the Linux 5.15 release.
 
 ## Table of Contents
@@ -15,58 +15,60 @@ merged to mainline in the Linux 5.15 release.
 
 ## Building and Installing
 
-You should first check if your distribution already packages ksmbd-tools,
-and if that is the case, consider installing it from the package manager.
-Otherwise, follow these instructions to build it yourself.
-Either the GNU Autotools or Meson build system can be used.
+You should first check if your distribution has a package for ksmbd-tools,  
+and if that is the case, consider installing it from the package manager.  
+Otherwise, follow these instructions to build it yourself. Either the GNU  
+Autotools or Meson build system can be used.
 
-Dependencies for Debian and its derivatives:
-```
-git gcc autoconf automake libtool meson libnl-3-dev libnl-genl-3-dev libglib2.0-dev
-```
+Dependencies for Debian and its derivatives: `git` `gcc` `pkgconf` `autoconf`  
+`automake` `libtool` `meson` `gawk` `libnl-3-dev` `libnl-genl-3-dev`  
+`libglib2.0-dev`
 
-Dependencies for RHEL, its derivatives, and openSUSE:
-```
-git gcc autoconf automake libtool meson libnl3-devel glib2-devel
-```
+Dependencies for RHEL, its derivatives, and openSUSE: `git` `gcc` `pkgconf`  
+`autoconf` `automake` `libtool` `meson` `gawk` `libnl3-devel` `glib2-devel`
 
-Autotools build:
+Example Build and Install:
 ```sh
 git clone https://github.com/cifsd-team/ksmbd-tools.git
 cd ksmbd-tools
+
+# autotools build
+
 ./autogen.sh
 ./configure
+
 make
 sudo make install
-```
 
-Meson build:
-```sh
+# meson build
+
 git clone https://github.com/cifsd-team/ksmbd-tools.git
 cd ksmbd-tools
+
 mkdir build
 cd build
 meson ..
+
 ninja
 sudo ninja install
 ```
 
-By default, the utilities are in `/usr/local/sbin` and the files they use by
+By default, the utilities are in `/usr/local/sbin` and the files they use by  
 default are under `/usr/local/etc` in the `ksmbd` directory.
 
-If you would like to install ksmbd-tools under `/usr`, where it may conflict
-with your distribution's packages, give `--prefix=/usr` and `--sysconfdir=/etc`
-as options to `configure` or `meson`. In that case, the utilities are in
-`/usr/sbin` and the files they use by default are under `/etc` in the `ksmbd`
-directory.
+If you would like to install ksmbd-tools under `/usr`, where it may conflict  
+with ksmbd-tools installed using the package manager, give `--prefix=/usr`  
+and `--sysconfdir=/etc` as options to `configure` or `meson`. In that case,  
+the utilities are in `/usr/sbin` and the files they use by default are under  
+`/etc` in the `ksmbd` directory.
 
-If you have systemd and it meets at least the minimum version required, the
-build will install the `ksmbd.service` unit file. The unit file supports the
-usual unit commands and handles loading of the kernel module. Note that the
-location of the unit file may conflict with ksmbd-tools installed using the
-package manager. You can bypass the version check and choose the unit file
-directory yourself by giving `--with-systemdsystemunitdir=DIR` and
-`-Dsystemdsystemunitdir=DIR` as an option to `configure` or `meson`,
+If you have systemd and it meets at least the minimum version required, the  
+build will install the `ksmbd.service` unit file. The unit file supports the  
+usual unit commands and handles loading of the kernel module. Note that the  
+location of the unit file may conflict with ksmbd-tools installed using the  
+package manager. You can bypass the version check and choose the unit file  
+directory yourself by giving `--with-systemdsystemunitdir=DIR` or  
+`-Dsystemdsystemunitdir=DIR` as an option to either `configure` or `meson`,  
 respectively.
 
 ## Example Usage
@@ -76,8 +78,8 @@ respectively.
 # the utilities are in `/usr/local/sbin',
 # the default user database is `/usr/local/etc/ksmbd/ksmbdpwd.db', and
 # the default config file is `/usr/local/etc/ksmbd/smb.conf'
-#
-# otherwise, most likely,
+
+# otherwise it is likely that,
 # the utilities are in `/usr/sbin',
 # the default user database is `/etc/ksmbd/ksmbdpwd.db', and
 # the default config file is `/etc/ksmbd/smb.conf'
@@ -128,7 +130,7 @@ force group = $USER
 #         read only = no
 #
 
-# load the kernel module if it is not already loaded
+# add the kernel module
 sudo modprobe ksmbd
 
 # run the user mode and kernel mode daemons
@@ -140,7 +142,7 @@ sudo ksmbd.mountd
 sudo mount -o user=MyUser //127.0.0.1/MyShare /mnt
 
 # you can now access the share at `/mnt'
-sudo touch /mnt/hello_from_cifs_utils
+sudo touch /mnt/new_file_from_cifs_utils
 
 # unmount the share
 sudo umount /mnt
@@ -153,7 +155,7 @@ sudo ksmbd.adduser --update-user=MyUser --password=MyNewPassword
 sudo ksmbd.adduser --del-user=MyUser
 
 # utilities notify ksmbd of changes by sending SIGHUP to the manager process
-# you can do this manually as well
+# you can do this manually as well when you have e.g. edited the config file
 sudo kill -HUP $(cat /tmp/ksmbd.lock)
 
 # toggle debug printing of the `all' component
@@ -166,5 +168,5 @@ sudo ksmbd.control --debug=all
 sudo ksmbd.control --shutdown
 
 # remove the kernel module
-sudo rmmod ksmbd
+sudo modprobe -r ksmbd
 ```

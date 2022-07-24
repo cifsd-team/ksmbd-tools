@@ -7,6 +7,7 @@ SUBDIRS = lib mountd adduser addshare control
 # other stuff
 EXTRA_DIST =			\
 	include			\
+	README.md		\
 	Documentation		\
 	ksmbd-tools.spec	\
 	ksmbd.service.in
