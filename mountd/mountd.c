@@ -128,31 +128,6 @@ retry:
 	return 0;
 }
 
-char *make_path_subauth(void)
-{
-	char *path;
-	int smbconf_len = strlen(global_conf.smbconf);
-	int loc = 0;
-	const char *subauth_filename = "ksmbd.subauth";
-
-	if (strchr(global_conf.smbconf, '/')) {
-		for (loc = smbconf_len - 1; loc > 0; loc--)
-			if (global_conf.smbconf[loc] == '/') {
-				loc++;
-				break;
-			}
-	}
-
-	path = g_try_malloc0(loc + strlen(subauth_filename) + 1);
-	if (!path)
-		return NULL;
-
-	strncat(path, global_conf.smbconf, loc);
-	strcat(path, subauth_filename);
-
-	return path;
-}
-
 /*
  * Write to file safely; by using a tmp and atomic rename.
  * Avoids a corrupt file if the write would be interrupted due
@@ -192,7 +167,7 @@ err_out:
 	return ret;
 }
 
-static int create_subauth_file(char *path_subauth)
+static int create_subauth_file(void)
 {
 	char *subauth_buf;
 	GRand *rnd;
@@ -203,7 +178,7 @@ static int create_subauth_file(char *path_subauth)
 		g_rand_int_range(rnd, 0, INT_MAX),
 		g_rand_int_range(rnd, 0, INT_MAX));
 
-	ret = write_file_safe(path_subauth, subauth_buf, strlen(subauth_buf),
+	ret = write_file_safe(PATH_SUBAUTH, subauth_buf, strlen(subauth_buf),
 		S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
 	g_free(subauth_buf);
 
@@ -212,28 +187,20 @@ static int create_subauth_file(char *path_subauth)
 
 static int generate_sub_auth(void)
 {
-	int rc = -EINVAL;
-	char *path_subauth;
+	int ret = -EINVAL;
 
-	path_subauth = make_path_subauth();
-	if (!path_subauth)
-		return -ENOMEM;
 retry:
-	if (g_file_test(path_subauth, G_FILE_TEST_EXISTS)) {
-		rc = cp_parse_subauth(path_subauth);
-	}
+	if (g_file_test(PATH_SUBAUTH, G_FILE_TEST_EXISTS))
+		ret = cp_parse_subauth();
 
-	if (rc < 0) {
-		rc = create_subauth_file(path_subauth);
-		if (rc) {
-			free(path_subauth);
-			return -1;
-		}
+	if (ret) {
+		ret = create_subauth_file();
+		if (ret)
+			return ret;
 		goto retry;
 	}
 
-	free(path_subauth);
-	return 0;
+	return ret;
 }
 
 static void delete_lock_file(void)

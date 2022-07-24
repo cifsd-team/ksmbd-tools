@@ -710,9 +710,9 @@ int cp_smbconfig_hash_create(const char *smbconf)
 	return __mmap_parse_file(smbconf, process_smbconf_entry);
 }
 
-int cp_parse_subauth(const char *subauth_path)
+int cp_parse_subauth(void)
 {
-	return __mmap_parse_file(subauth_path, usm_add_subauth_global_conf);
+	return __mmap_parse_file(PATH_SUBAUTH, usm_add_subauth_global_conf);
 }
 
 void cp_smbconfig_destroy(void)
