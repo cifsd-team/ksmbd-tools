@@ -107,7 +107,7 @@ static int parse_configs(char *smbconf)
 
 static int sanity_check_share_name_simple(char *name)
 {
-	int sz, i;
+	int sz;
 
 	if (!name)
 		return -EINVAL;

@@ -111,7 +111,7 @@ static int parse_configs(char *pwddb, char *smbconf)
 
 static int sanity_check_user_name_simple(char *uname)
 {
-	int sz, i;
+	int sz;
 
 	if (!uname)
 		return -EINVAL;
