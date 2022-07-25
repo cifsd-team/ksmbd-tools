@@ -624,7 +624,7 @@ static void groups_callback(gpointer _k, gpointer _v, gpointer user_data)
 	struct smbconf_group *group = (struct smbconf_group *)_v;
 
 	if (group != global_group) {
-		if (global_group && g_ascii_strncasecmp(_k, "ipc$", 4))
+		if (global_group && g_ascii_strcasecmp(_k, "ipc$"))
 			g_hash_table_foreach(global_group->kv,
 					     append_key_value,
 					     group->kv);

@@ -602,7 +602,7 @@ static void init_share_from_group(struct ksmbd_share *share,
 	set_share_flag(share, KSMBD_SHARE_FLAG_OPLOCKS);
 	set_share_flag(share, KSMBD_SHARE_FLAG_STORE_DOS_ATTRS);
 
-	if (!cp_key_cmp(share->name, "IPC$"))
+	if (!g_ascii_strcasecmp(share->name, "ipc$"))
 		set_share_flag(share, KSMBD_SHARE_FLAG_PIPE);
 
 	g_hash_table_foreach(group->kv, process_group_kv, share);
