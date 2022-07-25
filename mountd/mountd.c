@@ -123,8 +123,10 @@ retry:
 		return -EINVAL;
 
 	sz = snprintf(manager_pid, sizeof(manager_pid), "%d", getpid());
-	if (write(lock_fd, manager_pid, sz) == -1)
+	if (write(lock_fd, manager_pid, sz) == -1) {
 		pr_err("Unable to record main PID: %m\n");
+		return -EINVAL;
+	}
 	return 0;
 }
 
@@ -135,7 +137,7 @@ retry:
  */
 static int write_file_safe(char *path, char *buff, size_t length, int mode)
 {
-	int fd, ret = -1;
+	int fd, ret = -EINVAL;
 	char *path_tmp = g_strdup_printf("%s.tmp", path);
 
 	if (g_file_test(path_tmp, G_FILE_TEST_EXISTS))
