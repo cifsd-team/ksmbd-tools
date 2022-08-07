@@ -72,7 +72,7 @@ int tcm_handle_tree_connect(struct ksmbd_tree_connect_request *req,
 	if (test_share_flag(share, KSMBD_SHARE_FLAG_WRITEABLE))
 		set_conn_flag(conn, KSMBD_TREE_CONN_FLAG_WRITABLE);
 	if (test_share_flag(share, KSMBD_SHARE_FLAG_READONLY))
-		set_conn_flag(conn, KSMBD_SHARE_FLAG_READONLY);
+		set_conn_flag(conn, KSMBD_TREE_CONN_FLAG_READ_ONLY);
 
 	if (shm_open_connection(share)) {
 		resp->status = KSMBD_TREE_CONN_STATUS_TOO_MANY_CONNS;
