@@ -66,6 +66,8 @@ static void usage(int status)
 			"  -V, --version               output version information and exit\n"
 			"  -h, --help                  display this help and exit\n"
 			"\n"
+			"ksmbd.adduser notifies ksmbd.mountd of any made changes.\n"
+			"\n"
 			"ksmbd-tools home page: <https://github.com/cifsd-team/ksmbd-tools>\n");
 }
 
@@ -223,8 +225,11 @@ int main(int argc, char *argv[])
 	if (cmd == COMMAND_UPDATE_USER)
 		ret = command_update_user(pwddb, arg_account, arg_password);
 
-	if (cmd && !ret)
-		notify_ksmbd_daemon();
+	if (cmd && !ret) {
+		ret = send_signal_to_ksmbd_mountd(SIGHUP);
+		if (ret)
+			pr_err("Failed to notify ksmbd.mountd of changes\n");
+	}
 out:
 	shm_destroy();
 	usm_destroy();

@@ -154,15 +154,15 @@ sudo ksmbd.adduser --update-user=MyUser --password=MyNewPassword
 # delete a user from the default user database
 sudo ksmbd.adduser --del-user=MyUser
 
-# utilities notify ksmbd of changes by sending SIGHUP to the manager process
+# utilities notify ksmbd.mountd of changes by sending it the SIGHUP signal
 # you can do this manually as well when you have e.g. edited the config file
 sudo ksmbd.control --reload
 
 # toggle debug printing of the `all' component
 sudo ksmbd.control --debug=all
 
-# some config file changes require restarting ksmbd
-# restarting ksmbd means you run `ksmbd.mountd' again after you shut it down
+# some config file changes require restarting the user and kernel mode daemons
+# restarting them means running `ksmbd.mountd' again after shutting them down
 
 # shutdown the user and kernel mode daemons
 sudo ksmbd.control --shutdown

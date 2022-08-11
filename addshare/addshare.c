@@ -66,6 +66,8 @@ static void usage(int status)
 			"  -V, --version               output version information and exit\n"
 			"  -h, --help                  display this help and exit\n"
 			"\n"
+			"ksmbd.addshare notifies ksmbd.mountd of any made changes.\n"
+			"\n"
 			"Following options are supported for use in OPTIONS:\n");
 		for (i = 0; i < KSMBD_SHARE_CONF_MAX; i++)
 			g_printerr("  %s\n", KSMBD_SHARE_CONF[i]);
@@ -204,8 +206,11 @@ int main(int argc, char *argv[])
 	if (cmd == COMMAND_UPDATE_SHARE)
 		ret = command_update_share(smbconf, arg_name, arg_opts);
 
-	if (cmd && !ret)
-		notify_ksmbd_daemon();
+	if (cmd && !ret) {
+		ret = send_signal_to_ksmbd_mountd(SIGHUP);
+		if (ret)
+			pr_err("Failed to notify ksmbd.mountd of changes\n");
+	}
 out:
 	cp_smbconfig_destroy();
 	return ret ? EXIT_FAILURE : EXIT_SUCCESS;

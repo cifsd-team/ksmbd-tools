@@ -72,62 +72,50 @@ static int show_version(void)
 	return 0;
 }
 
-static int handle_orphaned_lock_file(void)
-{
-	char *proc_ent = NULL;
-	char manager_pid[10] = {0, };
-	int pid = 0;
-	int fd;
-
-	fd = open(KSMBD_LOCK_FILE, O_RDONLY);
-	if (fd < 0)
-		return -EINVAL;
-
-	if (read(fd, &manager_pid, sizeof(manager_pid)) == -1) {
-		pr_debug("Unable to read main PID: %m\n");
-		close(fd);
-		return -EINVAL;
-	}
-
-	close(fd);
-
-	pid = strtol(manager_pid, NULL, 10);
-	proc_ent = g_strdup_printf("/proc/%d", pid);
-	fd = open(proc_ent, O_RDONLY);
-	g_free(proc_ent);
-	if (fd < 0) {
-		pr_info("Unlink orphaned '%s'\n", KSMBD_LOCK_FILE);
-		return unlink(KSMBD_LOCK_FILE);
-	}
-
-	close(fd);
-	pr_info("File '%s' belongs to pid %d\n", KSMBD_LOCK_FILE, pid);
-	return -EINVAL;
-}
-
 static int create_lock_file(void)
 {
-	char manager_pid[10];
+	int ret = -EINVAL;
+	char *open_m = NULL;
+	char pid_buf[10];
 	size_t sz;
 
 retry:
 	lock_fd = open(KSMBD_LOCK_FILE, O_CREAT | O_EXCL | O_WRONLY,
 			S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
 	if (lock_fd < 0) {
-		if (handle_orphaned_lock_file())
-			return -EINVAL;
+		open_m = g_strdup_printf("%m");
+
+		if (send_signal_to_ksmbd_mountd(0) == -ESRCH) {
+			pr_info("Unlinking orphaned lock file\n");
+			if (unlink(KSMBD_LOCK_FILE) == -1) {
+				pr_err("Can't unlink `%s': %m\n", KSMBD_LOCK_FILE);
+				goto out;
+			}
+		} else {
+			pr_err("Can't create `%s': %s\n", KSMBD_LOCK_FILE, open_m);
+			goto out;
+		}
+
+		g_free(open_m);
+		open_m = NULL;
 		goto retry;
 	}
 
-	if (flock(lock_fd, LOCK_EX | LOCK_NB) != 0)
-		return -EINVAL;
-
-	sz = snprintf(manager_pid, sizeof(manager_pid), "%d", getpid());
-	if (write(lock_fd, manager_pid, sz) == -1) {
-		pr_err("Unable to record main PID: %m\n");
-		return -EINVAL;
+	if (flock(lock_fd, LOCK_EX | LOCK_NB) == -1) {
+		pr_err("Unable to place exclusive lock: %m\n");
+		goto out;
 	}
-	return 0;
+
+	sz = snprintf(pid_buf, sizeof(pid_buf), "%d", getpid());
+	if (write(lock_fd, pid_buf, sz) == -1) {
+		pr_err("Unable to write manager PID: %m\n");
+		goto out;
+	}
+
+	ret = 0;
+out:
+	g_free(open_m);
+	return ret;
 }
 
 /*
@@ -459,7 +447,7 @@ static int manager_process_init(void)
 		setpgid(0, 0);
 
 	if (create_lock_file()) {
-		pr_err("Failed to create lock file: %m\n");
+		pr_err("Failed to create lock file\n");
 		goto out;
 	}
 

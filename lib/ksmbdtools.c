@@ -211,50 +211,50 @@ retry:
 	return converted;
 }
 
-static void send_signal_to_ksmbd_daemon(int signo)
+int send_signal_to_ksmbd_mountd(int signo)
 {
-	char manager_pid[10] = {0, };
-	int pid = 0;
-	int lock_fd;
+	int fd, ret = -EINVAL;
+	char pid_buf[10] = {0};
+	int pid;
 
-	lock_fd = open(KSMBD_LOCK_FILE, O_RDONLY);
-	if (lock_fd < 0)
-		return;
-
-	if (read(lock_fd, &manager_pid, sizeof(manager_pid)) == -1) {
-		pr_debug("Unable to read main PID: %m\n");
-		close(lock_fd);
-		return;
+	fd = open(KSMBD_LOCK_FILE, O_RDONLY);
+	if (fd < 0) {
+		pr_err("Can't open `%s': %m\n", KSMBD_LOCK_FILE);
+		return ret;
 	}
 
-	close(lock_fd);
+	if (read(fd, &pid_buf, sizeof(pid_buf)) == -1) {
+		pr_err("Unable to read manager PID: %m\n");
+		goto out;
+	}
 
-	pid = strtol(manager_pid, NULL, 10);
+	pid = strtol(pid_buf, NULL, 10);
+	pr_debug("Send signal %d (%s) to PID %d\n",
+		 signo, strsignal(signo), pid);
+	if (kill(pid, signo) == -1) {
+		ret = -errno;
+		if (signo)
+			pr_err("Unable to send signal %d (%s) to PID %d: %m\n",
+					signo, strsignal(signo), pid);
+		goto out;
+	}
 
-	pr_debug("Send %d to pid %d\n", signo, pid);
-	if (kill(pid, signo))
-		pr_debug("Unable to send signal to pid %d: %m\n", pid);
-}
-
-void notify_ksmbd_daemon(void)
-{
-	send_signal_to_ksmbd_daemon(SIGHUP);
-}
-
-void terminate_ksmbd_daemon(void)
-{
-	send_signal_to_ksmbd_daemon(SIGTERM);
+	ret = 0;
+out:
+	close(fd);
+	return ret;
 }
 
 int test_file_access(char *conf)
 {
-	int fd = open(conf, O_RDWR | O_CREAT, S_IRWXU | S_IRGRP);
+	int fd;
 
-	if (fd != -1) {
-		close(fd);
-		return 0;
+	fd = open(conf, O_RDWR | O_CREAT, S_IRWXU | S_IRGRP);
+	if (fd < 0) {
+		pr_err("Can't open `%s': %m\n", conf);
+		return -EINVAL;
 	}
 
-	pr_err("%s %m\n", conf);
-	return -EINVAL;
+	close(fd);
+	return 0;
 }

@@ -23,8 +23,8 @@ static void usage(int status)
 			"Control ksmbd.mountd user mode and ksmbd kernel mode daemons.\n"
 			"\n"
 			"Mandatory arguments to long options are mandatory for short options too.\n"
-			"  -s, --shutdown           shutdown ksmbd.mountd and ksmbd and exit\n"
-			"  -r, --reload             reload configuration and exit\n"
+			"  -s, --shutdown           shutdown daemons and exit\n"
+			"  -r, --reload             notify ksmbd.mountd of changes and exit\n"
 			"  -d, --debug=COMPONENT    toggle debug printing for COMPONENT and exit;\n"
 			"                           COMPONENT is `all', `smb', `auth', `vfs',\n"
 			"                           `oplock', `ipc', `conn', or `rdma';\n"
@@ -58,7 +58,8 @@ static int ksmbd_control_shutdown(void)
 	int fd, ret = -EINVAL;
 	const char *path = "/sys/class/ksmbd-control/kill_server";
 
-	terminate_ksmbd_daemon();
+	if (send_signal_to_ksmbd_mountd(SIGTERM))
+		pr_err("Failed to terminate ksmbd.mountd\n");
 
 	fd = open(path, O_WRONLY);
 	if (fd < 0) {
@@ -77,8 +78,7 @@ out:
 
 static int ksmbd_control_reload(void)
 {
-	notify_ksmbd_daemon();
-	return 0;
+	return send_signal_to_ksmbd_mountd(SIGHUP);
 }
 
 static int ksmbd_control_show_version(void)
