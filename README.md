@@ -27,7 +27,7 @@ Dependencies for Debian and its derivatives: `git` `gcc` `pkgconf` `autoconf`
 Dependencies for RHEL, its derivatives, and openSUSE: `git` `gcc` `pkgconf`  
 `autoconf` `automake` `libtool` `meson` `gawk` `libnl3-devel` `glib2-devel`
 
-Example Build and Install:
+Example build and install:
 ```sh
 git clone https://github.com/cifsd-team/ksmbd-tools.git
 cd ksmbd-tools
@@ -61,6 +61,14 @@ with ksmbd-tools installed using the package manager, give `--prefix=/usr`
 and `--sysconfdir=/etc` as options to `configure` or `meson`. In that case,  
 the utilities are in `/usr/sbin` and the files they use by default are under  
 `/etc` in the `ksmbd` directory.
+
+It is likely that you should give `--with-rundir` or `-Drundir` as an option  
+to `configure` or `meson`, respectively. This is due to it being likely that  
+your system does not mount a tmpfs filesystem at the directory given by the  
+default value. Common choices are `/run`, `/var/run`, or `/tmp`. ksmbd-tools  
+uses the directory for per-process modifiable data, namely the `ksmbd.lock`  
+file holding the PID of the `ksmbd.mountd` manager process. If your autoconf  
+supports it, you may instead choose to give `--runstatedir` to `configure`.
 
 If you have systemd and it meets at least the minimum version required, the  
 build will install the `ksmbd.service` unit file. The unit file supports the  
