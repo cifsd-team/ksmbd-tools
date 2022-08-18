@@ -59,24 +59,30 @@ static int show_version(void)
 
 static int ksmbd_control_shutdown(void)
 {
-	int fd, ret = -EINVAL;
+	int fd, ret;
 	const char *path = "/sys/class/ksmbd-control/kill_server";
 
-	if (send_signal_to_ksmbd_mountd(SIGTERM))
+	ret = send_signal_to_ksmbd_mountd(SIGTERM);
+	if (ret)
 		pr_err("Failed to terminate ksmbd.mountd\n");
 
 	fd = open(path, O_WRONLY);
 	if (fd < 0) {
+		ret = -EINVAL;
 		pr_err("Can't open `%s': %m\n", path);
-		return ret;
+		goto kill_err;
 	}
 
-	if (write(fd, "hard", 4) == -1)
-		goto out;
+	if (write(fd, "hard", 4) == -1) {
+		ret = -EINVAL;
+		close(fd);
+		goto kill_err;
+	}
 
-	ret = 0;
-out:
 	close(fd);
+	return ret;
+kill_err:
+	pr_err("Failed to kill ksmbd\n");
 	return ret;
 }
 
@@ -139,11 +145,6 @@ int main(int argc, char *argv[])
 	int c;
 
 	set_logger_app_name("ksmbd.control");
-
-	if (getuid() != 0) {
-		pr_err("Please try it as root.\n");
-		return ret;
-	}
 
 	while ((c = getopt_long(argc, argv, "srd:cvVh", opts, NULL)) != EOF)
 		switch (c) {
