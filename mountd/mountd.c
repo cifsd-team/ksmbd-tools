@@ -477,18 +477,23 @@ static int manager_process_init(void)
 		pid_t child;
 
 		child = waitpid(-1, &status, 0);
-		if (ksmbd_health_status & KSMBD_SHOULD_RELOAD_CONFIG &&
-				errno == EINTR) {
-			ksmbd_health_status &= ~KSMBD_SHOULD_RELOAD_CONFIG;
-			continue;
-		}
+		if (child == -1)
+			switch (errno) {
+			case EINTR:
+				if (ksmbd_health_status &
+						KSMBD_SHOULD_RELOAD_CONFIG) {
+					ksmbd_health_status &=
+						~KSMBD_SHOULD_RELOAD_CONFIG;
+					continue;
+				}
+				/* Fall through */
+			default:
+				pr_err("waitpid() returned error code: %m\n");
+				goto out;
+			}
 
 		pr_err("WARNING: child process exited abnormally: %d\n",
 				child);
-		if (child == -1) {
-			pr_err("waitpid() returned error code: %m\n");
-			goto out;
-		}
 
 		if (WIFEXITED(status) &&
 			WEXITSTATUS(status) == KSMBD_STATUS_IPC_FATAL_ERROR) {
