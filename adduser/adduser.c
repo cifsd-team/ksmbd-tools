@@ -62,7 +62,7 @@ static void usage(int status)
 			"                              this option does nothing by itself\n"
 			"  -c, --config=SMBCONF        use SMBCONF as config file instead of\n"
 			"                              `" PATH_SMBCONF "'\n"
-			"  -v, --verbose               be more verbose; unimplemented\n"
+			"  -v, --verbose               be verbose\n"
 			"  -V, --version               output version information and exit\n"
 			"  -h, --help                  display this help and exit\n"
 			"\n"
@@ -78,8 +78,8 @@ static const struct option opts[] = {
 	{"password",		required_argument,	NULL,	'p' },
 	{"import-users",	required_argument,	NULL,	'i' },
 	{"config",		required_argument,	NULL,	'c' },
-	{"version",		no_argument,		NULL,	'V' },
 	{"verbose",		no_argument,		NULL,	'v' },
+	{"version",		no_argument,		NULL,	'V' },
 	{"help",		no_argument,		NULL,	'h' },
 	{NULL,			0,			NULL,	 0  }
 };
@@ -92,7 +92,7 @@ static int show_version(void)
 
 static int parse_configs(char *pwddb, char *smbconf)
 {
-	int ret;
+	int ret, old_level;
 
 	ret = test_file_access(pwddb);
 	if (ret)
@@ -102,10 +102,13 @@ static int parse_configs(char *pwddb, char *smbconf)
 	if (ret)
 		return ret;
 
+	old_level = set_log_level(PR_NONE);
 	ret = cp_parse_smbconf(smbconf);
+	set_log_level(old_level);
 	if (ret == -ENOENT) {
-		pr_info("Config file does not exist, "
-			"cannot check if user is a global guest account\n");
+		pr_info("Config file `%s' does not exist; "
+			"global guest account is unknown\n",
+			smbconf);
 		return 0;
 	}
 	return ret;
@@ -143,7 +146,7 @@ int main(int argc, char *argv[])
 
 	set_logger_app_name("ksmbd.adduser");
 
-	while ((c = getopt_long(argc, argv, "c:i:a:d:u:p:Vvh", opts, NULL)) != EOF)
+	while ((c = getopt_long(argc, argv, "c:i:a:d:u:p:vVh", opts, NULL)) != EOF)
 		switch (c) {
 		case 'a':
 			arg_account = g_strdup(optarg);
@@ -166,11 +169,12 @@ int main(int argc, char *argv[])
 		case 'c':
 			smbconf = g_strdup(optarg);
 			break;
+		case 'v':
+			set_log_level(PR_DEBUG);
+			break;
 		case 'V':
 			ret = show_version();
 			goto out;
-		case 'v':
-			break;
 		case 'h':
 			ret = 0;
 			/* Fall through */
@@ -226,9 +230,12 @@ int main(int argc, char *argv[])
 		ret = command_update_user(pwddb, arg_account, arg_password);
 
 	if (cmd && !ret) {
-		ret = send_signal_to_ksmbd_mountd(SIGHUP);
-		if (ret)
+		int old_level;
+
+		old_level = set_log_level(PR_NONE);
+		if (send_signal_to_ksmbd_mountd(SIGHUP))
 			pr_err("Failed to notify ksmbd.mountd of changes\n");
+		set_log_level(old_level);
 	}
 out:
 	shm_destroy();

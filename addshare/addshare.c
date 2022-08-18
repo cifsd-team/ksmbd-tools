@@ -62,7 +62,7 @@ static void usage(int status)
 			"                              separators other than newline create ambiguity\n"
 			"  -c, --config=SMBCONF        use SMBCONF as config file instead of\n"
 			"                              `" PATH_SMBCONF "'\n"
-			"  -v, --verbose               be more verbose; unimplemented\n"
+			"  -v, --verbose               be verbose\n"
 			"  -V, --version               output version information and exit\n"
 			"  -h, --help                  display this help and exit\n"
 			"\n"
@@ -83,8 +83,8 @@ static const struct option opts[] = {
 	{"update-share",	required_argument,	NULL,	'u' },
 	{"options",		required_argument,	NULL,	'o' },
 	{"config",		required_argument,	NULL,	'c' },
-	{"version",		no_argument,		NULL,	'V' },
 	{"verbose",		no_argument,		NULL,	'v' },
+	{"version",		no_argument,		NULL,	'V' },
 	{"help",		no_argument,		NULL,	'h' },
 	{NULL,			0,			NULL,	 0  }
 };
@@ -134,7 +134,7 @@ int main(int argc, char *argv[])
 
 	set_logger_app_name("ksmbd.addshare");
 
-	while ((c = getopt_long(argc, argv, "c:a:d:u:p:o:Vvh", opts, NULL)) != EOF)
+	while ((c = getopt_long(argc, argv, "a:d:u:o:c:vVh", opts, NULL)) != EOF)
 		switch (c) {
 		case 'a':
 			arg_name = g_ascii_strdown(optarg, strlen(optarg));
@@ -148,17 +148,18 @@ int main(int argc, char *argv[])
 			arg_name = g_ascii_strdown(optarg, strlen(optarg));
 			cmd = COMMAND_UPDATE_SHARE;
 			break;
+		case 'o':
+			arg_opts = strdup(optarg);
+			break;
 		case 'c':
 			smbconf = strdup(optarg);
 			break;
-		case 'o':
-			arg_opts = strdup(optarg);
+		case 'v':
+			set_log_level(PR_DEBUG);
 			break;
 		case 'V':
 			ret = show_version();
 			goto out;
-		case 'v':
-			break;
 		case 'h':
 			ret = 0;
 			/* Fall through */
@@ -207,9 +208,12 @@ int main(int argc, char *argv[])
 		ret = command_update_share(smbconf, arg_name, arg_opts);
 
 	if (cmd && !ret) {
-		ret = send_signal_to_ksmbd_mountd(SIGHUP);
-		if (ret)
+		int old_level;
+
+		old_level = set_log_level(PR_NONE);
+		if (send_signal_to_ksmbd_mountd(SIGHUP))
 			pr_err("Failed to notify ksmbd.mountd of changes\n");
+		set_log_level(old_level);
 	}
 out:
 	cp_smbconfig_destroy();

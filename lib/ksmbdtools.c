@@ -14,6 +14,9 @@
 #include <stdio.h>
 #include <ksmbdtools.h>
 
+int log_level = PR_INFO;
+int ksmbd_health_status;
+
 static const char *app_name = "unknown";
 static int log_open;
 
@@ -87,6 +90,18 @@ void pr_logger_init(int flag)
 		__logger = __pr_log_syslog;
 		log_open = 1;
 	}
+}
+
+int set_log_level(int level)
+{
+	int old_level;
+
+	if (log_level == PR_DEBUG)
+		return log_level;
+
+	old_level = log_level;
+	log_level = level;
+	return old_level;
 }
 
 #if TRACING_DUMP_NL_MSG

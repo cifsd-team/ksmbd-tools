@@ -14,7 +14,9 @@
 
 static void usage(int status)
 {
-	g_printerr("Usage: ksmbd.control {-s | -r | -d COMPONENT | -c | -V | -h}\n");
+	g_printerr(
+		"Usage: ksmbd.control {-s | -r | -d COMPONENT | -c} [-v]\n"
+		"       ksmbd.control {-V | -h}\n");
 
 	if (status != EXIT_SUCCESS)
 		g_printerr("Try `ksmbd.control --help' for more information.\n");
@@ -31,6 +33,7 @@ static void usage(int status)
 			"                           output also status of all components;\n"
 			"                           enabled components are enclosed in brackets\n"
 			"  -c, --ksmbd-version      output ksmbd version information and exit\n"
+			"  -v, --verbose            be verbose\n"
 			"  -V, --version            output version information and exit\n"
 			"  -h, --help               display this help and exit\n"
 			"\n"
@@ -42,6 +45,7 @@ static const struct option opts[] = {
 	{"reload",		no_argument,		NULL,	'r' },
 	{"debug",		required_argument,	NULL,	'd' },
 	{"ksmbd-version",	no_argument,		NULL,	'c' },
+	{"verbose",		no_argument,		NULL,	'v' },
 	{"version",		no_argument,		NULL,	'V' },
 	{"help",		no_argument,		NULL,	'h' },
 	{NULL,			0,			NULL,	 0  }
@@ -141,7 +145,7 @@ int main(int argc, char *argv[])
 		return ret;
 	}
 
-	while ((c = getopt_long(argc, argv, "srd:cVh", opts, NULL)) != EOF)
+	while ((c = getopt_long(argc, argv, "srd:cvVh", opts, NULL)) != EOF)
 		switch (c) {
 		case 's':
 			ret = ksmbd_control_shutdown();
@@ -155,6 +159,9 @@ int main(int argc, char *argv[])
 		case 'c':
 			ret = ksmbd_control_show_version();
 			goto out;
+		case 'v':
+			set_log_level(PR_DEBUG);
+			break;
 		case 'V':
 			ret = show_version();
 			goto out;

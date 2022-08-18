@@ -108,11 +108,12 @@ extern int ksmbd_health_status;
 #define PRINF		LOGAPP" INFO: "
 #define PRDEBUG		LOGAPP" DEBUG: "
 
-#define PR_ERROR	0
-#define PR_INFO		1
-#define PR_DEBUG	2
+#define PR_NONE		0
+#define PR_ERROR	1
+#define PR_INFO		2
+#define PR_DEBUG	3
 
-static int log_level = PR_INFO;
+extern int log_level;
 
 #define PR_LOGGER_STDIO         0
 #define PR_LOGGER_SYSLOG        1
@@ -122,6 +123,7 @@ extern void __pr_log(int level, const char *fmt, ...);
 extern void set_logger_app_name(const char *an);
 extern const char *get_logger_app_name(void);
 extern void pr_logger_init(int flags);
+extern int set_log_level(int level);
 
 #define pr_log(l, f, ...)						\
 	do {								\

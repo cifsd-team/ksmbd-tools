@@ -20,7 +20,7 @@ static GRWLock		users_table_lock;
 
 static void kill_ksmbd_user(struct ksmbd_user *user)
 {
-	pr_debug("Kill user %s\n", user->name);
+	pr_debug("Kill user `%s'\n", user->name);
 
 	free(user->name);
 	free(user->pass_b64);
@@ -188,6 +188,7 @@ int usm_add_new_user(char *name, char *pwd)
 		return 0;
 	}
 
+	pr_debug("New user `%s'\n", user->name);
 	if (!g_hash_table_insert(users_table, user->name, user)) {
 		kill_ksmbd_user(user);
 		ret = -EINVAL;

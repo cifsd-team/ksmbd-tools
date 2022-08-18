@@ -32,8 +32,7 @@
 #include "management/spnego.h"
 #include "version.h"
 
-static int no_detach = 0;
-int ksmbd_health_status;
+static int no_detach;
 static pid_t worker_pid;
 static int lock_fd = -1;
 
@@ -42,7 +41,7 @@ typedef int (*worker_fn)(void);
 static void usage(int status)
 {
 	g_printerr(
-		"Usage: ksmbd.mountd [-p NUMBER] [-c SMBCONF] [-u PWDDB] [-n[WAY]]\n"
+		"Usage: ksmbd.mountd [-p NUMBER] [-c SMBCONF] [-u PWDDB] [-n[WAY]] [-v]\n"
 		"       ksmbd.mountd {-V | -h}\n");
 
 	if (status != EXIT_SUCCESS)
@@ -60,11 +59,23 @@ static void usage(int status)
 			"  -n, --nodetach[=WAY]    do not detach process from foreground;\n"
 			"                          if WAY is 1, become process group leader (default);\n"
 			"                          if WAY is 0, detach\n"
+			"  -v, --verbose           be verbose\n"
 			"  -V, --version           output version information and exit\n"
 			"  -h, --help              display this help and exit\n"
 			"\n"
 			"ksmbd-tools home page: <https://github.com/cifsd-team/ksmbd-tools>\n");
 }
+
+static struct option opts[] = {
+	{"port",	required_argument,	NULL,	'p' },
+	{"config",	required_argument,	NULL,	'c' },
+	{"users",	required_argument,	NULL,	'u' },
+	{"nodetach",	optional_argument,	NULL,	'n' },
+	{"verbose",	no_argument,		NULL,	'v' },
+	{"version",	no_argument,		NULL,	'V' },
+	{"help",	no_argument,		NULL,	'h' },
+	{NULL,		0,			NULL,	 0  }
+};
 
 static int show_version(void)
 {
@@ -263,12 +274,15 @@ static int setup_signals(sighandler_t handler)
 
 static int parse_configs(char *pwddb, char *smbconf)
 {
-	int ret;
+	int ret, old_level;
 
+	old_level = set_log_level(PR_NONE);
 	ret = cp_parse_pwddb(pwddb);
+	set_log_level(old_level);
 	if (ret == -ENOENT) {
-		pr_info("User database does not exist, "
-			"only guest sessions (if permitted) will work\n");
+		pr_info("User database `%s' does not exist; "
+			"only guest sessions may work\n",
+			pwddb);
 	} else if (ret) {
 		pr_err("Unable to parse user database\n");
 		return ret;
@@ -494,16 +508,6 @@ out:
 	return 0;
 }
 
-static struct option opts[] = {
-	{"port",	required_argument,	NULL,	'p' },
-	{"config",	required_argument,	NULL,	'c' },
-	{"users",	required_argument,	NULL,	'u' },
-	{"nodetach",	optional_argument,	NULL,	'n' },
-	{"help",	no_argument,		NULL,	'h' },
-	{"version",	no_argument,		NULL,	'V' },
-	{NULL,		0,			NULL,	 0  }
-};
-
 int main(int argc, char *argv[])
 {
 	int ret = -EINVAL;
@@ -515,7 +519,7 @@ int main(int argc, char *argv[])
 	global_conf.smbconf = PATH_SMBCONF;
 	pr_logger_init(PR_LOGGER_STDIO);
 
-	while ((c = getopt_long(argc, argv, "n::p:c:u:Vh", opts, NULL)) != EOF)
+	while ((c = getopt_long(argc, argv, "p:c:u:n::vVh", opts, NULL)) != EOF)
 		switch (c) {
 		case 'p':
 			global_conf.tcp_port = cp_get_group_kv_long(optarg);
@@ -532,6 +536,9 @@ int main(int argc, char *argv[])
 				no_detach = 1;
 			else
 				no_detach = cp_get_group_kv_long(optarg);
+			break;
+		case 'v':
+			set_log_level(PR_DEBUG);
 			break;
 		case 'V':
 			ret = show_version();

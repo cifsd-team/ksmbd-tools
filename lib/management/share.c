@@ -101,7 +101,7 @@ static void kill_ksmbd_share(struct ksmbd_share *share)
 {
 	int i;
 
-	pr_debug("Kill share %s\n", share->name);
+	pr_debug("Kill share `%s'\n", share->name);
 
 	for (i = 0; i < KSMBD_SHARE_USERS_MAX; i++)
 		free_user_map(share->maps[i]);
@@ -636,6 +636,7 @@ int shm_add_new_share(struct smbconf_group *group)
 		return 0;
 	}
 
+	pr_debug("New share `%s'\n", share->name);
 	if (!g_hash_table_insert(shares_table, share->name, share)) {
 		kill_ksmbd_share(share);
 		ret = -EINVAL;

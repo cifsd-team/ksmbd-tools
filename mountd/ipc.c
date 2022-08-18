@@ -65,14 +65,18 @@ static int generic_event(int type, void *payload, size_t sz)
 
 static int parse_reload_configs(const char *pwddb, const char *smbconf)
 {
-	int ret;
+	int ret, old_level;
 
 	pr_debug("Reload config\n");
+
 	usm_remove_all_users();
+	old_level = set_log_level(PR_NONE);
 	ret = cp_parse_pwddb(pwddb);
+	set_log_level(old_level);
 	if (ret == -ENOENT) {
-		pr_info("User database does not exist, "
-			"only guest sessions (if permitted) will work\n");
+		pr_info("User database `%s' does not exist; "
+			"only guest sessions may work\n",
+			pwddb);
 	} else if (ret) {
 		pr_err("Unable to parse user database\n");
 		return ret;
