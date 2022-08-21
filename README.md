@@ -13,6 +13,10 @@ merged to mainline in the Linux 5.15 release.
 - [Building and Installing](#building-and-installing)
 - [Example Usage](#example-usage)
 
+## Prebuilt binaries
+
+You can find them at https://repology.org/project/ksmbd-tools/versions
+
 ## Building and Installing
 
 You should first check if your distribution has a package for ksmbd-tools,  
