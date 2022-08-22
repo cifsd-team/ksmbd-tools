@@ -14,6 +14,12 @@
  */
 #define KSMBD_IPC_MAX_MESSAGE_SIZE	(16 * 1024)
 
+/*
+ * The netlink socket's receive buffer size needs to be increased
+ * to avoid -ENOBUFS errors when receiving.
+ */
+#define KSMBD_IPC_SO_RCVBUF_SIZE	(1 * 1024 * 1024)
+
 struct ksmbd_ipc_msg {
 	unsigned int	type;
 	unsigned int	sz;

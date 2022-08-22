@@ -495,6 +495,12 @@ int ipc_init(void)
 		goto out_error;
 	}
 
+	ret = nl_socket_set_buffer_size(sk, KSMBD_IPC_SO_RCVBUF_SIZE, 0);
+	if (ret) {
+		pr_err("Cannot set netlink socket buffer size: %s [%d]\n", nl_geterror(ret), ret);
+		goto out_error;
+	}
+
 	if (genl_register_family(&ksmbd_family_ops)) {
 		pr_err("Cannot register netlink family\n");
 		goto out_error;
