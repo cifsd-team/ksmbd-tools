@@ -16,48 +16,50 @@
 #
 
 Name:           ksmbd-tools
-Version:        3.4.2
+Version:        e3fc5436af67bfb1559b85022cbcc892fe5323e0
 Release:        0
-Summary:        cifsd/ksmbd kernel server userspace utilities
+Summary:        ksmbd kernel server userspace utilities
 License:        GPL-2.0-or-later
 Group:          System/Filesystems
 Url:            https://github.com/cifsd-team/ksmbd-tools
-Source:         %{name}-%{version}.tar.bz2
+Source:         %{url}/archive/%{version}/%{name}-%{version}.tar.gz
 
-# ksmbd kernel module was only added in kernel 5.15
-BuildRequires:  kernel-default >= 5.15
 BuildRequires:  glib2-devel
 BuildRequires:  libnl3-devel
 BuildRequires:  autoconf
 BuildRequires:  automake
-BuildRequires:	libtool
+BuildRequires:  libtool
+BuildRequires:  systemd-rpm-macros
 
 Requires(pre):	kernel-default >= 5.15
+Requires(pre):	systemd >= 245
 
 %description
-Set of utilities for creating and managing SMB3 shares for the ksmbd kernel
-module.
+Collection of userspace utilities for the ksmbd kernel server.
 
 %prep
 %setup -q
 
 %build
 ./autogen.sh
-%configure
+%configure --with-systemdsystemunitdir=%{_unitdir}
 make %{?_smp_mflags}
 
 %install
-mkdir -p %{buildroot}/%{_sysconfdir}/ksmbd
-
 %make_install
-install -m 644 -p smb.conf.example %{buildroot}%{_sysconfdir}/ksmbd
 
 %files
 %{_sbindir}/ksmbd.addshare
 %{_sbindir}/ksmbd.adduser
 %{_sbindir}/ksmbd.control
 %{_sbindir}/ksmbd.mountd
-%dir %{_sysconfdir}/ksmbd
-%config %{_sysconfdir}/ksmbd/smb.conf.example
+%{_mandir}/man1/ksmbd.addshare.1*
+%{_mandir}/man1/ksmbd.adduser.1*
+%{_mandir}/man1/ksmbd.control.1*
+%{_mandir}/man1/ksmbd.mountd.1*
+%{_mandir}/man5/ksmbdpwd.db.5*
+%{_mandir}/man5/smb.conf.5ksmbd*
+%{_sysconfdir}/ksmbd/smb.conf.example
+%{_unitdir}/ksmbd.service
 
 %changelog
