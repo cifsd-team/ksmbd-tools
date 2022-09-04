@@ -61,7 +61,7 @@ static void usage(int status)
 			"  -V, --version           output version information and exit\n"
 			"  -h, --help              display this help and exit\n"
 			"\n"
-			"See ksmbd.mountd(1), smb.conf(5ksmbd), and ksmbdpwd.db(5) for more details.\n");
+			"See ksmbd.mountd(1) for more details.\n");
 }
 
 static struct option opts[] = {

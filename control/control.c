@@ -28,14 +28,13 @@ static void usage(int status)
 			"  -d, --debug=COMPONENT    toggle ksmbd debug printing for COMPONENT and exit;\n"
 			"                           COMPONENT is `all', `smb', `auth', `vfs', `oplock',\n"
 			"                           `ipc', `conn', or `rdma';\n"
-			"                           output also status of all components with enabled\n"
-			"                           ones enclosed in brackets\n"
+			"                           enabled ones are output enclosed in brackets (`[]')\n"
 			"  -c, --ksmbd-version      output ksmbd version information and exit\n"
 			"  -v, --verbose            be verbose\n"
 			"  -V, --version            output version information and exit\n"
 			"  -h, --help               display this help and exit\n"
 			"\n"
-			"See ksmbd.control(1) and ksmbd.mountd(1) for more details.\n");
+			"See ksmbd.control(1) for more details.\n");
 }
 
 static const struct option opts[] = {

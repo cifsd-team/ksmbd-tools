@@ -12,13 +12,13 @@ ksmbd.adduser \- configure users for ksmbdpwd.db of ksmbd.mountd
 {-V | -h}
 .SH DESCRIPTION
 \fBksmbd.adduser\fR configures users for \fBksmbdpwd.db\fP(5) user database of \fBksmbd.mountd\fP(1) user mode daemon.
-\fBksmbd.adduser\fR can parse \fBsmb.conf\fP(5kmsbd) configuration file so as to guard against deletion of users that are depended on.
+\fBksmbd.adduser\fR can parse \fBsmb.conf\fP(5ksmbd) configuration file so as to guard against deletion of users that are depended on.
 \fBksmbd.adduser\fR notifies \fBksmbd.mountd\fR of changes if it had made any.
 .SH OPTIONS
 .TP
 \fB\-a\fR, \fB\-\-add-user\fR=\fI\,USER\/\fR
 Add \fI\,USER\/\fR to user database.
-\fI\,USER\/\fR is 1 to 48 ASCII characters.
+\fI\,USER\/\fR is [1, 48) ASCII characters. \" KSMBD_REQ_MAX_ACCOUNT_NAME_SZ
 \fI\,USER\/\fR cannot contain colon (\fB:\fR) or newline.
 .TP
 \fB\-d\fR, \fB\-\-del-user\fR=\fI\,USER\/\fR
@@ -30,15 +30,15 @@ Update \fI\,USER\/\fR in user database.
 \fB\-p\fR, \fB\-\-password\fR=\fI\,PWD\/\fR
 Use \fI\,PWD\/\fR as user password instead of prompting.
 \fI\,PWD\/\fR is assumed to be UTF-8 encoded.
-\fI\,PWD\/\fR is 0 to 129 bytes.
+\fI\,PWD\/\fR is [0, 129) bytes. \" MAX_NT_PWD_LEN
 \fI\,PWD\/\fR cannot contain newline.
 .TP
 \fB\-i\fR, \fB\-\-import-users\fR=\fI\,PWDDB\/\fR
-Use \fI\,PWDDB\/\fR as user database instead of \fB@sysconfdir@/ksmbd/ksmbdpwd.db\fR.
+Use \fI\,PWDDB\/\fR as user database instead of \fB@sysconfdir@/ksmbd/ksmbdpwd.db\fR. \" PATH_PWDDB
 This option does nothing by itself.
 .TP
 \fB\-c\fR, \fB\-\-config\fR=\fI\,SMBCONF\/\fR
-Use \fI\,SMBCONF\/\fR as configuration file instead of \fB@sysconfdir@/ksmbd/smb.conf\fR.
+Use \fI\,SMBCONF\/\fR as configuration file instead of \fB@sysconfdir@/ksmbd/smb.conf\fR. \" PATH_SMBCONF
 .TP
 \fB\-v\fR, \fB\-\-verbose\fR
 Be verbose.
@@ -66,7 +66,7 @@ For bug reports, use the issue tracker at https://github.com/cifsd-team/ksmbd-to
 \fBConfiguration File\fR
 \fBsmb.conf\fP(5ksmbd)
 .TP
-\fBOther Utilities\fR
+\fBUtilities\fR
 \fBksmbd.addshare\fP(1),
 \fBksmbd.control\fP(1),
 \fBksmbd.mountd\fP(1)

@@ -11,8 +11,8 @@ merged to mainline in the Linux 5.15 release.
 ## Table of Contents
 
 - [Building and Installing](#building-and-installing)
-- [Example Usage](#example-usage)
-- [Prebuilt binaries](#prebuilt-binaries)
+- [Usage](#usage)
+- [Packages](#packages)
 
 ## Building and Installing
 
@@ -22,11 +22,12 @@ Otherwise, follow these instructions to build it yourself. Either the GNU
 Autotools or Meson build system can be used.
 
 Dependencies for Debian and its derivatives: `git` `gcc` `pkgconf` `autoconf`  
-`automake` `libtool` `meson` `gawk` `libnl-3-dev` `libnl-genl-3-dev`  
-`libglib2.0-dev`
+`automake` `libtool` `make` `meson` `ninja-build` `gawk` `libnl-3-dev`  
+`libnl-genl-3-dev` `libglib2.0-dev`
 
-Dependencies for RHEL, its derivatives, and openSUSE: `git` `gcc` `pkgconf`  
-`autoconf` `automake` `libtool` `meson` `gawk` `libnl3-devel` `glib2-devel`
+Dependencies for RHEL and its derivatives: `git` `gcc` `pkgconf` `autoconf`  
+`automake` `libtool` `make` `meson` `ninja-build` `gawk` `libnl3-devel`  
+`glib2-devel`
 
 Example build and install:
 ```sh
@@ -77,57 +78,69 @@ directory yourself by giving `--with-systemdsystemunitdir=DIR` or
 `-Dsystemdsystemunitdir=DIR` as an option to either `configure` or `meson`,  
 respectively.
 
-## Example Usage
+## Usage
 
+Manual pages:
 ```sh
-# if you built and installed ksmbd-tools yourself, by default,
+man 1 ksmbd.addshare
+man 1 ksmbd.adduser
+man 1 ksmbd.control
+man 1 ksmbd.mountd
+man 5 ksmbdpwd.db
+man 5ksmbd smb.conf
+```
+
+Example session:
+```sh
+# If you built and installed ksmbd-tools yourself using autoconf defaults,
 # the utilities are in `/usr/local/sbin',
 # the default user database is `/usr/local/etc/ksmbd/ksmbdpwd.db', and
-# the default config file is `/usr/local/etc/ksmbd/smb.conf'
+# the default configuration file is `/usr/local/etc/ksmbd/smb.conf'.
 
-# otherwise it is likely that,
+# Otherwise it is likely that,
 # the utilities are in `/usr/sbin',
 # the default user database is `/etc/ksmbd/ksmbdpwd.db', and
-# the default config file is `/etc/ksmbd/smb.conf'
+# the default configuration file is `/etc/ksmbd/smb.conf'.
 
-# create the share path directory
-# the share stores files in this directory using its underlying filesystem
+# Create the share path directory.
+# The share stores files in this directory using its underlying filesystem.
 mkdir -vp $HOME/MyShare
 
-# add a share (case insensitive) to the default config file
-# `--options' takes a single argument, so quote it accordingly in your shell
-# note that the shell expands `$HOME' here, `ksmbd.addshare' will never do it
-# newline is the only safe character to use as an option separator
+# Add a share to the default configuration file.
+# Initial share parameters for the share are given with `--options'.
+# `--options' takes a single argument, so quote it accordingly in your shell.
+# Note that `ksmbd.addshare' does not do variable expansion.
+# Newline is the only safe character to use as separator for share parameters.
 sudo ksmbd.addshare --add-share=MyShare --options="
 path = $HOME/MyShare
 read only = no
 "
 
-# the default config file now looks like this:
+# The default configuration file now has a new section for `MyShare'.
 #
 # [myshare]
 #         path = /home/tester/MyShare
 #         read only = no
 #
-# the `[global]' section contains parameters that are not share specific
-# you can set default parameters for all shares by adding them to `[global]'
-# `ksmbd.addshare' cannot edit `[global]' so do it with a text editor
-# see smb.conf(5ksmbd) for more details
+# Each share has its own section with share parameters that apply to it.
+# A share parameter given in `[global]' changes its default value.
+# `[global]' also has global parameters which are not share specific.
+# `ksmbd.addshare' will not change `[global]' so do it with a text editor.
 
-# add a user to the default user database
-# you will be prompted for a password
+# Add a user to the default user database.
+# You will be prompted for a password.
 sudo ksmbd.adduser --add-user=MyUser
 
-# there is no UNIX user called `MyUser' so it has to be mapped to one
-# we can force all users accessing the share to map to a UNIX user and group
+# There is no system user called `MyUser' so it has to be mapped to one.
+# We can force all users accessing the share to map to a system user and group.
 
-# update the parameters of a share in the default config file
+# Update share parameters of a share in the default configuration file.
 sudo ksmbd.addshare --update-share=MyShare --options="
 force user = $USER
 force group = $USER
 "
 
-# the default config file now looks like this:
+# The default configuration file now has the updated share parameters.
 #
 # [myshare]
 #         force user = tester
@@ -136,47 +149,52 @@ force group = $USER
 #         read only = no
 #
 
-# add the kernel module
+# Add the kernel module.
 sudo modprobe ksmbd
 
-# run the user mode and kernel mode daemons
-# all interfaces are listened to by default
+# Start the user and kernel mode daemons.
+# All interfaces are listened to by default.
 sudo ksmbd.mountd
 
-# mount the new share with cifs-utils and authenticate as the new user
-# you will be prompted for a password
+# Mount the new share with cifs-utils and authenticate as the new user.
+# You will be prompted for the password given previously with `ksmbd.adduser'.
 sudo mount -o user=MyUser //127.0.0.1/MyShare /mnt
 
-# you can now access the share at `/mnt'
+# You can now access the share at `/mnt'.
 sudo touch /mnt/new_file_from_cifs_utils
 
-# unmount the share
+# Unmount the share.
 sudo umount /mnt
 
-# update the password of a user in the default user database
-# `--password' can be used to give the password instead of prompting
+# Update the password of a user in the default user database.
+# `--password' can be used to give the password instead of prompting.
 sudo ksmbd.adduser --update-user=MyUser --password=MyNewPassword
 
-# delete a user from the default user database
+# Delete a user from the default user database.
 sudo ksmbd.adduser --del-user=MyUser
 
-# the utilities notify ksmbd.mountd of changes by sending it the SIGHUP signal
-# you can do this manually as well when you have e.g. edited the config file
+# The utilities notify ksmbd.mountd of changes by sending it the SIGHUP signal.
+# This can be done manually when changes are made without using the utilities.
 sudo ksmbd.control --reload
 
-# toggle ksmbd debug printing of the `all' component
-sudo ksmbd.control --debug=all
+# Toggle ksmbd debug printing of the `smb' component.
+sudo ksmbd.control --debug=smb
 
-# some config file changes require restarting the user and kernel mode daemons
-# restarting them means running `ksmbd.mountd' again after shutting them down
+# Some changes require restarting the user and kernel mode daemons.
+# Modifying any global parameter is one example of such a change.
+# Restarting means starting `ksmbd.mountd' after shutting the daemons down.
 
-# shutdown the user and kernel mode daemons
+# Shutdown the user and kernel mode daemons.
 sudo ksmbd.control --shutdown
 
-# remove the kernel module
+# Remove the kernel module.
 sudo modprobe -r ksmbd
 ```
 
-## Prebuilt binaries
+## Packages
 
-You can find them at https://repology.org/project/ksmbd-tools/versions
+The following packaging status tracker is provided by
+[the Repology project](https://repology.org)
+.
+
+[![Packaging status](https://repology.org/badge/vertical-allrepos/ksmbd-tools.svg)](https://repology.org/project/ksmbd-tools/versions)

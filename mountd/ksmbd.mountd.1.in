@@ -9,18 +9,18 @@ ksmbd.mountd \- start ksmbd.mountd and ksmbd daemons
 {-V | -h}
 .SH DESCRIPTION
 \fBksmbd.mountd\fR starts \fBksmbd.mountd\fR user mode and \fBksmbd\fR kernel mode daemons.
-\fBksmbd.mountd\fR has to parse \fBsmb.conf\fP(5kmsbd) configuration file in order to start.
+\fBksmbd.mountd\fR has to parse \fBsmb.conf\fP(5ksmbd) configuration file in order to start.
 \fBksmbd.mountd\fR can parse \fBksmbdpwd.db\fP(5) user database so as to support non-guest sessions.
 .SH OPTIONS
 .TP
 \fB\-p\fR, \fB\-\-port\fR=\fI\,PORT\/\fR
-Bind to \fI\,PORT\/\fR instead of TCP port \fB445\fR.
+Bind to \fI\,PORT\/\fR instead of TCP port \fB445\fR. \" KSMBD_CONF_DEFAULT_TCP_PORT
 .TP
 \fB\-c\fR, \fB\-\-config\fR=\fI\,SMBCONF\/\fR
-Use \fI\,SMBCONF\/\fR as configuration file instead of \fB@sysconfdir@/ksmbd/smb.conf\fR.
+Use \fI\,SMBCONF\/\fR as configuration file instead of \fB@sysconfdir@/ksmbd/smb.conf\fR. \" PATH_SMBCONF
 .TP
 \fB\-u\fR, \fB\-\-users\fR=\fI\,PWDDB\/\fR
-Use \fI\,PWDDB\/\fR as user database instead of \fB@sysconfdir@/ksmbd/ksmbdpwd.db\fR.
+Use \fI\,PWDDB\/\fR as user database instead of \fB@sysconfdir@/ksmbd/ksmbdpwd.db\fR. \" PATH_PWDDB
 .TP
 \fB\-n\fR, \fB\-\-nodetach\fR[=\fI\,WAY\/\fR]
 Do not detach process from foreground.
@@ -39,7 +39,7 @@ Display this help and exit.
 The exit status is 0 on success and 1 on failure. When detaching process from foreground, exit status is 0 if daemonization succeeded.
 .SH SIGNALS
 \fBksmbd.mountd\fR can be notified of changes to \fBsmb.conf\fR or \fBksmbdpwd.db\fR by sending it the \fBSIGHUP\fR signal.
-The manager process of \fBksmbd.mountd\fR has its PID stored in \fB@runstatedir@/ksmbd.lock\fR.
+The manager process of \fBksmbd.mountd\fR has its PID stored in \fB@runstatedir@/ksmbd.lock\fR. \" KSMBD_LOCK_FILE
 .SH COPYRIGHT
 Copyright \(co 2015-2022 ksmbd-tools contributors.
 License GPLv2: GNU GPL version 2 <https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html>.
@@ -56,7 +56,7 @@ For bug reports, use the issue tracker at https://github.com/cifsd-team/ksmbd-to
 \fBUser Database\fR
 \fBksmbdpwd.db\fP(5)
 .TP
-\fBOther Utilities\fR
+\fBUtilities\fR
 \fBksmbd.addshare\fP(1),
 \fBksmbd.adduser\fP(1),
 \fBksmbd.control\fP(1)

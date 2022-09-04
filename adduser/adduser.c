@@ -47,13 +47,13 @@ static void usage(int status)
 		g_printerr(
 			"\n"
 			"  -a, --add-user=USER         add USER to user database;\n"
-			"                              USER is 1 to " STR(KSMBD_REQ_MAX_ACCOUNT_NAME_SZ) " ASCII characters;\n"
+			"                              USER is [1, " STR(KSMBD_REQ_MAX_ACCOUNT_NAME_SZ) ") ASCII characters;\n"
 			"                              USER cannot contain colon (`:') or newline\n"
 			"  -d, --del-user=USER         delete USER from user database\n"
 			"  -u, --update-user=USER      update USER in user database\n"
 			"  -p, --password=PWD          use PWD as user password instead of prompting;\n"
 			"                              PWD is assumed to be UTF-8 encoded;\n"
-			"                              PWD is 0 to " STR(MAX_NT_PWD_LEN) " bytes;\n"
+			"                              PWD is [0, " STR(MAX_NT_PWD_LEN) ") bytes;\n"
 			"                              PWD cannot contain newline\n"
 			"  -i, --import-users=PWDDB    use PWDDB as user database instead of\n"
 			"                              `" PATH_PWDDB "'\n"
@@ -64,7 +64,7 @@ static void usage(int status)
 			"  -V, --version               output version information and exit\n"
 			"  -h, --help                  display this help and exit\n"
 			"\n"
-			"See ksmbd.adduser(1), ksmbdpwd.db(5), and smb.conf(5ksmbd) for more details.\n");
+			"See ksmbd.adduser(1) for more details.\n");
 }
 
 static const struct option opts[] = {

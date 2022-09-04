@@ -20,7 +20,7 @@ Notify \fBksmbd.mountd\fR of changes and exit.
 \fB\-d\fR, \fB\-\-debug\fR=\fI\,COMPONENT\/\fR
 Toggle \fBksmbd\fR debug printing for \fI\,COMPONENT\/\fR and exit.
 \fI\,COMPONENT\/\fR is \fBall\fR, \fBsmb\fR, \fBauth\fR, \fBvfs\fR, \fBoplock\fR, \fBipc\fR, \fBconn\fR, or \fBrdma\fR.
-Output also status of all components with enabled ones enclosed in brackets.
+Enabled ones are output enclosed in brackets (\fB[]\fR).
 .TP
 \fB\-c\fR, \fB\-\-ksmbd-version\fR
 Output \fBksmbd\fR version information and exit.
@@ -45,7 +45,7 @@ There is NO WARRANTY, to the extent permitted by law.
 For bug reports, use the issue tracker at https://github.com/cifsd-team/ksmbd-tools/issues.
 .SH "SEE ALSO"
 .TP
-\fBOther Utilities\fR
+\fBUtilities\fR
 \fBksmbd.addshare\fP(1),
 \fBksmbd.adduser\fP(1),
 \fBksmbd.mountd\fP(1)

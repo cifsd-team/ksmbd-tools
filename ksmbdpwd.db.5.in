@@ -6,11 +6,11 @@ ksmbdpwd.db \- the user database for ksmbd.mountd
 \fBksmbd.adduser\fP(1) may be used for configuring users for \fBksmbdpwd.db\fR.
 \fBksmbd.adduser\fR notifies \fBksmbd.mountd\fR of changes, if it had made any, by sending the \fBSIGHUP\fR signal to \fBksmbd.mountd\fR.
 \fBksmbd.control --reload\fR can be used for notifying \fBksmbd.mountd\fR of changes when not using \fBksmbd.adduser\fR.
-\fBksmbdpwd.db\fR is expected to be at \fB@sysconfdir@/ksmbd/ksmbdpwd.db\fR by default.
+\fBksmbdpwd.db\fR is expected to be at \fB@sysconfdir@/ksmbd/ksmbdpwd.db\fR by default. \" PATH_PWDDB
 .SH "FILE FORMAT"
 \fBksmbdpwd.db\fR consists of user entries separated by newlines.
 Each user entry consists of a user and a password, in that order, separated by a colon (\fB:\fR).
-The user is 1 to 48 ASCII characters and cannot contain newline or colon.
+The user is [1, 48) ASCII characters and cannot contain newline or colon. \" KSMBD_REQ_MAX_ACCOUNT_NAME_SZ
 The password is created from the user-input UTF-8-encoded password by converting it to UTF-16LE, then MD4-hashing it, and finally Base64-encoding and padding it.
 .SH COPYRIGHT
 Copyright \(co 2015-2022 ksmbd-tools contributors.

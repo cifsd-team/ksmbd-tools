@@ -46,24 +46,24 @@ static void usage(int status)
 		g_printerr(
 			"\n"
 			"  -a, --add-share=SHARE       add SHARE to configuration file;\n"
-			"                              SHARE is 1 to " STR(KSMBD_REQ_MAX_SHARE_NAME) " ASCII characters;\n"
+			"                              SHARE is [1, " STR(KSMBD_REQ_MAX_SHARE_NAME) ") ASCII characters;\n"
 			"                              SHARE cannot be `global';\n"
 			"                              initial parameters must be given with `--options'\n"
 			"  -d, --del-share=SHARE       delete SHARE from configuration file\n"
 			"  -u, --update-share=SHARE    update SHARE in configuration file;\n"
 			"                              updated parameters must be given with `--options'\n"
-			"  -o, --options=OPTIONS       use OPTIONS as share parameters;\n"
-			"                              OPTIONS is one argument and has format\n"
-			"                              `1st nam = 1st val<newline>2nd nam = 2nd val...';\n"
+			"  -o, --options=OPTIONS       use OPTIONS as parameters;\n"
+			"                              OPTIONS is one argument and follows format\n"
+			"                              `1st par = 1st val<newline>2nd par = 2nd val...';\n"
 			"                              separators other than newline create ambiguity;\n"
-			"                              global section parameters cannot be given\n"
+			"                              global parameters cannot be given\n"
 			"  -c, --config=SMBCONF        use SMBCONF as configuration file instead of\n"
 			"                              `" PATH_SMBCONF "'\n"
 			"  -v, --verbose               be verbose\n"
 			"  -V, --version               output version information and exit\n"
 			"  -h, --help                  display this help and exit\n"
 			"\n"
-			"See ksmbd.addshare(1) and smb.conf(5ksmbd) for more details.\n");
+			"See ksmbd.addshare(1) for more details.\n");
 }
 
 static const struct option opts[] = {
@@ -90,13 +90,13 @@ static int parse_configs(char *smbconf)
 
 	ret = test_file_access(smbconf);
 	if (ret) {
-		pr_err("Unable to access configuration file\n");
+		pr_err("Failed to access configuration file\n");
 		return ret;
 	}
 
 	ret = cp_smbconfig_hash_create(smbconf);
 	if (ret)
-		pr_err("Unable to parse configuration file\n");
+		pr_err("Failed to parse configuration file\n");
 	return ret;
 }
 
@@ -173,7 +173,7 @@ int main(int argc, char *argv[])
 	}
 
 	if (cmd != COMMAND_DEL_SHARE && !arg_opts) {
-		pr_err("No share parameters given\n");
+		pr_err("No parameters given\n");
 		goto out;
 	}
 

@@ -17,7 +17,7 @@ ksmbd.addshare \- configure shares for smb.conf of ksmbd.mountd
 .TP
 \fB\-a\fR, \fB\-\-add-share\fR=\fI\,SHARE\/\fR
 Add \fI\,SHARE\/\fR to configuration file.
-\fI\,SHARE\/\fR is 1 to 64 ASCII characters.
+\fI\,SHARE\/\fR is [1, 64) ASCII characters. \" KSMBD_REQ_MAX_SHARE_NAME
 \fI\,SHARE\/\fR cannot be \fBglobal\fR.
 Initial parameters must be given with \fB\-\-options\fR.
 .TP
@@ -29,13 +29,13 @@ Update \fI\,SHARE\/\fR in configuration file.
 Updated parameters must be given with \fB\-\-options\fR.
 .TP
 \fB\-o\fR, \fB\-\-options\fR=\fI\,OPTIONS\/\fR
-Use \fI\,OPTIONS\/\fR as share parameters.
-\fI\,OPTIONS\/\fR is one argument and has format \fB1st nam = 1st val<newline>2nd nam = 2nd val...\fR.
+Use \fI\,OPTIONS\/\fR as parameters.
+\fI\,OPTIONS\/\fR is one argument and follows format \fB1st par = 1st val<newline>2nd par = 2nd val...\fR.
 Separators other than newline create ambiguity.
-Global section parameters cannot be given.
+Global parameters cannot be given.
 .TP
 \fB\-c\fR, \fB\-\-config\fR=\fI\,SMBCONF\/\fR
-Use \fI\,SMBCONF\/\fR as configuration file instead of \fB@sysconfdir@/ksmbd/smb.conf\fR.
+Use \fI\,SMBCONF\/\fR as configuration file instead of \fB@sysconfdir@/ksmbd/smb.conf\fR. \" PATH_SMBCONF
 .TP
 \fB\-v\fR, \fB\-\-verbose\fR
 Be verbose.
@@ -60,7 +60,7 @@ For bug reports, use the issue tracker at https://github.com/cifsd-team/ksmbd-to
 \fBConfiguration File\fR
 \fBsmb.conf\fP(5ksmbd)
 .TP
-\fBOther Utilities\fR
+\fBUtilities\fR
 \fBksmbd.adduser\fP(1),
 \fBksmbd.control\fP(1),
 \fBksmbd.mountd\fP(1)
