@@ -564,6 +564,13 @@ int main(int argc, char *argv[])
 			pr_err("Out of memory\n");
 			goto out;
 		}
+		if (!g_file_test(global_conf.smbconf, G_FILE_TEST_EXISTS) &&
+		    g_file_test(PATH_SMBCONF_FALLBACK, G_FILE_TEST_EXISTS)) {
+			pr_err("Use of `%s' is deprecated, rename it to `%s' now!\n",
+					PATH_SMBCONF_FALLBACK, PATH_SMBCONF);
+			g_free(global_conf.smbconf);
+			global_conf.smbconf = g_strdup(PATH_SMBCONF_FALLBACK);
+		}
 	}
 
 	if (!global_conf.pwddb) {
