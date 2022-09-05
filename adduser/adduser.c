@@ -25,15 +25,6 @@
 #include "linux/ksmbd_server.h"
 #include "version.h"
 
-static char *arg_account = NULL;
-static char *arg_password = NULL;
-
-enum {
-	COMMAND_ADD_USER = 1,
-	COMMAND_DEL_USER,
-	COMMAND_UPDATE_USER,
-};
-
 static void usage(int status)
 {
 	g_printerr(
@@ -134,33 +125,39 @@ static int sanity_check_user_name_simple(char *uname)
 int main(int argc, char *argv[])
 {
 	int ret = -EINVAL;
-	char *pwddb = PATH_PWDDB;
-	char *smbconf = PATH_SMBCONF;
-	int c, cmd = 0;
+	char *account = NULL, *password = NULL, *pwddb = NULL, *smbconf = NULL;
+	command_fn command = NULL;
+	int c;
 
 	set_logger_app_name("ksmbd.adduser");
 
 	while ((c = getopt_long(argc, argv, "c:i:a:d:u:p:vVh", opts, NULL)) != EOF)
 		switch (c) {
 		case 'a':
-			arg_account = g_strdup(optarg);
-			cmd = COMMAND_ADD_USER;
+			g_free(account);
+			account = g_strdup(optarg);
+			command = command_add_user;
 			break;
 		case 'd':
-			arg_account = g_strdup(optarg);
-			cmd = COMMAND_DEL_USER;
+			g_free(account);
+			account = g_strdup(optarg);
+			command = command_del_user;
 			break;
 		case 'u':
-			arg_account = g_strdup(optarg);
-			cmd = COMMAND_UPDATE_USER;
+			g_free(account);
+			account = g_strdup(optarg);
+			command = command_update_user;
 			break;
 		case 'p':
-			arg_password = g_strdup(optarg);
+			g_free(password);
+			password = g_strdup(optarg);
 			break;
 		case 'i':
+			g_free(pwddb);
 			pwddb = g_strdup(optarg);
 			break;
 		case 'c':
+			g_free(smbconf);
 			smbconf = g_strdup(optarg);
 			break;
 		case 'v':
@@ -183,19 +180,30 @@ int main(int argc, char *argv[])
 		goto out;
 	}
 
-	if (!arg_account) {
+	if (!account) {
 		pr_err("No option with user name given\n");
 		goto out;
 	}
 
-	if (sanity_check_user_name_simple(arg_account)) {
+	if (sanity_check_user_name_simple(account)) {
 		pr_err("User name sanity check failure\n");
 		goto out;
 	}
 
 	if (!pwddb) {
-		pr_err("Out of memory\n");
-		goto out;
+		pwddb = g_strdup(PATH_PWDDB);
+		if (!pwddb) {
+			pr_err("Out of memory\n");
+			goto out;
+		}
+	}
+
+	if (!smbconf) {
+		smbconf = g_strdup(PATH_SMBCONF);
+		if (!smbconf) {
+			pr_err("Out of memory\n");
+			goto out;
+		}
 	}
 
 	ret = usm_init();
@@ -214,15 +222,12 @@ int main(int argc, char *argv[])
 	if (ret)
 		goto out;
 
-	if (cmd == COMMAND_ADD_USER)
-		ret = command_add_user(pwddb, arg_account, arg_password);
-	if (cmd == COMMAND_DEL_USER)
-		ret = command_del_user(pwddb, arg_account);
-	if (cmd == COMMAND_UPDATE_USER)
-		ret = command_update_user(pwddb, arg_account, arg_password);
+	if (command) {
+		ret = command(pwddb, account, password);
+		if (!ret && send_signal_to_ksmbd_mountd(SIGHUP))
+			pr_debug("Unable to notify ksmbd.mountd of changes\n");
+	}
 
-	if (cmd && !ret && send_signal_to_ksmbd_mountd(SIGHUP))
-		pr_debug("Unable to notify ksmbd.mountd of changes\n");
 out:
 	shm_destroy();
 	usm_destroy();

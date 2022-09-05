@@ -205,8 +205,10 @@ error:
 	return -EINVAL;
 }
 
-int command_del_share(char *smbconf, char *name)
+int command_del_share(char *smbconf, char *name, char *unused)
 {
+	(void)unused;
+
 	if (__open_smbconf(smbconf))
 		return -EINVAL;
 

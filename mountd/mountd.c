@@ -275,11 +275,11 @@ static int setup_signals(sighandler_t handler)
 	return 0;
 }
 
-static int parse_configs(char *pwddb, char *smbconf)
+static int parse_configs(void)
 {
 	int ret;
 
-	ret = cp_parse_pwddb(pwddb);
+	ret = cp_parse_pwddb(global_conf.pwddb);
 	if (ret == -ENOENT) {
 		pr_info("User database does not exist, "
 			"only guest sessions may work\n");
@@ -289,7 +289,7 @@ static int parse_configs(char *pwddb, char *smbconf)
 		return ret;
 	}
 
-	ret = cp_parse_smbconf(smbconf);
+	ret = cp_parse_smbconf(global_conf.smbconf);
 	if (ret)
 		pr_err("Failed to parse configuration file\n");
 	return ret;
@@ -377,7 +377,7 @@ static int worker_process_init(void)
 		goto out;
 	}
 
-	ret = parse_configs(global_conf.pwddb, global_conf.smbconf);
+	ret = parse_configs();
 	if (ret)
 		goto out;
 
@@ -516,21 +516,20 @@ int main(int argc, char *argv[])
 	int c;
 
 	set_logger_app_name("ksmbd.mountd");
-	memset(&global_conf, 0x00, sizeof(struct smbconf_global));
-	global_conf.pwddb = PATH_PWDDB;
-	global_conf.smbconf = PATH_SMBCONF;
-	pr_logger_init(PR_LOGGER_STDIO);
 
+	memset(&global_conf, 0x00, sizeof(struct smbconf_global));
 	while ((c = getopt_long(argc, argv, "p:c:u:n::vVh", opts, NULL)) != EOF)
 		switch (c) {
 		case 'p':
-			global_conf.tcp_port = cp_get_group_kv_long(optarg);
 			pr_debug("TCP port option override\n");
+			global_conf.tcp_port = cp_get_group_kv_long(optarg);
 			break;
 		case 'c':
+			g_free(global_conf.smbconf);
 			global_conf.smbconf = g_strdup(optarg);
 			break;
 		case 'u':
+			g_free(global_conf.pwddb);
 			global_conf.pwddb = g_strdup(optarg);
 			break;
 		case 'n':
@@ -559,9 +558,20 @@ int main(int argc, char *argv[])
 		goto out;
 	}
 
-	if (!global_conf.smbconf || !global_conf.pwddb) {
-		pr_err("Out of memory\n");
-		goto out;
+	if (!global_conf.smbconf) {
+		global_conf.smbconf = g_strdup(PATH_SMBCONF);
+		if (!global_conf.smbconf) {
+			pr_err("Out of memory\n");
+			goto out;
+		}
+	}
+
+	if (!global_conf.pwddb) {
+		global_conf.pwddb = g_strdup(PATH_PWDDB);
+		if (!global_conf.pwddb) {
+			pr_err("Out of memory\n");
+			goto out;
+		}
 	}
 
 	setup_signals(manager_sig_handler);

@@ -24,15 +24,6 @@
 #include "share_admin.h"
 #include "version.h"
 
-static char *arg_name;
-static char *arg_opts;
-
-enum {
-	COMMAND_ADD_SHARE = 1,
-	COMMAND_DEL_SHARE,
-	COMMAND_UPDATE_SHARE,
-};
-
 static void usage(int status)
 {
 	g_printerr(
@@ -122,30 +113,36 @@ static int sanity_check_share_name_simple(char *name)
 int main(int argc, char *argv[])
 {
 	int ret = -EINVAL;
-	char *smbconf = PATH_SMBCONF;
-	int c, cmd = 0;
+	char *share = NULL, *options = NULL, *smbconf = NULL;
+	command_fn command = NULL;
+	int c;
 
 	set_logger_app_name("ksmbd.addshare");
 
 	while ((c = getopt_long(argc, argv, "a:d:u:o:c:vVh", opts, NULL)) != EOF)
 		switch (c) {
 		case 'a':
-			arg_name = g_ascii_strdown(optarg, strlen(optarg));
-			cmd = COMMAND_ADD_SHARE;
+			g_free(share);
+			share = g_ascii_strdown(optarg, strlen(optarg));
+			command = command_add_share;
 			break;
 		case 'd':
-			arg_name = g_ascii_strdown(optarg, strlen(optarg));
-			cmd = COMMAND_DEL_SHARE;
+			g_free(share);
+			share = g_ascii_strdown(optarg, strlen(optarg));
+			command = command_del_share;
 			break;
 		case 'u':
-			arg_name = g_ascii_strdown(optarg, strlen(optarg));
-			cmd = COMMAND_UPDATE_SHARE;
+			g_free(share);
+			share = g_ascii_strdown(optarg, strlen(optarg));
+			command = command_update_share;
 			break;
 		case 'o':
-			arg_opts = strdup(optarg);
+			g_free(options);
+			options = g_strdup(optarg);
 			break;
 		case 'c':
-			smbconf = strdup(optarg);
+			g_free(smbconf);
+			smbconf = g_strdup(optarg);
 			break;
 		case 'v':
 			set_log_level(PR_DEBUG);
@@ -167,39 +164,40 @@ int main(int argc, char *argv[])
 		goto out;
 	}
 
-	if (!arg_name) {
+	if (!share) {
 		pr_err("No option with share name given\n");
 		goto out;
 	}
 
-	if (cmd != COMMAND_DEL_SHARE && !arg_opts) {
+	if ((command == command_add_share || command == command_update_share) &&
+	    !options) {
 		pr_err("No parameters given\n");
 		goto out;
 	}
 
-	if (sanity_check_share_name_simple(arg_name)) {
+	if (sanity_check_share_name_simple(share)) {
 		pr_err("Share name sanity check failure\n");
 		goto out;
 	}
 
 	if (!smbconf) {
-		pr_err("Out of memory\n");
-		goto out;
+		smbconf = g_strdup(PATH_SMBCONF);
+		if (!smbconf) {
+			pr_err("Out of memory\n");
+			goto out;
+		}
 	}
 
 	ret = parse_configs(smbconf);
 	if (ret)
 		goto out;
 
-	if (cmd == COMMAND_ADD_SHARE)
-		ret = command_add_share(smbconf, arg_name, arg_opts);
-	if (cmd == COMMAND_DEL_SHARE)
-		ret = command_del_share(smbconf, arg_name);
-	if (cmd == COMMAND_UPDATE_SHARE)
-		ret = command_update_share(smbconf, arg_name, arg_opts);
+	if (command) {
+		ret = command(smbconf, share, options);
+		if (!ret && send_signal_to_ksmbd_mountd(SIGHUP))
+			pr_debug("Unable to notify ksmbd.mountd of changes\n");
+	}
 
-	if (cmd && !ret && send_signal_to_ksmbd_mountd(SIGHUP))
-		pr_debug("Unable to notify ksmbd.mountd of changes\n");
 out:
 	cp_smbconfig_destroy();
 	return ret ? EXIT_FAILURE : EXIT_SUCCESS;
