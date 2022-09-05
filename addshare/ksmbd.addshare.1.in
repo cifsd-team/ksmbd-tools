@@ -1,6 +1,6 @@
 .TH KSMBD.ADDSHARE "1" "" "ksmbd-tools @ksmbd_tools_version@" "User Commands"
 .SH NAME
-ksmbd.addshare \- configure shares for smb.conf of ksmbd.mountd
+ksmbd.addshare \- configure shares for ksmbd.conf of ksmbd.mountd
 .SH SYNOPSIS
 .B ksmbd.addshare
 [-v] {-a \fI\,SHARE\/\fR | -u \fI\,SHARE\/\fR} [-o \fI\,OPTIONS\/\fR] [-c \fI\,SMBCONF\/\fR]
@@ -11,7 +11,7 @@ ksmbd.addshare \- configure shares for smb.conf of ksmbd.mountd
 .B ksmbd.addshare
 {-V | -h}
 .SH DESCRIPTION
-\fBksmbd.addshare\fR configures shares for \fBsmb.conf\fP(5ksmbd) configuration file of \fBksmbd.mountd\fP(1) user mode daemon.
+\fBksmbd.addshare\fR configures shares for \fBksmbd.conf\fP(5) configuration file of \fBksmbd.mountd\fP(1) user mode daemon.
 \fBksmbd.addshare\fR notifies \fBksmbd.mountd\fR of changes if it had made any.
 .SH OPTIONS
 .TP
@@ -35,7 +35,7 @@ Separators other than newline create ambiguity.
 Global parameters cannot be given.
 .TP
 \fB\-c\fR, \fB\-\-config\fR=\fI\,SMBCONF\/\fR
-Use \fI\,SMBCONF\/\fR as configuration file instead of \fB@sysconfdir@/ksmbd/smb.conf\fR. \" PATH_SMBCONF
+Use \fI\,SMBCONF\/\fR as configuration file instead of \fB@sysconfdir@/ksmbd/ksmbd.conf\fR. \" PATH_SMBCONF
 .TP
 \fB\-v\fR, \fB\-\-verbose\fR
 Be verbose.
@@ -58,7 +58,7 @@ For bug reports, use the issue tracker at https://github.com/cifsd-team/ksmbd-to
 .SH "SEE ALSO"
 .TP
 \fBConfiguration File\fR
-\fBsmb.conf\fP(5ksmbd)
+\fBksmbd.conf\fP(5)
 .TP
 \fBUtilities\fR
 \fBksmbd.adduser\fP(1),

@@ -9,7 +9,7 @@ ksmbd.mountd \- start ksmbd.mountd and ksmbd daemons
 {-V | -h}
 .SH DESCRIPTION
 \fBksmbd.mountd\fR starts \fBksmbd.mountd\fR user mode and \fBksmbd\fR kernel mode daemons.
-\fBksmbd.mountd\fR has to parse \fBsmb.conf\fP(5ksmbd) configuration file in order to start.
+\fBksmbd.mountd\fR has to parse \fBksmbd.conf\fP(5) configuration file in order to start.
 \fBksmbd.mountd\fR can parse \fBksmbdpwd.db\fP(5) user database so as to support non-guest sessions.
 .SH OPTIONS
 .TP
@@ -17,7 +17,7 @@ ksmbd.mountd \- start ksmbd.mountd and ksmbd daemons
 Bind to \fI\,PORT\/\fR instead of TCP port \fB445\fR. \" KSMBD_CONF_DEFAULT_TCP_PORT
 .TP
 \fB\-c\fR, \fB\-\-config\fR=\fI\,SMBCONF\/\fR
-Use \fI\,SMBCONF\/\fR as configuration file instead of \fB@sysconfdir@/ksmbd/smb.conf\fR. \" PATH_SMBCONF
+Use \fI\,SMBCONF\/\fR as configuration file instead of \fB@sysconfdir@/ksmbd/ksmbd.conf\fR. \" PATH_SMBCONF
 .TP
 \fB\-u\fR, \fB\-\-users\fR=\fI\,PWDDB\/\fR
 Use \fI\,PWDDB\/\fR as user database instead of \fB@sysconfdir@/ksmbd/ksmbdpwd.db\fR. \" PATH_PWDDB
@@ -38,7 +38,7 @@ Display this help and exit.
 .SH "EXIT STATUS"
 The exit status is 0 on success and 1 on failure. When detaching process from foreground, exit status is 0 if daemonization succeeded.
 .SH SIGNALS
-\fBksmbd.mountd\fR can be notified of changes to \fBsmb.conf\fR or \fBksmbdpwd.db\fR by sending it the \fBSIGHUP\fR signal.
+\fBksmbd.mountd\fR can be notified of changes to \fBksmbd.conf\fR or \fBksmbdpwd.db\fR by sending it the \fBSIGHUP\fR signal.
 The manager process of \fBksmbd.mountd\fR has its PID stored in \fB@runstatedir@/ksmbd.lock\fR. \" KSMBD_LOCK_FILE
 .SH COPYRIGHT
 Copyright \(co 2015-2022 ksmbd-tools contributors.
@@ -51,7 +51,7 @@ For bug reports, use the issue tracker at https://github.com/cifsd-team/ksmbd-to
 .SH "SEE ALSO"
 .TP
 \fBConfiguration File\fR
-\fBsmb.conf\fP(5ksmbd)
+\fBksmbd.conf\fP(5)
 .TP
 \fBUser Database\fR
 \fBksmbdpwd.db\fP(5)

@@ -86,8 +86,8 @@ man 1 ksmbd.addshare
 man 1 ksmbd.adduser
 man 1 ksmbd.control
 man 1 ksmbd.mountd
+man 5 ksmbd.conf
 man 5 ksmbdpwd.db
-man 5ksmbd smb.conf
 ```
 
 Example session:
@@ -95,12 +95,12 @@ Example session:
 # If you built and installed ksmbd-tools yourself using autoconf defaults,
 # the utilities are in `/usr/local/sbin',
 # the default user database is `/usr/local/etc/ksmbd/ksmbdpwd.db', and
-# the default configuration file is `/usr/local/etc/ksmbd/smb.conf'.
+# the default configuration file is `/usr/local/etc/ksmbd/ksmbd.conf'.
 
 # Otherwise it is likely that,
 # the utilities are in `/usr/sbin',
 # the default user database is `/etc/ksmbd/ksmbdpwd.db', and
-# the default configuration file is `/etc/ksmbd/smb.conf'.
+# the default configuration file is `/etc/ksmbd/ksmbd.conf'.
 
 # Create the share path directory.
 # The share stores files in this directory using its underlying filesystem.

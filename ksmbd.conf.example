@@ -1,4 +1,4 @@
-; see smb.conf(5ksmbd) for details
+; see ksmbd.conf(5) for details
 
 [global]
 	; global section parameters

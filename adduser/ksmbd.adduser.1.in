@@ -12,7 +12,7 @@ ksmbd.adduser \- configure users for ksmbdpwd.db of ksmbd.mountd
 {-V | -h}
 .SH DESCRIPTION
 \fBksmbd.adduser\fR configures users for \fBksmbdpwd.db\fP(5) user database of \fBksmbd.mountd\fP(1) user mode daemon.
-\fBksmbd.adduser\fR can parse \fBsmb.conf\fP(5ksmbd) configuration file so as to guard against deletion of users that are depended on.
+\fBksmbd.adduser\fR can parse \fBksmbd.conf\fP(5) configuration file so as to guard against deletion of users that are depended on.
 \fBksmbd.adduser\fR notifies \fBksmbd.mountd\fR of changes if it had made any.
 .SH OPTIONS
 .TP
@@ -38,7 +38,7 @@ Use \fI\,PWDDB\/\fR as user database instead of \fB@sysconfdir@/ksmbd/ksmbdpwd.d
 This option does nothing by itself.
 .TP
 \fB\-c\fR, \fB\-\-config\fR=\fI\,SMBCONF\/\fR
-Use \fI\,SMBCONF\/\fR as configuration file instead of \fB@sysconfdir@/ksmbd/smb.conf\fR. \" PATH_SMBCONF
+Use \fI\,SMBCONF\/\fR as configuration file instead of \fB@sysconfdir@/ksmbd/ksmbd.conf\fR. \" PATH_SMBCONF
 .TP
 \fB\-v\fR, \fB\-\-verbose\fR
 Be verbose.
@@ -64,7 +64,7 @@ For bug reports, use the issue tracker at https://github.com/cifsd-team/ksmbd-to
 \fBksmbdpwd.db\fP(5)
 .TP
 \fBConfiguration File\fR
-\fBsmb.conf\fP(5ksmbd)
+\fBksmbd.conf\fP(5)
 .TP
 \fBUtilities\fR
 \fBksmbd.addshare\fP(1),

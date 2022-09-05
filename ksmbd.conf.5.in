@@ -1,14 +1,14 @@
-.TH SMB.CONF "5" "" "ksmbd-tools @ksmbd_tools_version@" "File Formats and Conventions"
+.TH KSMBD.CONF "5" "" "ksmbd-tools @ksmbd_tools_version@" "File Formats and Conventions"
 .SH NAME
-smb.conf \- the configuration file for ksmbd.mountd
+ksmbd.conf \- the configuration file for ksmbd.mountd
 .SH DESCRIPTION
-\fBsmb.conf\fR is the configuration file for \fBksmbd.mountd\fP(1) user mode daemon.
-\fBksmbd.addshare\fP(1) may be used for configuring shares for \fBsmb.conf\fR.
+\fBksmbd.conf\fR is the configuration file for \fBksmbd.mountd\fP(1) user mode daemon.
+\fBksmbd.addshare\fP(1) may be used for configuring shares for \fBksmbd.conf\fR.
 \fBksmbd.addshare\fR notifies \fBksmbd.mountd\fR of changes, if it had made any, by sending the \fBSIGHUP\fR signal to \fBksmbd.mountd\fR.
 \fBksmbd.control --reload\fR can be used for notifying \fBksmbd.mountd\fR of changes when not using \fBksmbd.addshare\fR.
-\fBsmb.conf\fR is expected to be at \fB@sysconfdir@/ksmbd/smb.conf\fR by default. \" PATH_SMBCONF
+\fBksmbd.conf\fR is expected to be at \fB@sysconfdir@/ksmbd/ksmbd.conf\fR by default. \" PATH_SMBCONF
 .SH "FILE FORMAT"
-\fBsmb.conf\fR consists of sections with each new section marking the end of the previous one.
+\fBksmbd.conf\fR consists of sections with each new section marking the end of the previous one.
 A new section begins with the section name enclosed in brackets (\fB[]\fR) followed by a newline.
 Each section may have parameter entries separated by newlines.
 A parameter entry consists of a parameter and a value, in that order, separated by an equal sign (\fB=\fR).

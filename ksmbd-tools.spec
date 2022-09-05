@@ -57,9 +57,9 @@ make %{?_smp_mflags}
 %{_mandir}/man1/ksmbd.adduser.1*
 %{_mandir}/man1/ksmbd.control.1*
 %{_mandir}/man1/ksmbd.mountd.1*
+%{_mandir}/man5/ksmbd.conf.5*
 %{_mandir}/man5/ksmbdpwd.db.5*
-%{_mandir}/man5/smb.conf.5ksmbd*
-%{_sysconfdir}/ksmbd/smb.conf.example
+%{_sysconfdir}/ksmbd/ksmbd.conf.example
 %{_unitdir}/ksmbd.service
 
 %changelog

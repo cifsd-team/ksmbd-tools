@@ -111,7 +111,7 @@ else
 endif
 
 install_data(
-  sources: 'smb.conf.example',
+  sources: 'ksmbd.conf.example',
   install_dir: get_option('sysconfdir') / 'ksmbd',
 )
 
@@ -131,8 +131,8 @@ in_data = configuration_data({
 })
 
 configure_file(
-  input: 'smb.conf.5ksmbd.in',
-  output: 'smb.conf.5ksmbd',
+  input: 'ksmbd.conf.5.in',
+  output: 'ksmbd.conf.5',
   install_dir: get_option('mandir') / 'man5',
   configuration: in_data,
 )
