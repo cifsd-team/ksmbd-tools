@@ -767,3 +767,99 @@ error:
 	cp_smbconfig_destroy();
 	return -EINVAL;
 }
+
+void cp_insert_user(char *name, GHashTable *map)
+{
+	struct ksmbd_user *user;
+	user = usm_lookup_user(name);
+	if (!user) {
+		pr_info("Drop non-existing user `%s'\n", name);
+		return;
+	}
+
+	if (g_hash_table_lookup(map, user->name)) {
+		pr_debug("User already exists in a map: %s\n", name);
+		return;
+	}
+
+	g_hash_table_insert(map, user->name, user);
+}
+
+void cp_insert_user_group(char *gname, GHashTable *map)
+{
+	const char *fname="/etc/group";
+	int fd;
+	GMappedFile *file;
+	gchar *contents = NULL;
+	GError *err = NULL;
+	int i;
+	char **lines = NULL;
+	char **fields = NULL;
+	char **names = NULL;
+
+	//skips if there is only an '@'
+	if (*gname == '\0')
+		return;
+
+	fd = g_open(fname, O_RDONLY, 0);
+	if (fd == -1) {
+		pr_err("Can't open `%s': %m\n", fname);
+		return;
+	}
+
+	file = g_mapped_file_new_from_fd(fd, FALSE, &err);
+	if (err) {
+		pr_err("%s: `%s'\n", err->message, fname);
+		g_error_free(err);
+		goto out;
+	}
+
+	contents = g_mapped_file_get_contents(file);
+	if (!contents)
+		goto out;
+
+	lines = g_strsplit_set(contents, "\n", -1);
+	for (i = 0; lines[i] != NULL; i++) {
+		//Skip if it's wrong line.
+		if (lines[i]!=g_strstr_len(lines[i],-1,gname))
+			continue;
+
+		//Split the line, and users are record in the 4th string.
+		fields = g_strsplit_set(lines[i], ":", -1);
+
+		//End if no users in the group
+		if (fields[3][0]=='\0')
+			goto out;
+
+		names = g_strsplit_set(fields[3], ",", -1);
+		for (i = 0; names[i] != NULL; i++) {
+			char *p = names[i];
+			p = cp_ltrim(p);
+			if (!p)
+				continue;
+
+			cp_insert_user(p, map);
+		}
+		goto out;
+	}
+
+	pr_info("Drop non-existing usergroup `%s'\n", gname);
+
+out:
+	if (file)
+		g_mapped_file_unref(file);
+
+	if (fd) {
+		g_close(fd, &err);
+		if (err) {
+			pr_err("%s: /etc/group\n", err->message);
+			g_error_free(err);
+		}
+	}
+	if(lines)
+		g_strfreev(lines);
+	if(fields)
+		g_strfreev(fields);
+	if(names)
+		g_strfreev(names);
+}

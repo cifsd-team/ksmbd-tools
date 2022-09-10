@@ -45,5 +45,7 @@ unsigned long cp_get_group_kv_long(char *v);
 int cp_get_group_kv_config_opt(char *v);
 char **cp_get_group_kv_list(char *v);
 void cp_group_kv_list_free(char **list);
+void cp_insert_user(char *name, GHashTable *map);
+void cp_insert_user_group(char *gname, GHashTable *map);
 
 #endif /* __KSMBD_CONFIG_H__ */

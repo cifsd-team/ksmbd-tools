@@ -269,26 +269,18 @@ static GHashTable *parse_list(GHashTable *map, char **list)
 		return map;
 
 	for (i = 0;  list[i] != NULL; i++) {
-		struct ksmbd_user *user;
 		char *p = list[i];
 
 		p = cp_ltrim(p);
 		if (!p)
 			continue;
 
-		user = usm_lookup_user(p);
-		if (!user) {
-			pr_info("Drop non-existing user `%s'\n", p);
+		if (*p=='@') {
+			cp_insert_user_group(p+1, map);
 			continue;
 		}
 
-		if (g_hash_table_lookup(map, user->name)) {
-			pr_debug("User `%s' already exists in a map\n",
-				 user->name);
-			continue;
-		}
-
-		g_hash_table_insert(map, user->name, user);
+		cp_insert_user(p, map);
 	}
 
 	cp_group_kv_list_free(list);
