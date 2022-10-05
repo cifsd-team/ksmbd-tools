@@ -41,7 +41,7 @@ static void samr_ch_free(struct connect_handle *ch)
 	g_hash_table_remove(ch_table, &(ch->handle));
 	g_rw_lock_writer_unlock(&ch_table_lock);
 
-	free(ch);
+	g_free(ch);
 }
 
 static struct connect_handle *samr_ch_lookup(unsigned char *handle)
@@ -389,7 +389,7 @@ static int samr_query_user_info_return(struct ksmbd_rpc_pipe *pipe)
 
 	profile_path = g_try_malloc0(home_dir_len + strlen("profile"));
 	if (!profile_path) {
-		free(home_dir);
+		g_free(home_dir);
 		return KSMBD_RPC_ENOMEM;
 	}
 
@@ -508,8 +508,8 @@ static int samr_query_user_info_return(struct ksmbd_rpc_pipe *pipe)
 	for (i = 0; i < 21; i++)
 		ndr_write_int8(dce, 0xff);
 
-	free(home_dir);
-	free(profile_path);
+	g_free(home_dir);
+	g_free(profile_path);
 	return KSMBD_RPC_OK;
 }
 

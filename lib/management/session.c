@@ -31,7 +31,7 @@ static void kill_ksmbd_session(struct ksmbd_session *sess)
 	g_list_foreach(sess->tree_conns, __free_func, NULL);
 	g_list_free(sess->tree_conns);
 	g_rw_lock_clear(&sess->update_lock);
-	free(sess);
+	g_free(sess);
 }
 
 static struct ksmbd_session *new_ksmbd_session(unsigned long long id,

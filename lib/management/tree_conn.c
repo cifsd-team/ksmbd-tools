@@ -32,7 +32,7 @@ void tcm_tree_conn_free(struct ksmbd_tree_conn *conn)
 {
 	shm_close_connection(conn->share);
 	put_ksmbd_share(conn->share);
-	free(conn);
+	g_free(conn);
 }
 
 int tcm_handle_tree_connect(struct ksmbd_tree_connect_request *req,

@@ -111,8 +111,8 @@ static struct ksmbd_rpc_pipe *rpc_pipe_lookup(unsigned int id)
 static void dcerpc_free(struct ksmbd_dcerpc *dce)
 {
 	if (!(dce->flags & KSMBD_DCERPC_EXTERNAL_PAYLOAD))
-		free(dce->payload);
-	free(dce);
+		g_free(dce->payload);
+	g_free(dce);
 }
 
 static struct ksmbd_dcerpc *dcerpc_alloc(unsigned int flags, int sz)
@@ -125,7 +125,7 @@ static struct ksmbd_dcerpc *dcerpc_alloc(unsigned int flags, int sz)
 
 	dce->payload = g_try_malloc0(sz);
 	if (!dce->payload) {
-		free(dce);
+		g_free(dce);
 		return NULL;
 	}
 
@@ -183,7 +183,7 @@ static void __rpc_pipe_free(struct ksmbd_rpc_pipe *pipe)
 		dcerpc_free(pipe->dce);
 	if (pipe->entries)
 		g_array_free(pipe->entries, 1);
-	free(pipe);
+	g_free(pipe);
 }
 
 static void rpc_pipe_free(struct ksmbd_rpc_pipe *pipe)
@@ -887,8 +887,8 @@ static void dcerpc_bind_req_free(struct dcerpc_bind_request *hdr)
 	int i;
 
 	for (i = 0; i < hdr->num_contexts; i++)
-		free(hdr->list[i].transfer_syntaxes);
-	free(hdr->list);
+		g_free(hdr->list[i].transfer_syntaxes);
+	g_free(hdr->list);
 	hdr->list = NULL;
 	hdr->num_contexts = 0;
 }
@@ -945,7 +945,7 @@ static int dcerpc_parse_bind_req(struct ksmbd_dcerpc *dce,
 	return KSMBD_RPC_OK;
 
 fail:
-	free(hdr->list);
+	g_free(hdr->list);
 	return ret;
 }
 

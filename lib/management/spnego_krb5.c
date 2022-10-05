@@ -344,7 +344,7 @@ static int setup_krb5_ctx(struct spnego_mech_ctx *mech_ctx)
 
 	krb_retval = krb5_init_context(&krb5_ctx->context);
 	if (krb_retval) {
-		free(krb5_ctx);
+		g_free(krb5_ctx);
 		pr_err("while initializing krb5 context\n");
 		return -EINVAL;
 	}
@@ -355,7 +355,7 @@ static int setup_krb5_ctx(struct spnego_mech_ctx *mech_ctx)
 			&krb5_ctx->creds, &krb5_ctx->keytab);
 	if (krb_retval) {
 		krb5_free_context(krb5_ctx->context);
-		free(krb5_ctx);
+		g_free(krb5_ctx);
 		return -EINVAL;
 	}
 
@@ -386,7 +386,7 @@ static void cleanup_krb5(struct spnego_mech_ctx *mech_ctx)
 		krb5_free_cred_contents(krb5_ctx->context, &krb5_ctx->creds);
 		krb5_kt_close(krb5_ctx->context, krb5_ctx->keytab);
 		krb5_free_context(krb5_ctx->context);
-		free(krb5_ctx);
+		g_free(krb5_ctx);
 		mech_ctx->private = NULL;
 	}
 	if (mech_ctx->params.krb5.service_name)

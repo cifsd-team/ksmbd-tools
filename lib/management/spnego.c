@@ -148,10 +148,10 @@ static int decode_negTokenInit(unsigned char *negToken, int token_len,
 			asn1_oid_decode(&ctx, end, &oid, &len) == 0 ||
 			compare_oid(oid, len, SPNEGO_OID, SPNEGO_OID_LEN)) {
 		pr_debug("Error decoding SPNEGO OID\n");
-		free(oid);
+		g_free(oid);
 		return -EINVAL;
 	}
-	free(oid);
+	g_free(oid);
 
 	/* negoTokenInit */
 	if (decode_asn1_header(&ctx, &end, ASN1_CTX, ASN1_CON, 0) ||
@@ -177,11 +177,11 @@ static int decode_negTokenInit(unsigned char *negToken, int token_len,
 	}
 
 	if (!is_supported_mech(oid, len, mech_type)) {
-		free(oid);
+		g_free(oid);
 		pr_debug("Not a supported mechanism\n");
 		return -EINVAL;
 	}
-	free(oid);
+	g_free(oid);
 
 	ctx.pointer = mech_types_end;
 	/* mechToken */
@@ -207,10 +207,10 @@ static int decode_negTokenInit(unsigned char *negToken, int token_len,
 			compare_oid(oid, len, KRB5_OID,
 				ARRAY_SIZE(KRB5_OID))) {
 		pr_debug("Not a Kerberos 5 OID\n");
-		free(oid);
+		g_free(oid);
 		return -EINVAL;
 	}
-	free(oid);
+	g_free(oid);
 
 	/* AP_REQ id */
 	if (asn1_read(&ctx, &id, 2) == 0 || id[0] != 1 || id[1] != 0) {
@@ -240,7 +240,7 @@ static int encode_negTokenTarg(char *in_blob, int in_len,
 		return -ENOMEM;
 	if (asn1_oid_encode(KRB5_OID, ARRAY_SIZE(KRB5_OID),
 			&krb5_oid, &krb5_oid_len)) {
-		free(sup_oid);
+		g_free(sup_oid);
 		return -ENOMEM;
 	}
 
@@ -311,8 +311,8 @@ static int encode_negTokenTarg(char *in_blob, int in_len,
 	*buf++ = 0;
 	memcpy(buf, in_blob, in_len);
 
-	free(sup_oid);
-	free(krb5_oid);
+	g_free(sup_oid);
+	g_free(krb5_oid);
 }
 
 int spnego_handle_authen_request(struct ksmbd_spnego_authen_request *req,

@@ -40,7 +40,7 @@ static void lsarpc_ph_free(struct policy_handle *ph)
 	g_hash_table_remove(ph_table, &(ph->handle));
 	g_rw_lock_writer_unlock(&ph_table_lock);
 
-	free(ph);
+	g_free(ph);
 }
 
 static struct policy_handle *lsarpc_ph_lookup(unsigned char *handle)
@@ -266,7 +266,7 @@ static int lsarpc_lookup_sid2_invoke(struct ksmbd_rpc_pipe *pipe)
 	pipe->entry_processed = __lsarpc_entry_processed;
 	return KSMBD_RPC_OK;
 fail:
-	free(ni);
+	g_free(ni);
 	return KSMBD_RPC_EINVALID_PARAMETER;
 }
 

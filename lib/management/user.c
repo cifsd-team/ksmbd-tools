@@ -26,7 +26,7 @@ static void kill_ksmbd_user(struct ksmbd_user *user)
 	free(user->pass_b64);
 	free(user->pass);
 	g_rw_lock_clear(&user->update_lock);
-	free(user);
+	g_free(user);
 }
 
 static int __usm_remove_user(struct ksmbd_user *user)

@@ -42,7 +42,7 @@ struct ksmbd_ipc_msg *ipc_msg_alloc(size_t sz)
 
 void ipc_msg_free(struct ksmbd_ipc_msg *msg)
 {
-	free(msg);
+	g_free(msg);
 }
 
 static int generic_event(int type, void *payload, size_t sz)

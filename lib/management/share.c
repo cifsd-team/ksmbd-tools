@@ -117,7 +117,7 @@ static void kill_ksmbd_share(struct ksmbd_share *share)
 	free(share->veto_list);
 	free(share->guest_account);
 	g_rw_lock_clear(&share->update_lock);
-	free(share);
+	g_free(share);
 }
 
 static int __shm_remove_share(struct ksmbd_share *share)

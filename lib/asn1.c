@@ -247,7 +247,7 @@ asn1_oid_decode(struct asn1_ctx *ctx,
 	optr = *oid;
 
 	if (!asn1_subid_decode(ctx, &subid)) {
-		free(*oid);
+		g_free(*oid);
 		*oid = NULL;
 		return 0;
 	}
@@ -269,13 +269,13 @@ asn1_oid_decode(struct asn1_ctx *ctx,
 	while (ctx->pointer < eoc) {
 		if (++(*len) > size) {
 			ctx->error = ASN1_ERR_DEC_BADVALUE;
-			free(*oid);
+			g_free(*oid);
 			*oid = NULL;
 			return 0;
 		}
 
 		if (!asn1_subid_decode(ctx, optr++)) {
-			free(*oid);
+			g_free(*oid);
 			*oid = NULL;
 			return 0;
 		}
