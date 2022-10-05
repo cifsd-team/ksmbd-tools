@@ -162,7 +162,8 @@ static char *prompt_password(char *pswd_raw_opt, size_t *sz_raw)
 static char *get_utf16le_password(char *pswd_raw_opt, long *len)
 {
 	size_t sz_raw;
-	char *pswd_raw, *pswd_utf16le;
+	g_autofree char *pswd_raw = NULL;
+	char *pswd_utf16le;
 	gsize bytes_read = 0;
 	gsize bytes_written = 0;
 
@@ -176,20 +177,17 @@ static char *get_utf16le_password(char *pswd_raw_opt, long *len)
 				      KSMBD_CHARSET_DEFAULT,
 				      &bytes_read,
 				      &bytes_written);
-	if (!pswd_utf16le) {
-		g_free(pswd_raw);
+	if (!pswd_utf16le)
 		return NULL;
-	}
 
 	*len = bytes_written;
-	g_free(pswd_raw);
 	return pswd_utf16le;
 }
 
 static void __sanity_check(char *pswd_hash, char *pswd_b64)
 {
 	size_t pass_sz;
-	char *pass = base64_decode(pswd_b64, &pass_sz);
+	g_autofree char *pass = base64_decode(pswd_b64, &pass_sz);
 
 	if (!pass) {
 		pr_err("Unable to decode NT hash\n");
@@ -200,14 +198,15 @@ static void __sanity_check(char *pswd_hash, char *pswd_b64)
 		pr_err("NT hash encoding error\n");
 		exit(EXIT_FAILURE);
 	}
-	g_free(pass);
 }
 
 static char *get_base64_password(char *pswd_raw_opt)
 {
 	struct md4_ctx mctx;
 	long len;
-	char *pswd_utf16le, *pswd_hash, *pswd_b64;
+	g_autofree char *pswd_utf16le = NULL;
+	g_autofree char *pswd_hash = NULL;
+	char *pswd_b64;
 
 	pswd_utf16le = get_utf16le_password(pswd_raw_opt, &len);
 	if (!pswd_utf16le)
@@ -215,7 +214,6 @@ static char *get_base64_password(char *pswd_raw_opt)
 
 	pswd_hash = g_try_malloc0(sizeof(mctx.hash) + 1);
 	if (!pswd_hash) {
-		g_free(pswd_utf16le);
 		pr_err("Out of memory\n");
 		return NULL;
 	}
@@ -228,8 +226,6 @@ static char *get_base64_password(char *pswd_raw_opt)
 				 MD4_HASH_WORDS * sizeof(unsigned int));
 
 	__sanity_check(pswd_hash, pswd_b64);
-	g_free(pswd_utf16le);
-	g_free(pswd_hash);
 	return pswd_b64;
 }
 
@@ -361,7 +357,7 @@ int command_add_user(char *pwddb, char *account, char *password)
 int command_update_user(char *pwddb, char *account, char *password)
 {
 	struct ksmbd_user *user;
-	char *pswd;
+	g_autofree char *pswd = NULL;
 
 	user = usm_lookup_user(account);
 	if (!user) {
@@ -383,7 +379,6 @@ int command_update_user(char *pwddb, char *account, char *password)
 	}
 
 	put_ksmbd_user(user);
-	g_free(pswd);
 
 	if (__opendb_file(pwddb))
 		return -EINVAL;

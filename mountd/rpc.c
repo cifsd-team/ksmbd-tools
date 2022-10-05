@@ -422,7 +422,7 @@ static gchar *ndr_convert_char_to_unicode(struct ksmbd_dcerpc *dce, char *str,
 
 int ndr_write_vstring(struct ksmbd_dcerpc *dce, void *value)
 {
-	gchar *out;
+	g_autofree char *out = NULL;
 	gsize bytes_written = 0;
 
 	size_t raw_len, str_len;
@@ -456,13 +456,12 @@ int ndr_write_vstring(struct ksmbd_dcerpc *dce, void *value)
 	ret |= ndr_write_bytes(dce, out, bytes_written);
 	auto_align_offset(dce);
 
-	g_free(out);
 	return ret;
 }
 
 int ndr_write_string(struct ksmbd_dcerpc *dce, char *str)
 {
-	gchar *out;
+	g_autofree char *out = NULL;
 	gsize bytes_written = 0;
 
 	size_t len;
@@ -482,13 +481,12 @@ int ndr_write_string(struct ksmbd_dcerpc *dce, char *str)
 	ret |= ndr_write_bytes(dce, out, bytes_written);
 	auto_align_offset(dce);
 
-	g_free(out);
 	return ret;
 }
 
 int ndr_write_lsa_string(struct ksmbd_dcerpc *dce, char *str)
 {
-	gchar *out;
+	g_autofree char *out = NULL;
 	gsize bytes_written = 0;
 
 	size_t len;
@@ -508,7 +506,6 @@ int ndr_write_lsa_string(struct ksmbd_dcerpc *dce, char *str)
 	ret |= ndr_write_bytes(dce, out, bytes_written);
 	auto_align_offset(dce);
 
-	g_free(out);
 	return ret;
 }
 

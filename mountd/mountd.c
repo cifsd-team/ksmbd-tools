@@ -135,8 +135,8 @@ out:
  */
 static int write_file_safe(char *path, char *buff, size_t length, int mode)
 {
-	int fd, ret = -EINVAL;
-	char *path_tmp = g_strdup_printf("%s.tmp", path);
+	int fd;
+	g_autofree char *path_tmp = g_strdup_printf("%s.tmp", path);
 
 	if (g_file_test(path_tmp, G_FILE_TEST_EXISTS))
 		unlink(path_tmp);
@@ -144,13 +144,13 @@ static int write_file_safe(char *path, char *buff, size_t length, int mode)
 	fd = open(path_tmp, O_CREAT | O_EXCL | O_WRONLY, mode);
 	if (fd < 0) {
 		pr_err("Can't create `%s': %m\n", path_tmp);
-		goto err_out;
+		return -EINVAL;
 	}
 
 	if (write(fd, buff, length) == -1) {
 		pr_err("Can't write `%s': %m\n", path_tmp);
 		close(fd);
-		goto err_out;
+		return -EINVAL;
 	}
 
 	fsync(fd);
@@ -158,31 +158,21 @@ static int write_file_safe(char *path, char *buff, size_t length, int mode)
 
 	if (rename(path_tmp, path) == -1) {
 		pr_err("Can't rename `%s' to `%s': %m\n", path_tmp, path);
-		goto err_out;
+		return -EINVAL;
 	}
-	ret = 0;
 
-err_out:
-	g_free(path_tmp);
-	return ret;
+	return 0;
 }
 
 static int create_subauth_file(void)
 {
-	char *subauth_buf;
-	GRand *rnd;
-	int ret;
-
-	rnd = g_rand_new();
-	subauth_buf = g_strdup_printf("%d:%d:%d\n", g_rand_int_range(rnd, 0, INT_MAX),
+	GRand *rnd = g_rand_new();
+	g_autofree char *subauth_buf = g_strdup_printf("%d:%d:%d\n", g_rand_int_range(rnd, 0, INT_MAX),
 		g_rand_int_range(rnd, 0, INT_MAX),
 		g_rand_int_range(rnd, 0, INT_MAX));
 
-	ret = write_file_safe(PATH_SUBAUTH, subauth_buf, strlen(subauth_buf),
+	return write_file_safe(PATH_SUBAUTH, subauth_buf, strlen(subauth_buf),
 		S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
-	g_free(subauth_buf);
-
-	return ret;
 }
 
 static int generate_sub_auth(void)

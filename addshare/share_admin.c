@@ -138,7 +138,7 @@ static void update_share_cb(gpointer key,
 
 int command_add_share(char *smbconf, char *name, char *opts)
 {
-	char *new_name = NULL;
+	g_autofree char *new_name = NULL;
 
 	if (g_hash_table_lookup(parser.groups, name)) {
 		pr_err("Share `%s' already exists\n", name);
@@ -147,44 +147,40 @@ int command_add_share(char *smbconf, char *name, char *opts)
 
 	new_name = new_group_name(name);
 	if (cp_parse_external_smbconf_group(new_name, opts))
-		goto error;
+		return -EINVAL;
 
 	if (__open_smbconf(smbconf))
-		goto error;
+		return -EINVAL;
 
 	pr_info("Adding share `%s'\n", name);
 	g_hash_table_foreach(parser.groups, write_share_cb, NULL);
 	close(conf_fd);
-	g_free(new_name);
 	return 0;
 
-error:
-	g_free(new_name);
-	return -EINVAL;
 }
 
 int command_update_share(char *smbconf, char *name, char *opts)
 {
 	struct smbconf_group *existing_group;
 	struct smbconf_group *update_group;
-	char *aux_name = NULL;
+	g_autofree char *aux_name = NULL;
 
 	existing_group = g_hash_table_lookup(parser.groups, name);
 	if (!existing_group) {
 		pr_err("Share `%s' does not exist\n", name);
-		goto error;
+		return -EINVAL;
 	}
 
 	aux_name = aux_group_name(name);
 	if (cp_parse_external_smbconf_group(aux_name, opts))
-		goto error;
+		return -EINVAL;
 
 	/* get rid of [] */
 	sprintf(aux_name, "%s%s", AUX_GROUP_PREFIX, name);
 	update_group = g_hash_table_lookup(parser.groups, aux_name);
 	if (!update_group) {
 		pr_err("External group `%s' does not exist\n", aux_name);
-		goto error;
+		return -EINVAL;
 	}
 
 	g_free(existing_group->name);
@@ -195,16 +191,12 @@ int command_update_share(char *smbconf, char *name, char *opts)
 			     existing_group->kv);
 
 	if (__open_smbconf(smbconf))
-		goto error;
+		return -EINVAL;
 
 	pr_info("Updating share `%s'\n", name);
 	g_hash_table_foreach(parser.groups, write_share_cb, NULL);
 	close(conf_fd);
-	g_free(aux_name);
 	return 0;
-error:
-	g_free(aux_name);
-	return -EINVAL;
 }
 
 int command_del_share(char *smbconf, char *name, char *unused)

@@ -366,7 +366,8 @@ static int samr_query_user_info_return(struct ksmbd_rpc_pipe *pipe)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
 	struct connect_handle *ch;
-	char *home_dir, *profile_path;
+	char *home_dir;
+	g_autofree char *profile_path = NULL;
 	char hostname[NAME_MAX];
 	int home_dir_len, i;
 
@@ -509,7 +510,6 @@ static int samr_query_user_info_return(struct ksmbd_rpc_pipe *pipe)
 		ndr_write_int8(dce, 0xff);
 
 	g_free(home_dir);
-	g_free(profile_path);
 	return KSMBD_RPC_OK;
 }
 

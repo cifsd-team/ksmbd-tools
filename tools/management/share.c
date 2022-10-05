@@ -229,42 +229,26 @@ void shm_destroy(void)
 
 static char *shm_casefold_share_name(const char *name, size_t len)
 {
-	char *nfdi_name, *nfdicf_name;
+	g_autofree char *nfdi_name = NULL;
 
 	nfdi_name = g_utf8_normalize(name, len, G_NORMALIZE_NFD);
 	if (!nfdi_name)
-		goto out_ascii;
+		return g_ascii_strdown(name, len);
 
-	nfdicf_name = g_utf8_casefold(nfdi_name, strlen(nfdi_name));
-	g_free(nfdi_name);
-	return nfdicf_name;
-out_ascii:
-	g_free(nfdi_name);
-	return g_ascii_strdown(name, len);
+	return g_utf8_casefold(nfdi_name, strlen(nfdi_name));
 }
 
 guint shm_share_name_hash(gconstpointer name)
 {
-	char *cf_name;
-	guint hash;
-
-	cf_name = shm_casefold_share_name(name, strlen(name));
-	hash = g_str_hash(cf_name);
-	g_free(cf_name);
-	return hash;
+	g_autofree char *cf_name = shm_casefold_share_name(name, strlen(name));
+	return g_str_hash(cf_name);
 }
 
 gboolean shm_share_name_equal(gconstpointer lname, gconstpointer rname)
 {
-	char *cf_lname, *cf_rname;
-	gboolean equal;
-
-	cf_lname = shm_casefold_share_name(lname, strlen(lname));
-	cf_rname = shm_casefold_share_name(rname, strlen(rname));
-	equal = g_str_equal(cf_lname, cf_rname);
-	g_free(cf_lname);
-	g_free(cf_rname);
-	return equal;
+	g_autofree char *cf_lname = shm_casefold_share_name(lname, strlen(lname));
+	g_autofree char *cf_rname = shm_casefold_share_name(rname, strlen(rname));
+	return g_str_equal(cf_lname, cf_rname);
 }
 
 int shm_init(void)
