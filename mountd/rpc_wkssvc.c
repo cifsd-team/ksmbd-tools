@@ -45,7 +45,7 @@ static int __netwksta_entry_rep_ctr100(struct ksmbd_dcerpc *dce,
 
 	/* server_name */
 	dce->num_pointers++;
-	ret = ndr_write_int32(dce, dce->num_pointers); /* ref pointer */
+	ret |= ndr_write_int32(dce, dce->num_pointers); /* ref pointer */
 	dce->num_pointers++;
 	/* domain_name */
 	ret |= ndr_write_int32(dce, dce->num_pointers); /* ref pointer */
