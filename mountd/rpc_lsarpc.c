@@ -59,7 +59,7 @@ static struct policy_handle *lsarpc_ph_alloc(unsigned int id)
 	struct policy_handle *ph;
 	int ret;
 
-	ph = g_try_malloc(sizeof(struct policy_handle));
+	ph = g_try_malloc0(sizeof(struct policy_handle));
 	if (!ph)
 		return NULL;
 
