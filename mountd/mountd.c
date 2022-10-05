@@ -283,7 +283,6 @@ static int parse_configs(void)
 	if (ret == -ENOENT) {
 		pr_info("User database does not exist, "
 			"only guest sessions may work\n");
-		ret = 0;
 	} else if (ret) {
 		pr_err("Failed to parse user database\n");
 		return ret;

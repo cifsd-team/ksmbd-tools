@@ -74,7 +74,6 @@ static int parse_reload_configs(const char *pwddb, const char *smbconf)
 	if (ret == -ENOENT) {
 		pr_info("User database does not exist, "
 			"only guest sessions may work\n");
-		ret = 0;
 	} else if (ret) {
 		pr_err("Failed to parse user database\n");
 		return ret;

@@ -686,7 +686,6 @@ int ndr_write_array_of_structs(struct ksmbd_rpc_pipe *pipe)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
 	int max_entry_nr;
-	int ret = KSMBD_RPC_OK;
 
 	/*
 	 * In the NDR representation of a structure that contains a
@@ -700,9 +699,6 @@ int ndr_write_array_of_structs(struct ksmbd_rpc_pipe *pipe)
 		return ndr_write_empty_array_of_struct(pipe);
 
 	max_entry_nr = __max_entries(dce, pipe);
-	if (max_entry_nr != pipe->num_entries)
-		ret = KSMBD_RPC_EMORE_DATA;
-
 	ndr_write_int32(dce, max_entry_nr);
 	/*
 	 * ARRAY representation [per dimension]
