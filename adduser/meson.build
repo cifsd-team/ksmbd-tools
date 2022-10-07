@@ -1,4 +1,4 @@
-adduser = executable(
+executable(
   'ksmbd.adduser',
   'md4_hash.c',
   'user_admin.c',

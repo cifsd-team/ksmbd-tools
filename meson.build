@@ -13,10 +13,10 @@ exec awk '/define KSMBD_TOOLS_VERSION / { gsub(/"/,"",$3); printf "%s", $3 }' in
   meson_version: '>= 0.51.0',
 )
 
-tools_incdir = include_directories([
+tools_incdir = include_directories(
   '.',
   'include',
-])
+)
 
 glib_dep = dependency(
   'glib-2.0',

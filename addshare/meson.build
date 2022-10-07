@@ -1,4 +1,4 @@
-addshare = executable(
+executable(
   'ksmbd.addshare',
   'share_admin.c',
   'addshare.c',

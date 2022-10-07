@@ -1,4 +1,4 @@
-control = executable(
+executable(
   'ksmbd.control',
   'control.c',
   dependencies: [

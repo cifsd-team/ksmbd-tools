@@ -1,4 +1,4 @@
-mountd = executable(
+executable(
   'ksmbd.mountd',
   'worker.c',
   'ipc.c',
