@@ -18,7 +18,7 @@
 #include <ctype.h>
 
 #include "config_parser.h"
-#include "ksmbdtools.h"
+#include "tools.h"
 #include "management/user.h"
 #include "management/share.h"
 #include "user_admin.h"
@@ -121,7 +121,7 @@ static int sanity_check_user_name_simple(char *uname)
 	return 0;
 }
 
-int main(int argc, char *argv[])
+int adduser_main(int argc, char **argv)
 {
 	int ret = -EINVAL;
 	char *account = NULL, *password = NULL, *pwddb = NULL, *smbconf = NULL;

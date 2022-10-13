@@ -15,7 +15,7 @@
 #include <linux/ksmbd_server.h>
 
 #include <config_parser.h>
-#include <ksmbdtools.h>
+#include <tools.h>
 #include <management/user.h>
 #include <management/share.h>
 

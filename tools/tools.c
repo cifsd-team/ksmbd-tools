@@ -12,7 +12,7 @@
 #include <fcntl.h>
 
 #include <stdio.h>
-#include <ksmbdtools.h>
+#include <tools.h>
 
 int log_level = PR_INFO;
 int ksmbd_health_status;
@@ -273,4 +273,29 @@ int test_file_access(char *conf)
 
 	close(fd);
 	return 0;
+}
+
+int main(int argc, char **argv)
+{
+	char *base_name;
+
+	set_logger_app_name("ksmbd.tools");
+
+	if (!*argv)
+		return EXIT_FAILURE;
+
+	base_name = strrchr(*argv, '/');
+	base_name = base_name ? base_name + 1 : *argv;
+
+	if (!strcmp(base_name, "ksmbd.addshare"))
+		return addshare_main(argc, argv);
+	if (!strcmp(base_name, "ksmbd.adduser"))
+		return adduser_main(argc, argv);
+	if (!strcmp(base_name, "ksmbd.control"))
+		return control_main(argc, argv);
+	if (!strcmp(base_name, "ksmbd.mountd"))
+		return mountd_main(argc, argv);
+
+	pr_err("Unknown base name: %s\n", base_name);
+	return EXIT_FAILURE;
 }

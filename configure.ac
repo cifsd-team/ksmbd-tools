@@ -24,6 +24,8 @@ AC_PROG_CC_STDC
 AM_SILENT_RULES([yes])
 AC_PROG_LIBTOOL
 AC_PROG_SED
+AC_PROG_MKDIR_P
+AC_PROG_LN_S
 
 AC_SUBST([in_script], [[\
 '$(SED) -e "s,[@]sbindir[@],$(sbindir),g" \
@@ -143,11 +145,11 @@ AM_CONDITIONAL(HAVE_LIBKRB5, [test "x$enable_krb5" != xno])
 
 AC_CONFIG_FILES([
 	Makefile
-	lib/Makefile
-	mountd/Makefile
-	adduser/Makefile
 	addshare/Makefile
+	adduser/Makefile
 	control/Makefile
+	mountd/Makefile
+	tools/Makefile
 ])
 
 AC_OUTPUT

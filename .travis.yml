@@ -1,4 +1,4 @@
-dist: focal
+dist: jammy
 
 language: c
 
@@ -6,9 +6,11 @@ notifications:
  - email: true
 
 before_install:
- - sudo apt-get install libnl-3-dev libnl-genl-3-dev krb5-multidev heimdal-multidev meson
+ - sudo apt-get install libnl-3-dev libnl-genl-3-dev krb5-multidev heimdal-multidev ninja-build
  - gcc --version
  - g++ --version
+ - pip3 install --user meson
+ - PATH=$HOME/.local/bin:$PATH
 
 jobs:
  include:

@@ -17,7 +17,7 @@
 
 #include <linux/ksmbd_server.h>
 
-#include <ksmbdtools.h>
+#include <tools.h>
 #include <ipc.h>
 #include <worker.h>
 #include <config_parser.h>

@@ -15,7 +15,7 @@
 #include <rpc.h>
 #include <rpc_samr.h>
 #include <smbacl.h>
-#include <ksmbdtools.h>
+#include <tools.h>
 
 #define SAMR_OPNUM_CONNECT5		64
 #define SAMR_OPNUM_ENUM_DOMAIN		6

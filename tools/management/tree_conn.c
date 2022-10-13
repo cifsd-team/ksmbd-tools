@@ -14,7 +14,7 @@
 #include "management/session.h"
 #include "management/share.h"
 #include "management/user.h"
-#include "ksmbdtools.h"
+#include "tools.h"
 
 static struct ksmbd_tree_conn *new_ksmbd_tree_conn(void)
 {

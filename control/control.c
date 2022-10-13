@@ -9,7 +9,7 @@
 #include <fcntl.h>
 #include <errno.h>
 
-#include "ksmbdtools.h"
+#include "tools.h"
 #include "version.h"
 
 static void usage(int status)
@@ -146,7 +146,7 @@ out:
 	return ret;
 }
 
-int main(int argc, char *argv[])
+int control_main(int argc, char **argv)
 {
 	int ret = -EINVAL;
 	int c;

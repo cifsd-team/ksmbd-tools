@@ -1,6 +1,6 @@
 ACLOCAL_AMFLAGS = -I m4
 
-SUBDIRS = lib mountd adduser addshare control
+SUBDIRS = addshare adduser control mountd tools
 
 EXTRA_DIST = include \
              README.md \

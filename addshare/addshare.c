@@ -18,7 +18,7 @@
 #include <ctype.h>
 
 #include "config_parser.h"
-#include "ksmbdtools.h"
+#include "tools.h"
 #include "management/share.h"
 #include "linux/ksmbd_server.h"
 #include "share_admin.h"
@@ -111,7 +111,7 @@ static int sanity_check_share_name_simple(char *name)
 	return 0;
 }
 
-int main(int argc, char *argv[])
+int addshare_main(int argc, char **argv)
 {
 	int ret = -EINVAL;
 	char *share = NULL, *options = NULL, *smbconf = NULL;

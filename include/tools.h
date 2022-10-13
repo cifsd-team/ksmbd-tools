@@ -5,8 +5,8 @@
  *   linux-cifsd-devel@lists.sourceforge.net
  */
 
-#ifndef __KSMBDTOOLS_H__
-#define __KSMBDTOOLS_H__
+#ifndef __TOOLS_H__
+#define __TOOLS_H__
 
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1
@@ -169,4 +169,9 @@ extern char *ksmbd_conv_charsets[KSMBD_CHARSET_MAX + 1];
 int send_signal_to_ksmbd_mountd(int signo);
 int test_file_access(char *conf);
 
-#endif /* __KSMBDTOOLS_H__ */
+int addshare_main(int argc, char **argv);
+int adduser_main(int argc, char **argv);
+int control_main(int argc, char **argv);
+int mountd_main(int argc, char **argv);
+
+#endif /* __TOOLS_H__ */

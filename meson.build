@@ -10,10 +10,10 @@ exec awk '/define KSMBD_TOOLS_VERSION / { gsub(/"/,"",$3); printf "%s", $3 }' in
     check: true,
   ).stdout(),
   default_options: 'c_std=gnu99',
-  meson_version: '>= 0.51.0',
+  meson_version: '>= 0.61.5',
 )
 
-tools_incdir = include_directories(
+include_dirs = include_directories(
   '.',
   'include',
 )
@@ -151,8 +151,8 @@ configure_file(
   configuration: in_data,
 )
 
-subdir('lib')
 subdir('addshare')
 subdir('adduser')
 subdir('control')
 subdir('mountd')
+subdir('tools')

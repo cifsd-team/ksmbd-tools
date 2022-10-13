@@ -14,7 +14,7 @@
 #include <fcntl.h>
 
 #include <config_parser.h>
-#include <ksmbdtools.h>
+#include <tools.h>
 
 #include <management/share.h>
 

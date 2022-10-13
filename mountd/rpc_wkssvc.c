@@ -15,7 +15,7 @@
 
 #include <rpc.h>
 #include <rpc_wkssvc.h>
-#include <ksmbdtools.h>
+#include <tools.h>
 
 #define WKSSVC_NETWKSTA_GET_INFO	(0)
 

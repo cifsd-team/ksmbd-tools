@@ -15,7 +15,7 @@
 
 #include <rpc.h>
 #include <rpc_srvsvc.h>
-#include <ksmbdtools.h>
+#include <tools.h>
 
 #define SHARE_TYPE_TEMP			0x40000000
 #define SHARE_TYPE_HIDDEN		0x80000000

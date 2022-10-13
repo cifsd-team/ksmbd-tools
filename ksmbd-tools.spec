@@ -16,7 +16,7 @@
 #
 
 Name:           ksmbd-tools
-Version:        3.4.6
+Version:        master
 Release:        0
 Summary:        ksmbd kernel server userspace utilities
 License:        GPL-2.0-or-later
@@ -53,6 +53,7 @@ make %{?_smp_mflags}
 %{_sbindir}/ksmbd.adduser
 %{_sbindir}/ksmbd.control
 %{_sbindir}/ksmbd.mountd
+%{_libexecdir}/ksmbd.tools
 %{_mandir}/man8/ksmbd.addshare.8*
 %{_mandir}/man8/ksmbd.adduser.8*
 %{_mandir}/man8/ksmbd.control.8*

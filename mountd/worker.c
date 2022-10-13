@@ -9,7 +9,7 @@
 #include <errno.h>
 #include <linux/ksmbd_server.h>
 
-#include <ksmbdtools.h>
+#include <tools.h>
 #include <worker.h>
 #include <ipc.h>
 #include <rpc.h>

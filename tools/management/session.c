@@ -13,7 +13,7 @@
 #include "management/session.h"
 #include "management/tree_conn.h"
 #include "management/user.h"
-#include "ksmbdtools.h"
+#include "tools.h"
 
 static GHashTable	*sessions_table;
 static GRWLock		sessions_table_lock;

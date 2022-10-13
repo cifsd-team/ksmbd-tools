@@ -16,7 +16,7 @@
 #include <rpc_wkssvc.h>
 #include <rpc_samr.h>
 #include <rpc_lsarpc.h>
-#include <ksmbdtools.h>
+#include <tools.h>
 
 static GHashTable	*pipes_table;
 static GRWLock		pipes_table_lock;

@@ -11,7 +11,7 @@
 
 #include "linux/ksmbd_server.h"
 #include "management/user.h"
-#include "ksmbdtools.h"
+#include "tools.h"
 
 #define KSMBD_USER_STATE_FREEING	1
 

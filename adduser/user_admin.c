@@ -15,7 +15,7 @@
 #include <termios.h>
 
 #include <config_parser.h>
-#include <ksmbdtools.h>
+#include <tools.h>
 
 #include <md4_hash.h>
 #include <user_admin.h>
