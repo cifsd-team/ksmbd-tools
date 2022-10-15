@@ -277,7 +277,7 @@ static void write_remove_user_cb(gpointer key,
 	struct ksmbd_user *user = (struct ksmbd_user *)value;
 	char **account = (char **)user_data;
 
-	if (!g_ascii_strcasecmp(user->name, *account)) {
+	if (!strcmp(user->name, *account)) {
 		pr_info("User `%s' removed\n", user->name);
 		return;
 	}
