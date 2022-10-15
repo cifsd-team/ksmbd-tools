@@ -186,15 +186,11 @@ static int srvsvc_share_get_info_invoke(struct ksmbd_rpc_pipe *pipe,
 		put_ksmbd_share(share);
 		return 0;
 	}
-
-	if (ret != 0) {
-		gchar *server_name = g_ascii_strdown(STR_VAL(hdr->server_name),
-				strlen(STR_VAL(hdr->server_name)));
-
+	if (ret) {
 		ret = shm_lookup_hosts_map(share,
 					   KSMBD_SHARE_HOSTS_DENY_MAP,
-					   server_name);
-		if (ret == 0) {
+					   STR_VAL(hdr->server_name));
+		if (!ret) {
 			put_ksmbd_share(share);
 			return 0;
 		}
