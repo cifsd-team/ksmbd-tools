@@ -148,12 +148,6 @@ static int add_group_key_value(char *line)
 	if (is_a_comment(value))
 		return 0;
 
-	if (g_hash_table_lookup(parser.current->kv, key)) {
-		pr_info("Multiple key-value definitions [%s] %s\n",
-				parser.current->name, key);
-		return 0;
-	}
-
 	key = g_strndup(line, key - line + 1);
 	value = g_strdup(value);
 
@@ -161,6 +155,14 @@ static int add_group_key_value(char *line)
 		g_free(key);
 		g_free(value);
 		return -ENOMEM;
+	}
+
+	if (g_hash_table_lookup(parser.current->kv, key)) {
+		pr_info("Multiple key-value definitions for `%s' in group `%s'\n",
+			key, parser.current->name);
+		g_free(key);
+		g_free(value);
+		return 0;
 	}
 
 	g_hash_table_insert(parser.current->kv, key, value);
