@@ -639,7 +639,7 @@ static void groups_callback(gpointer _k, gpointer _v, gpointer user_data)
 static int cp_add_ipc_group(void)
 {
 	char *comment = NULL, *guest = NULL;
-	int ret = 0;
+	int ret;
 
 	ipc_group = g_hash_table_lookup(parser.groups, "ipc$");
 	if (ipc_group)
