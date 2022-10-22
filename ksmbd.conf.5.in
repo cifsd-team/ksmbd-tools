@@ -95,12 +95,18 @@ System user that all users connected to the share should be mapped to.
 Default: \fBforce user = \fR
 .TP
 \fBguest account\fR (G)
-System user that all users connected to the share should be mapped to when the share specifies \fBguest ok = yes\fR.
+User that does not require a password when connecting to any share with \fBguest ok = yes\fR specified.
+When connecting to such a share with the user left empty, the parameter determines what system user to map to.
 
 Default: \fBguest account = nobody\fR \" KSMBD_CONF_DEFAULT_GUEST_ACCOUNT
 .TP
+\fBguest account\fR (S)
+User that does not require a password when connecting to the share with \fBguest ok = yes\fR specified.
+
+Default: \fBguest account = \fR
+.TP
 \fBguest ok\fR (S)
-No password is required when connecting to the share.
+Allow passwordless connections to the share as the user specified with \fBguest account\fR and with the user left empty.
 
 Default: \fBguest ok = no\fR
 .TP
@@ -154,9 +160,8 @@ If no value is given, it is \fBcifs/\fR followed by the FQDN resolved with \fBge
 Default: \fBkerberos service name = 
 .TP
 \fBmap to guest\fR (G)
-What to do with users that cannot be mapped to a system user.
-With \fBmap to guest = never\fR, disallow connecting to all shares.
-With \fBmap to guest = bad user\fR, map to the guest account if the user does not exist.
+When to map a user to the user specified with \fBguest account\fR.
+With \fBmap to guest = bad user\fR, map when the user does not exist.
 \" With \fBmap to guest = bad password\fR, 
 \" With \fBmap to guest = bad uid\fR, 
 
@@ -205,8 +210,8 @@ Inverted synonym for \fBwriteable\fP.
 Default: \fBread only = yes\fR
 .TP
 \fBrestrict anonymous\fR (G)
-What to do with anonymous connections.
-With \fBrestrict anonymous = 1\fR or \fBrestrict anonymous = 2\fR, disallow connections when the share specifies \fBguest ok = no\fR or is the \fBIPC$\fR share.
+How to restrict connections to any share as the user specified with \fBguest account\fR.
+With \fBrestrict anonymous = 1\fR or \fBrestrict anonymous = 2\fR, disallow connections to the \fBIPC$\fR share and any share that specifies \fBguest ok = no\fR.
 
 Default: \fBrestrict anonymous = 0\fR
 .TP

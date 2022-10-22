@@ -401,7 +401,7 @@ int command_del_user(char *pwddb, char *account, char *unused)
 
 	if (global_conf.guest_account &&
 	    !strcmp(global_conf.guest_account, account)) {
-		pr_err("User `%s' is the guest account, "
+		pr_err("User `%s' is the global guest account, "
 		       "aborting user deletion\n", account);
 		return -EINVAL;
 	}

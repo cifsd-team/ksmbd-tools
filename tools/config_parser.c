@@ -414,7 +414,8 @@ static gboolean global_group_kv(gpointer _k, gpointer _v, gpointer user_data)
 	}
 
 	if (!cp_key_cmp(_k, "guest account")) {
-		cp_add_global_guest_account(_v);
+		if (cp_add_global_guest_account(_v))
+			pr_err("Unable to add global guest account\n");
 		return TRUE;
 	}
 
@@ -621,7 +622,7 @@ static void global_conf_fixup_missing(void)
 	if (user)
 		put_ksmbd_user(user);
 	else if (cp_add_global_guest_account(KSMBD_CONF_DEFAULT_GUEST_ACCOUNT))
-		pr_err("Unable to add guest account\n");
+		pr_err("Unable to add default global guest account\n");
 }
 
 static void groups_callback(gpointer _k, gpointer _v, gpointer user_data)
