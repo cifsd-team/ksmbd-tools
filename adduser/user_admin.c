@@ -296,6 +296,10 @@ static void lookup_can_del_user(gpointer key,
 	if (!*account)
 		return;
 
+	ret = !share->guest_account || strcmp(share->guest_account, *account);
+	if (!ret)
+		goto conflict;
+
 	ret = shm_lookup_users_map(share,
 				   KSMBD_SHARE_ADMIN_USERS_MAP,
 				   *account);

@@ -183,7 +183,7 @@ int usm_add_new_user(char *name, char *pwd)
 	g_rw_lock_writer_lock(&users_table_lock);
 	if (__usm_lookup_user(name)) {
 		g_rw_lock_writer_unlock(&users_table_lock);
-		pr_info("User `%s' already exists\n", name);
+		pr_debug("User `%s' already exists\n", name);
 		kill_ksmbd_user(user);
 		return 0;
 	}
