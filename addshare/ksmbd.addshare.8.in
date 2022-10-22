@@ -3,7 +3,7 @@
 ksmbd.addshare \- configure shares for ksmbd.conf of ksmbd.mountd
 .SH SYNOPSIS
 .B ksmbd.addshare
-[-v] {-a \fI\,SHARE\/\fR | -u \fI\,SHARE\/\fR} [-o \fI\,OPTIONS\/\fR] [-c \fI\,SMBCONF\/\fR]
+[-v] {-a \fI\,SHARE\/\fR | -u \fI\,SHARE\/\fR} {-o \fI\,OPTIONS\/\fR} [-c \fI\,SMBCONF\/\fR]
 .br
 .B ksmbd.addshare
 [-v] {-d \fI\,SHARE\/\fR} [-c \fI\,SMBCONF\/\fR]
