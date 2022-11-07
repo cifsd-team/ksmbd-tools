@@ -359,28 +359,6 @@ void cp_group_kv_list_free(char **list)
 	g_strfreev(list);
 }
 
-static int cp_add_global_guest_account(gpointer _v)
-{
-	struct ksmbd_user *user;
-
-	if (usm_add_new_user(cp_get_group_kv_string(_v),
-			     g_strdup("NULL"))) {
-		pr_err("Unable to add new user `%s'\n", (char *) _v);
-		return -ENOMEM;
-	}
-
-	user = usm_lookup_user(_v);
-	if (!user) {
-		pr_err("Unable to find user `%s'\n", (char *) _v);
-		return -EINVAL;
-	}
-
-	set_user_flag(user, KSMBD_USER_FLAG_GUEST_ACCOUNT);
-	put_ksmbd_user(user);
-	global_conf.guest_account = cp_get_group_kv_string(_v);
-	return 0;
-}
-
 static gboolean global_group_kv(gpointer _k, gpointer _v, gpointer user_data)
 {
 	if (!cp_key_cmp(_k, "server string")) {
@@ -414,8 +392,7 @@ static gboolean global_group_kv(gpointer _k, gpointer _v, gpointer user_data)
 	}
 
 	if (!cp_key_cmp(_k, "guest account")) {
-		if (cp_add_global_guest_account(_v))
-			pr_err("Unable to add global guest account\n");
+		global_conf.guest_account = cp_get_group_kv_string(_v);
 		return TRUE;
 	}
 
@@ -599,13 +576,12 @@ static void global_conf_update(struct smbconf_group *group)
 	if (!global_group)
 		return;
 
+	g_hash_table_remove(global_group->kv, "guest account");
 	g_hash_table_foreach(global_group->kv, append_key_value, group->kv);
 }
 
 static void global_conf_fixup_missing(void)
 {
-	struct ksmbd_user *user;
-
 	/*
 	 * Set default global parameters which were not specified
 	 * in smb.conf
@@ -628,11 +604,15 @@ static void global_conf_fixup_missing(void)
 	if (global_conf.sessions_cap <= 0)
 		global_conf.sessions_cap = KSMBD_CONF_DEFAULT_SESS_CAP;
 
-	user = usm_lookup_user(global_conf.guest_account);
-	if (user)
-		put_ksmbd_user(user);
-	else if (cp_add_global_guest_account(KSMBD_CONF_DEFAULT_GUEST_ACCOUNT))
-		pr_err("Unable to add default global guest account\n");
+	if (!global_conf.guest_account)
+		global_conf.guest_account =
+			cp_get_group_kv_string(
+					KSMBD_CONF_DEFAULT_GUEST_ACCOUNT);
+
+	if (usm_add_guest_account(g_strdup(global_conf.guest_account))) {
+		g_free(global_conf.guest_account);
+		global_conf.guest_account = NULL;
+	}
 }
 
 static void groups_callback(gpointer _k, gpointer _v, gpointer user_data)

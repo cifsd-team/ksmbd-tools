@@ -184,7 +184,7 @@ int usm_add_new_user(char *name, char *pwd)
 	g_rw_lock_writer_lock(&users_table_lock);
 	if (__usm_lookup_user(name)) {
 		g_rw_lock_writer_unlock(&users_table_lock);
-		pr_debug("User `%s' already exists\n", name);
+		pr_debug("New user `%s' already exists\n", name);
 		kill_ksmbd_user(user);
 		return 0;
 	}
@@ -231,6 +231,25 @@ int usm_add_update_user_from_pwdentry(char *data)
 		return ret;
 	}
 	return usm_add_new_user(name, pwd);
+}
+
+int usm_add_guest_account(char *name)
+{
+	g_autofree char *account = g_strdup(name);
+	struct ksmbd_user *user;
+
+	if (usm_add_new_user(name, g_strdup("NULL"))) {
+		pr_err("Unable to add guest account `%s'\n", account);
+		return -EINVAL;
+	}
+
+	user = usm_lookup_user(account);
+	if (!user)
+		return -EINVAL;
+
+	set_user_flag(user, KSMBD_USER_FLAG_GUEST_ACCOUNT);
+	put_ksmbd_user(user);
+	return 0;
 }
 
 int usm_add_subauth_global_conf(char *data)

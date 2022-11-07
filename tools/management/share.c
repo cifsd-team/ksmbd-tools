@@ -400,21 +400,11 @@ static void process_group_kv(gpointer _k, gpointer _v, gpointer user_data)
 	}
 
 	if (shm_share_config(k, KSMBD_SHARE_CONF_GUEST_ACCOUNT)) {
-		struct ksmbd_user *user;
-
-		if (usm_add_new_user(cp_get_group_kv_string(_v),
-				     g_strdup("NULL"))) {
-			pr_err("Unable to add guest account\n");
+		if (usm_add_guest_account(cp_get_group_kv_string(v))) {
 			set_share_flag(share, KSMBD_SHARE_FLAG_INVALID);
 			return;
 		}
-
-		user = usm_lookup_user(_v);
-		if (user) {
-			set_user_flag(user, KSMBD_USER_FLAG_GUEST_ACCOUNT);
-			put_ksmbd_user(user);
-		}
-		share->guest_account = cp_get_group_kv_string(_v);
+		share->guest_account = cp_get_group_kv_string(v);
 		if (!share->guest_account)
 			set_share_flag(share, KSMBD_SHARE_FLAG_INVALID);
 		return;
