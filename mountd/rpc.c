@@ -245,7 +245,7 @@ static int try_realloc_payload(struct ksmbd_dcerpc *dce, size_t data_sz)
 		return -ENOMEM;
 	}
 
-	n = realloc(dce->payload, dce->payload_sz + 4096);
+	n = g_try_realloc(dce->payload, dce->payload_sz + 4096);
 	if (!n)
 		return -ENOMEM;
 

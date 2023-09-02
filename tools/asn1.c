@@ -176,14 +176,14 @@ asn1_octets_decode(struct asn1_ctx *ctx,
 
 	*len = 0;
 
-	*octets = malloc(eoc - ctx->pointer);
-	if (*octets == NULL)
+	*octets = g_try_malloc(eoc - ctx->pointer);
+	if (!*octets)
 		return 0;
 
 	ptr = *octets;
 	while (ctx->pointer < eoc) {
 		if (!asn1_octet_decode(ctx, (unsigned char *) ptr++)) {
-			free(*octets);
+			g_free(*octets);
 			*octets = NULL;
 			return 0;
 		}
@@ -201,7 +201,7 @@ unsigned char asn1_read(struct asn1_ctx *ctx,
 		return 0;
 	}
 
-	*buf = malloc(len);
+	*buf = g_try_malloc(len);
 	if (!*buf)
 		return 0;
 	memcpy(*buf, ctx->pointer, len);

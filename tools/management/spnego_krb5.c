@@ -293,7 +293,7 @@ static int handle_krb5_authen(struct spnego_mech_ctx *mech_ctx,
 	}
 	krb5_free_unparsed_name(krb5_ctx->context, client_name);
 
-	auth_out->sess_key = malloc(KRB5_KEY_LENGTH(session_key));
+	auth_out->sess_key = g_try_malloc(KRB5_KEY_LENGTH(session_key));
 	if (!auth_out->sess_key) {
 		free(auth_out->user_name);
 		retval = -ENOMEM;
@@ -306,7 +306,7 @@ static int handle_krb5_authen(struct spnego_mech_ctx *mech_ctx,
 			mech_ctx->oid, mech_ctx->oid_len,
 			&auth_out->spnego_blob, &auth_out->blob_len)) {
 		free(auth_out->user_name);
-		free(auth_out->sess_key);
+		g_free(auth_out->sess_key);
 		goto out_free_client;
 	}
 

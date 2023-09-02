@@ -455,7 +455,7 @@ static int lsarpc_lookup_names3_invoke(struct ksmbd_rpc_pipe *pipe)
 	for (i = 0; i < num_names; i++) {
 		char *name = NULL;
 
-		ni = malloc(sizeof(struct lsarpc_names_info));
+		ni = g_try_malloc(sizeof(struct lsarpc_names_info));
 		if (!ni)
 			break;
 		// length
@@ -473,7 +473,7 @@ static int lsarpc_lookup_names3_invoke(struct ksmbd_rpc_pipe *pipe)
 
 		ni->user = usm_lookup_user(name);
 		if (!ni->user) {
-			free(ni);
+			g_free(ni);
 			break;
 		}
 		pipe->entries = g_array_append_val(pipe->entries, ni);
@@ -485,7 +485,7 @@ static int lsarpc_lookup_names3_invoke(struct ksmbd_rpc_pipe *pipe)
 	return KSMBD_RPC_OK;
 
 fail:
-	free(ni);
+	g_free(ni);
 	return KSMBD_RPC_EINVALID_PARAMETER;
 }
 
