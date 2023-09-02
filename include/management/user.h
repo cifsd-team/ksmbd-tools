@@ -46,8 +46,8 @@ struct ksmbd_user *usm_lookup_user(char *name);
 
 void usm_update_user_password(struct ksmbd_user *user, char *pass);
 
+int usm_user_name(char *name, char *p);
 int usm_add_new_user(char *name, char *pwd);
-int usm_add_update_user_from_pwdentry(char *data);
 int usm_add_guest_account(char *name);
 int usm_add_subauth_global_conf(char *data);
 

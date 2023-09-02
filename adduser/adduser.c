@@ -39,12 +39,11 @@ static void usage(int status)
 			"\n"
 			"  -a, --add-user=USER         add USER to user database;\n"
 			"                              USER must be UTF-8 and [1, " STR(KSMBD_REQ_MAX_ACCOUNT_NAME_SZ) ") bytes;\n"
-			"                              USER cannot contain colon (`:') or newline\n"
+			"                              USER cannot contain colon (`:')\n"
 			"  -d, --del-user=USER         delete USER from user database\n"
 			"  -u, --update-user=USER      update USER in user database\n"
 			"  -p, --password=PWD          use PWD as user password instead of prompting;\n"
-			"                              PWD must be UTF-8 and [0, " STR(MAX_NT_PWD_LEN) ") bytes;\n"
-			"                              PWD cannot contain newline\n"
+			"                              PWD must be UTF-8 and [0, " STR(MAX_NT_PWD_LEN) ") bytes\n"
 			"  -i, --import-users=PWDDB    use PWDDB as user database instead of\n"
 			"                              `" PATH_PWDDB "'\n"
 			"                              this option does nothing by itself\n"
@@ -102,29 +101,11 @@ static int parse_configs(char *pwddb, char *smbconf)
 	return ret;
 }
 
-static int sanity_check_user_name_simple(char *uname)
-{
-	int sz;
-
-	if (!uname)
-		return -EINVAL;
-
-	sz = strlen(uname);
-	if (sz < 1)
-		return -EINVAL;
-	if (sz >= KSMBD_REQ_MAX_ACCOUNT_NAME_SZ)
-		return -EINVAL;
-
-	if (strpbrk(uname, ":\n"))
-		return -EINVAL;
-
-	return 0;
-}
-
 int adduser_main(int argc, char **argv)
 {
 	int ret = -EINVAL;
-	char *account = NULL, *password = NULL, *pwddb = NULL, *smbconf = NULL;
+	char *pwddb = NULL, *name = NULL, *password = NULL;
+	char *smbconf = NULL;
 	command_fn command = NULL;
 	int c;
 
@@ -133,18 +114,18 @@ int adduser_main(int argc, char **argv)
 	while ((c = getopt_long(argc, argv, "c:i:a:d:u:p:vVh", opts, NULL)) != EOF)
 		switch (c) {
 		case 'a':
-			g_free(account);
-			account = g_strdup(optarg);
+			g_free(name);
+			name = g_strdup(optarg);
 			command = command_add_user;
 			break;
 		case 'd':
-			g_free(account);
-			account = g_strdup(optarg);
+			g_free(name);
+			name = g_strdup(optarg);
 			command = command_del_user;
 			break;
 		case 'u':
-			g_free(account);
-			account = g_strdup(optarg);
+			g_free(name);
+			name = g_strdup(optarg);
 			command = command_update_user;
 			break;
 		case 'p':
@@ -174,20 +155,13 @@ int adduser_main(int argc, char **argv)
 			goto out;
 		}
 
-	if (argc < 2 || argc > optind) {
+	if (argc < 2 || argc > optind || !name) {
 		usage(ret ? EXIT_FAILURE : EXIT_SUCCESS);
 		goto out;
 	}
 
-	if (!account) {
-		pr_err("No option with user name given\n");
+	if (!usm_user_name(name, strchr(name, 0x00)))
 		goto out;
-	}
-
-	if (sanity_check_user_name_simple(account)) {
-		pr_err("User name sanity check failure\n");
-		goto out;
-	}
 
 	if (!pwddb)
 		pwddb = g_strdup(PATH_PWDDB);
@@ -220,7 +194,7 @@ int adduser_main(int argc, char **argv)
 		goto out;
 
 	if (command) {
-		ret = command(pwddb, account, password);
+		ret = command(pwddb, name, password);
 		if (!ret && send_signal_to_ksmbd_mountd(SIGHUP))
 			pr_debug("Unable to notify ksmbd.mountd of changes\n");
 	}

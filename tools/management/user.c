@@ -11,6 +11,7 @@
 
 #include "linux/ksmbd_server.h"
 #include "management/user.h"
+#include "config_parser.h"
 #include "tools.h"
 
 #define KSMBD_USER_STATE_FREEING	1
@@ -168,6 +169,39 @@ struct ksmbd_user *usm_lookup_user(char *name)
 	return user;
 }
 
+int usm_user_name(char *name, char *p)
+{
+	int is_name;
+
+	is_name = p > name;
+	if (!is_name) {
+		pr_err("User name is missing\n");
+		goto out;
+	}
+	is_name = p - name < KSMBD_REQ_MAX_ACCOUNT_NAME_SZ;
+	if (!is_name) {
+		pr_err("User name exceeds %d bytes\n",
+		       KSMBD_REQ_MAX_ACCOUNT_NAME_SZ - 1);
+		goto out;
+	}
+	is_name = g_utf8_validate(name, p - name, NULL);
+	if (!is_name) {
+		pr_err("User name is not UTF-8\n");
+		goto out;
+	}
+	for (; name < p; name++) {
+		is_name = cp_printable(name) && *name != ':';
+		if (!is_name) {
+			pr_err("User name contains `%c' [0x%2X]\n",
+			       *name,
+			       *name);
+			goto out;
+		}
+	}
+out:
+	return is_name;
+}
+
 int usm_add_new_user(char *name, char *pwd)
 {
 	int ret = 0;
@@ -194,34 +228,6 @@ int usm_add_new_user(char *name, char *pwd)
 	}
 	g_rw_lock_writer_unlock(&users_table_lock);
 	return ret;
-}
-
-int usm_add_update_user_from_pwdentry(char *data)
-{
-	struct ksmbd_user *user;
-	char *name;
-	char *pwd;
-	char *pos = strchr(data, ':');
-
-	if (!pos) {
-		pr_err("Invalid pwd entry: %s\n", data);
-		return -EINVAL;
-	}
-
-	*pos = 0x00;
-	name = g_strdup(data);
-	pwd = g_strdup(pos + 1);
-
-	user = usm_lookup_user(name);
-	if (user) {
-		usm_update_user_password(user, pwd);
-		put_ksmbd_user(user);
-
-		g_free(name);
-		g_free(pwd);
-		return 0;
-	}
-	return usm_add_new_user(name, pwd);
 }
 
 int usm_add_guest_account(char *name)

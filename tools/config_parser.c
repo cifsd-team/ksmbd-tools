@@ -689,9 +689,74 @@ int cp_parse_smbconf(const char *smbconf)
 				    GROUPS_CALLBACK_INIT);
 }
 
+static int is_a_user_password(char *entry)
+{
+	char *delim;
+	int is_user_password;
+
+	delim = strchr(entry, ':');
+	is_user_password = usm_user_name(entry, delim);
+	if (!is_user_password)
+		goto out;
+	entry = delim + 1;
+	delim = strchr(entry, 0x00);
+	for (; delim > entry; delim--)
+		if (delim[-1] != '=')
+			break;
+	is_user_password = delim > entry;
+	if (!is_user_password) {
+		pr_err("Password is missing\n");
+		goto out;
+	}
+	for (; entry < delim; entry++) {
+		is_user_password =
+			*entry >= '0' && *entry <= '9' ||
+			*entry >= 'A' && *entry <= 'Z' ||
+			*entry >= 'a' && *entry <= 'z' ||
+			*entry == '+' ||
+			*entry == '/';
+		if (!is_user_password) {
+			pr_err("Password contains `%c' [0x%2X]\n",
+			       *entry,
+			       *entry);
+			goto out;
+		}
+	}
+out:
+	return is_user_password;
+}
+
+static void add_user_password(const char *entry)
+{
+	const char *delim = strchr(entry, ':');
+	g_autofree char *name = g_strndup(entry, delim - entry);
+	g_autofree char *pwd = g_strdup(delim + 1);
+	struct ksmbd_user *user = usm_lookup_user(name);
+
+	if (user) {
+		usm_update_user_password(user, pwd);
+		put_ksmbd_user(user);
+		return;
+	}
+
+	usm_add_new_user(name, pwd);
+	name = pwd = NULL;
+}
+
+static int process_pwddb_entry(char *entry)
+{
+	if (is_a_user_password(entry)) {
+		add_user_password(entry);
+		return 0;
+	}
+
+	pr_err("Invalid pwddb entry `%s'\n", entry);
+	return -EINVAL;
+}
+
 int cp_parse_pwddb(const char *pwddb)
 {
-	return __mmap_parse_file(pwddb, usm_add_update_user_from_pwdentry);
+	return __mmap_parse_file(pwddb, process_pwddb_entry);
 }
 
 int cp_smbconfig_hash_create(const char *smbconf)

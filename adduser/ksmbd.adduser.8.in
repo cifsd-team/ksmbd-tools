@@ -19,7 +19,7 @@ ksmbd.adduser \- configure users for ksmbdpwd.db of ksmbd.mountd
 \fB\-a\fR, \fB\-\-add-user\fR=\fI\,USER\/\fR
 Add \fI\,USER\/\fR to user database.
 \fI\,USER\/\fR must be UTF-8 and [1, 48) bytes. \" KSMBD_REQ_MAX_ACCOUNT_NAME_SZ
-\fI\,USER\/\fR cannot contain colon (\fB:\fR) or newline.
+\fI\,USER\/\fR cannot contain colon (\fB:\fR).
 .TP
 \fB\-d\fR, \fB\-\-del-user\fR=\fI\,USER\/\fR
 Delete \fI\,USER\/\fR from user database.
@@ -30,7 +30,6 @@ Update \fI\,USER\/\fR in user database.
 \fB\-p\fR, \fB\-\-password\fR=\fI\,PWD\/\fR
 Use \fI\,PWD\/\fR as user password instead of prompting.
 \fI\,PWD\/\fR must be UTF-8 and [0, 129) bytes. \" MAX_NT_PWD_LEN
-\fI\,PWD\/\fR cannot contain newline.
 .TP
 \fB\-i\fR, \fB\-\-import-users\fR=\fI\,PWDDB\/\fR
 Use \fI\,PWDDB\/\fR as user database instead of \fB@sysconfdir@/ksmbd/ksmbdpwd.db\fR. \" PATH_PWDDB
