@@ -14,14 +14,14 @@
 
 static void usage(int status)
 {
-	g_printerr(
+	printf(
 		"Usage: ksmbd.control [-v] {-s | -r | -d COMPONENT | -c}\n"
 		"       ksmbd.control {-V | -h}\n");
 
 	if (status != EXIT_SUCCESS)
-		g_printerr("Try `ksmbd.control --help' for more information.\n");
+		printf("Try `ksmbd.control --help' for more information.\n");
 	else
-		g_printerr(
+		printf(
 			"\n"
 			"  -s, --shutdown           shutdown both ksmbd.mountd and ksmbd and exit\n"
 			"  -r, --reload             notify ksmbd.mountd of changes and exit\n"
@@ -50,7 +50,7 @@ static const struct option opts[] = {
 
 static int show_version(void)
 {
-	g_print("ksmbd-tools version : %s\n", KSMBD_TOOLS_VERSION);
+	printf("ksmbd-tools version : %s\n", KSMBD_TOOLS_VERSION);
 	return 0;
 }
 

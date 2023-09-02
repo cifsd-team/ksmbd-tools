@@ -26,15 +26,15 @@
 
 static void usage(int status)
 {
-	g_printerr(
+	printf(
 		"Usage: ksmbd.addshare [-v] {-a SHARE | -u SHARE} {-o OPTIONS} [-c SMBCONF]\n"
 		"       ksmbd.addshare [-v] {-d SHARE} [-c SMBCONF]\n"
 		"       ksmbd.addshare {-V | -h}\n");
 
 	if (status != EXIT_SUCCESS)
-		g_printerr("Try `ksmbd.addshare --help' for more information.\n");
+		printf("Try `ksmbd.addshare --help' for more information.\n");
 	else
-		g_printerr(
+		printf(
 			"\n"
 			"  -a, --add-share=SHARE       add SHARE to configuration file;\n"
 			"                              SHARE must be UTF-8 and [1, " STR(KSMBD_REQ_MAX_SHARE_NAME) ") bytes;\n"
@@ -72,7 +72,7 @@ static const struct option opts[] = {
 
 static int show_version(void)
 {
-	g_print("ksmbd-tools version : %s\n", KSMBD_TOOLS_VERSION);
+	printf("ksmbd-tools version : %s\n", KSMBD_TOOLS_VERSION);
 	return 0;
 }
 

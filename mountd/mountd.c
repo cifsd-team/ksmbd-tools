@@ -40,14 +40,14 @@ typedef int (*worker_fn)(void);
 
 static void usage(int status)
 {
-	g_printerr(
+	printf(
 		"Usage: ksmbd.mountd [-v] [-p PORT] [-c SMBCONF] [-u PWDDB] [-n[WAY]]\n"
 		"       ksmbd.mountd {-V | -h}\n");
 
 	if (status != EXIT_SUCCESS)
-		g_printerr("Try `ksmbd.mountd --help' for more information.\n");
+		printf("Try `ksmbd.mountd --help' for more information.\n");
 	else
-		g_printerr(
+		printf(
 			"\n"
 			"  -p, --port=PORT         bind to PORT instead of TCP port " STR(KSMBD_CONF_DEFAULT_TCP_PORT) "\n"
 			"  -c, --config=SMBCONF    use SMBCONF as configuration file instead of\n"
@@ -77,7 +77,7 @@ static struct option opts[] = {
 
 static int show_version(void)
 {
-	g_print("ksmbd-tools version : %s\n", KSMBD_TOOLS_VERSION);
+	printf("ksmbd-tools version : %s\n", KSMBD_TOOLS_VERSION);
 	return 0;
 }
 

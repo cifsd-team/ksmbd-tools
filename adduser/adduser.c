@@ -27,15 +27,15 @@
 
 static void usage(int status)
 {
-	g_printerr(
+	printf(
 		"Usage: ksmbd.adduser [-v] {-a USER | -u USER} [-p PWD] [-i PWDDB] [-c SMBCONF]\n"
 		"       ksmbd.adduser [-v] {-d USER} [-i PWDDB] [-c SMBCONF]\n"
 		"       ksmbd.adduser {-V | -h}\n");
 
 	if (status != EXIT_SUCCESS)
-		g_printerr("Try `ksmbd.adduser --help' for more information.\n");
+		printf("Try `ksmbd.adduser --help' for more information.\n");
 	else
-		g_printerr(
+		printf(
 			"\n"
 			"  -a, --add-user=USER         add USER to user database;\n"
 			"                              USER must be UTF-8 and [1, " STR(KSMBD_REQ_MAX_ACCOUNT_NAME_SZ) ") bytes;\n"
@@ -72,7 +72,7 @@ static const struct option opts[] = {
 
 static int show_version(void)
 {
-	g_print("ksmbd-tools version : %s\n", KSMBD_TOOLS_VERSION);
+	printf("ksmbd-tools version : %s\n", KSMBD_TOOLS_VERSION);
 	return 0;
 }
 

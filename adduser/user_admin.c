@@ -81,9 +81,9 @@ static char *__prompt_password_stdin(size_t *sz)
 	for (pswd_raw_cur = pswd_raw;;
 	     pswd_raw_cur = pswd_raw_cur == pswd_raw ? pswd_raw_re : pswd_raw) {
 		if (pswd_raw_cur == pswd_raw)
-			g_print("New password (UTF-8): ");
+			printf("New password (UTF-8): ");
 		else if (pswd_raw_cur == pswd_raw_re)
-			g_print("Retype password (UTF-8): ");
+			printf("Retype password (UTF-8): ");
 
 		memset(pswd_raw_cur, 0, MAX_NT_PWD_LEN + 1);
 
@@ -94,7 +94,7 @@ static char *__prompt_password_stdin(size_t *sz)
 
 			fgets_m = g_strdup_printf("%m");
 			term_toggle_echo(1);
-			g_print("\n");
+			printf("\n");
 			pr_err("fgets() returned an error: %s\n", fgets_m);
 			g_free(fgets_m);
 			g_free(pswd_raw);
@@ -123,7 +123,7 @@ static char *__prompt_password_stdin(size_t *sz)
 			len = strlen(pswd_raw_cur);
 
 		term_toggle_echo(1);
-		g_print("\n");
+		printf("\n");
 		if (__sanity_check_sz_raw(len))
 			pswd_raw_cur = NULL;
 
