@@ -10,6 +10,7 @@
 #include <glib.h>
 
 #include "linux/ksmbd_server.h"
+#include "management/share.h"
 #include "management/user.h"
 #include "config_parser.h"
 #include "tools.h"
@@ -95,7 +96,7 @@ void usm_remove_all_users(void)
 static struct ksmbd_user *new_ksmbd_user(char *name, char *pwd)
 {
 	struct ksmbd_user *user;
-	struct passwd *passwd;
+	struct passwd *e;
 	size_t pass_sz;
 
 	user = g_try_malloc0(sizeof(struct ksmbd_user));
@@ -106,12 +107,14 @@ static struct ksmbd_user *new_ksmbd_user(char *name, char *pwd)
 	user->name = name;
 	user->pass_b64 = pwd;
 	user->ref_count = 1;
-	user->gid = 9999;
-	user->uid = 9999;
-	passwd = getpwnam(name);
-	if (passwd) {
-		user->uid = passwd->pw_uid;
-		user->gid = passwd->pw_gid;
+
+	e = getpwnam(name);
+	if (!e) {
+		user->uid = KSMBD_SHARE_INVALID_UID;
+		user->gid = KSMBD_SHARE_INVALID_GID;
+	} else {
+		user->uid = e->pw_uid;
+		user->gid = e->pw_gid;
 	}
 
 	user->pass = base64_decode(user->pass_b64, &pass_sz);
