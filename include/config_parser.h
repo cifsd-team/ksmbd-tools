@@ -36,7 +36,8 @@ int cp_parse_smbconf(const char *smbconf);
 int cp_parse_reload_smbconf(const char *smbconf);
 int cp_parse_subauth(void);
 
-char *cp_ltrim(char *v);
+char *cp_ltrim(const char *v);
+char *cp_rtrim(const char *v, const char *p);
 int cp_key_cmp(char *k, char *v);
 char *cp_get_group_kv_string(char *v);
 int cp_get_group_kv_bool(char *v);

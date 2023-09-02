@@ -284,19 +284,17 @@ struct ksmbd_share *shm_lookup_share(char *name)
 
 static GHashTable *parse_list(GHashTable *map, char **list, char grc)
 {
-	int i;
+	char **pp;
 
 	if (!map)
 		map = g_hash_table_new(g_str_hash, g_str_equal);
 
-	for (i = 0;  list[i] != NULL; i++) {
+	for (pp = list; *pp; pp++) {
+		char *p = *pp;
 		struct ksmbd_user *user;
-		char *p = list[i];
 
-		p = cp_ltrim(p);
-		if (!p)
+		if (*p == 0x00)
 			continue;
-
 		if (*p == grc) {
 			struct group *gr;
 
@@ -585,16 +583,13 @@ static void process_group_kv(gpointer _k, gpointer _v, gpointer user_data)
 	}
 
 	if (shm_share_config(k, KSMBD_SHARE_CONF_VFS_OBJECTS)) {
-		char *p;
-		int i;
-		char **objects = cp_get_group_kv_list(v);
+		char **objects = cp_get_group_kv_list(v), **pp = objects;
 
 		clear_share_flag(share, KSMBD_SHARE_FLAG_ACL_XATTR);
 		clear_share_flag(share, KSMBD_SHARE_FLAG_STREAMS);
-		for (i = 0;  objects[i] != NULL; i++) {
-			p = cp_ltrim(objects[i]);
-			if (!p)
-				continue;
+		for (; *pp; pp++) {
+			char *p = *pp;
+
 			if (!strcmp(p, "acl_xattr"))
 				set_share_flag(share, KSMBD_SHARE_FLAG_ACL_XATTR);
 			else if (!strcmp(p, "streams_xattr"))

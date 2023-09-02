@@ -288,16 +288,18 @@ static void release_smbconf_parser(void)
 	parser.groups = NULL;
 }
 
-char *cp_ltrim(char *v)
+char *cp_ltrim(const char *v)
 {
-	if (!v)
-		return NULL;
-
-	while (*v && *v == ' ')
+	while (is_ascii_space_tab(*v))
 		v++;
-	if (*v == 0x00)
-		return NULL;
-	return v;
+	return (char *)v;
+}
+
+char *cp_rtrim(const char *v, const char *p)
+{
+	while (p != v && is_ascii_space_tab(*p))
+		p--;
+	return (char *)p;
 }
 
 int cp_key_cmp(char *k, char *v)

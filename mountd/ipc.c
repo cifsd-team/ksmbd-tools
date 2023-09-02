@@ -133,19 +133,17 @@ static int handle_unsupported_event(struct nl_cache_ops *unused,
 
 static int ifc_list_size(void)
 {
-	int len = 0;
-	int i;
+	char **pp = global_conf.interfaces;
+	int sz = 0;
 
-	for (i = 0; global_conf.interfaces[i] != NULL; i++) {
-		char *ifc = global_conf.interfaces[i];
+	for (; *pp; pp++) {
+		char *p = *pp;
 
-		ifc = cp_ltrim(ifc);
-		if (!ifc)
+		if (*p == 0x00)
 			continue;
-
-		len += strlen(ifc) + 1;
+		sz += strlen(p) + 1;
 	}
-	return len;
+	return sz;
 }
 
 static int ipc_ksmbd_starting_up(void)
@@ -207,21 +205,19 @@ static int ipc_ksmbd_starting_up(void)
 	}
 
 	if (ifc_list_sz) {
-		int i;
-		int sz = 0;
 		char *config_payload = KSMBD_STARTUP_CONFIG_INTERFACES(ev);
+		char **pp = global_conf.interfaces;
+		int sz = 0;
 
 		ev->ifc_list_sz = ifc_list_sz;
 
-		for (i = 0; global_conf.interfaces[i] != NULL; i++) {
-			char *ifc = global_conf.interfaces[i];
+		for (; *pp; pp++) {
+			char *p = *pp;
 
-			ifc = cp_ltrim(ifc);
-			if (!ifc)
+			if (*p == 0x00)
 				continue;
-
-			strcpy(config_payload + sz, ifc);
-			sz += strlen(ifc) + 1;
+			strcpy(config_payload + sz, p);
+			sz += strlen(p) + 1;
 		}
 
 		global_conf.bind_interfaces_only = 0;
