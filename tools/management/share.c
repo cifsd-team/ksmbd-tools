@@ -315,44 +315,84 @@ struct ksmbd_share *shm_lookup_share(char *name)
 	return share;
 }
 
-static GHashTable *parse_list(GHashTable *map, char **list, char grc)
+static void add_users_map(struct ksmbd_share *share,
+			  enum share_users map,
+			  char **names)
 {
 	char **pp;
 
-	if (!map)
-		map = g_hash_table_new(g_str_hash, g_str_equal);
+	if (!share->maps[map])
+		share->maps[map] = g_hash_table_new(g_str_hash, g_str_equal);
 
-	for (pp = list; *pp; pp++) {
-		char *p = *pp;
+	for (pp = names; *pp; g_free(*pp++)) {
 		struct ksmbd_user *user;
 
-		if (*p == 0x00)
+		if (**pp == 0x00)
 			continue;
-		if (*p == grc) {
-			struct group *gr;
+		if (**pp == '@') {
+			struct group *e = getgrnam(*pp + 1);
 
-			gr = getgrnam(p + 1);
-			if (gr)
-				parse_list(map, gr->gr_mem, 0x00);
+			if (!e) {
+				pr_err("Can't get group file entry for `%s'\n",
+				       *pp + 1);
+				continue;
+			}
+
+			add_users_map(share, map, g_strdupv(e->gr_mem));
 			continue;
 		}
 
-		user = usm_lookup_user(p);
+		user = usm_lookup_user(*pp);
 		if (!user) {
-			pr_info("Drop non-existing user `%s'\n", p);
+			pr_info("No user `%s' for share `%s'\n",
+				*pp,
+				share->name);
 			continue;
 		}
 
-		if (g_hash_table_lookup(map, user->name)) {
-			pr_debug("User `%s' already exists in a map\n",
-				 user->name);
+		if (g_hash_table_lookup(share->maps[map], user->name))
 			continue;
-		}
 
-		g_hash_table_insert(map, user->name, user);
+		g_hash_table_insert(share->maps[map], user->name, user);
 	}
 
-	return map;
+	g_free(names);
+}
+
+static void add_hosts_map(struct ksmbd_share *share,
+			  enum share_hosts map,
+			  char **names)
+{
+	GHashTable **hosts_map;
+	char **pp;
+
+	if (map == KSMBD_SHARE_HOSTS_ALLOW_MAP)
+		hosts_map = &share->hosts_allow_map;
+	else if (map == KSMBD_SHARE_HOSTS_DENY_MAP)
+		hosts_map = &share->hosts_deny_map;
+
+	if (!*hosts_map)
+		*hosts_map = g_hash_table_new_full(g_str_hash,
+						   g_str_equal,
+						   g_free,
+						   NULL);
+
+	for (pp = names; *pp; g_free(*pp++)) {
+		if (**pp == 0x00)
+			continue;
+
+		/*
+		 * FIXME
+		 */
+
+		if (g_hash_table_lookup(*hosts_map, *pp))
+			continue;
+
+		g_hash_table_insert(*hosts_map, *pp, *pp);
+		*pp = NULL;
+	}
+
+	g_free(names);
 }
 
 static void make_veto_list(struct ksmbd_share *share)
@@ -528,77 +568,51 @@ static void process_group_kv(gpointer _k, gpointer _v, gpointer user_data)
 	}
 
 	if (shm_share_config(k, KSMBD_SHARE_CONF_VALID_USERS)) {
-		char **users_list;
-
-		users_list = cp_get_group_kv_list(v);
-		share->maps[KSMBD_SHARE_VALID_USERS_MAP] =
-			parse_list(share->maps[KSMBD_SHARE_VALID_USERS_MAP],
-				   users_list, '@');
-		cp_group_kv_list_free(users_list);
+		add_users_map(share,
+			      KSMBD_SHARE_VALID_USERS_MAP,
+			      cp_get_group_kv_list(v));
 		return;
 	}
 
 	if (shm_share_config(k, KSMBD_SHARE_CONF_INVALID_USERS)) {
-		char **users_list;
-
-		users_list = cp_get_group_kv_list(v);
-		share->maps[KSMBD_SHARE_INVALID_USERS_MAP] =
-			parse_list(share->maps[KSMBD_SHARE_INVALID_USERS_MAP],
-				   users_list, '@');
-		cp_group_kv_list_free(users_list);
+		add_users_map(share,
+			      KSMBD_SHARE_INVALID_USERS_MAP,
+			      cp_get_group_kv_list(v));
 		return;
 	}
 
 	if (shm_share_config(k, KSMBD_SHARE_CONF_READ_LIST)) {
-		char **users_list;
-
-		users_list = cp_get_group_kv_list(v);
-		share->maps[KSMBD_SHARE_READ_LIST_MAP] =
-			parse_list(share->maps[KSMBD_SHARE_READ_LIST_MAP],
-				   users_list, '@');
-		cp_group_kv_list_free(users_list);
+		add_users_map(share,
+			      KSMBD_SHARE_READ_LIST_MAP,
+			      cp_get_group_kv_list(v));
 		return;
 	}
 
 	if (shm_share_config(k, KSMBD_SHARE_CONF_WRITE_LIST)) {
-		char **users_list;
-
-		users_list = cp_get_group_kv_list(v);
-		share->maps[KSMBD_SHARE_WRITE_LIST_MAP] =
-			parse_list(share->maps[KSMBD_SHARE_WRITE_LIST_MAP],
-				   users_list, '@');
-		cp_group_kv_list_free(users_list);
+		add_users_map(share,
+			      KSMBD_SHARE_WRITE_LIST_MAP,
+			      cp_get_group_kv_list(v));
 		return;
 	}
 
 	if (shm_share_config(k, KSMBD_SHARE_CONF_ADMIN_USERS)) {
-		char **users_list;
-
-		users_list = cp_get_group_kv_list(v);
-		share->maps[KSMBD_SHARE_ADMIN_USERS_MAP] =
-			parse_list(share->maps[KSMBD_SHARE_ADMIN_USERS_MAP],
-				   users_list, '@');
-		cp_group_kv_list_free(users_list);
+		add_users_map(share,
+			      KSMBD_SHARE_ADMIN_USERS_MAP,
+			      cp_get_group_kv_list(v));
 		return;
 	}
 
 	if (shm_share_config(k, KSMBD_SHARE_CONF_HOSTS_ALLOW)) {
-		char **hosts_list;
-
-		hosts_list = cp_get_group_kv_list(v);
-		share->hosts_allow_map = parse_list(share->hosts_allow_map,
-						    hosts_list, 0x00);
-		cp_group_kv_list_free(hosts_list);
+		add_hosts_map(share,
+			      KSMBD_SHARE_HOSTS_ALLOW_MAP,
+			      cp_get_group_kv_list(v));
 		return;
 	}
 
 	if (shm_share_config(k, KSMBD_SHARE_CONF_HOSTS_DENY)) {
-		char **hosts_list;
-
-		hosts_list = cp_get_group_kv_list(v);
-		share->hosts_deny_map = parse_list(share->hosts_deny_map,
-						   hosts_list, 0x00);
-		cp_group_kv_list_free(hosts_list);
+		add_hosts_map(share,
+			      KSMBD_SHARE_HOSTS_DENY_MAP,
+			      cp_get_group_kv_list(v));
 		return;
 	}
 
