@@ -28,34 +28,38 @@ static process_entry_fn process_smbconf_entry,
 			process_pwddb_entry,
 			process_subauth_entry;
 
-unsigned long long memparse(const char *v)
+unsigned long long cp_memparse(char *v)
 {
-	char *eptr;
+	char *cp;
+	unsigned long long ull = strtoull(v, &cp, 0);
 
-	unsigned long long ret = strtoull(v, &eptr, 0);
-
-	switch (*eptr) {
+	switch (*cp) {
 	case 'E':
 	case 'e':
-		ret <<= 10;
+		ull <<= 10;
+		/* Fall through */
 	case 'P':
 	case 'p':
-		ret <<= 10;
+		ull <<= 10;
+		/* Fall through */
 	case 'T':
 	case 't':
-		ret <<= 10;
+		ull <<= 10;
+		/* Fall through */
 	case 'G':
 	case 'g':
-		ret <<= 10;
+		ull <<= 10;
+		/* Fall through */
 	case 'M':
 	case 'm':
-		ret <<= 10;
+		ull <<= 10;
+		/* Fall through */
 	case 'K':
 	case 'k':
-		ret <<= 10;
+		ull <<= 10;
 	}
 
-	return ret;
+	return ull;
 }
 
 static int is_ascii_space_tab(char c)
@@ -446,17 +450,17 @@ static gboolean global_group_kv(gpointer _k, gpointer _v, gpointer user_data)
 	}
 
 	if (!cp_key_cmp(_k, "smb2 max read")) {
-		global_conf.smb2_max_read = memparse(_v);
+		global_conf.smb2_max_read = cp_memparse(_v);
 		return TRUE;
 	}
 
 	if (!cp_key_cmp(_k, "smb2 max write")) {
-		global_conf.smb2_max_write = memparse(_v);
+		global_conf.smb2_max_write = cp_memparse(_v);
 		return TRUE;
 	}
 
 	if (!cp_key_cmp(_k, "smb2 max trans")) {
-		global_conf.smb2_max_trans = memparse(_v);
+		global_conf.smb2_max_trans = cp_memparse(_v);
 		return TRUE;
 	}
 
@@ -504,17 +508,17 @@ static gboolean global_group_kv(gpointer _k, gpointer _v, gpointer user_data)
 	}
 
 	if (!cp_key_cmp(_k, "smb2 max credits")) {
-		global_conf.smb2_max_credits = memparse(_v);
+		global_conf.smb2_max_credits = cp_memparse(_v);
 		return TRUE;
 	}
 
 	if (!cp_key_cmp(_k, "smbd max io size")) {
-		global_conf.smbd_max_io_size = memparse(_v);
+		global_conf.smbd_max_io_size = cp_memparse(_v);
 		return TRUE;
 	}
 
 	if (!cp_key_cmp(_k, "max connections")) {
-		global_conf.max_connections = memparse(_v);
+		global_conf.max_connections = cp_memparse(_v);
 		if (!global_conf.max_connections ||
 		    global_conf.max_connections > KSMBD_CONF_MAX_CONNECTIONS) {
 			pr_info("Limits exceeding the maximum simultaneous connections(%d)\n",

@@ -18,6 +18,7 @@ A name may contain leading and trailing tabs and spaces.
 A value, which begins immediately after the equal sign, may contain leading tabs and spaces or be empty.
 A value may be a list of multiple values separated by commas, tabs, and spaces.
 For a list of users, all users in a system group are given by giving the group name prefixed with an at (\fB@\fR).
+A value may have a number suffix, which is either \fBK\R, \fBM\R, \fBG\R, \fBT\R, \fBP\R, or \fBE\R.
 A semicolon (\fB;\fR) or a hash (\fB#\fR) marks the beginning of a comment which continues until the end of the line.
 .SH SHARES
 Each section name, except that of the \fBglobal\fR section, defines a shared resource, commonly referred to as a share.
@@ -181,12 +182,14 @@ Default: \fBmax active sessions = 1024\fR \" KSMBD_CONF_DEFAULT_SESS_CAP
 \fBmax connections\fR (G)
 Maximum number of simultaneous connections to the server.
 With \fBmax connections = 0\fR, the value will be set to the maximum allowed number of 65536. \" KSMBD_CONF_MAX_CONNECTIONS
+Number suffixes are allowed.
 
 Default: \fBmax connections = 128\fR \" KSMBD_CONF_DEFAULT_CONNECTIONS
 .TP
 \fBmax connections\fR (S)
 Maximum number of simultaneous connections to the share.
 With \fBmax connections = 0\fR, the value will be set to the maximum allowed number of 65536. \" KSMBD_CONF_MAX_CONNECTIONS
+Number suffixes are allowed.
 
 Default: \fBmax connections = 128\fR \" KSMBD_CONF_DEFAULT_CONNECTIONS
 .TP
@@ -275,21 +278,25 @@ Default: \fBsmb2 leases = no\fR
 .TP
 \fBsmb2 max credits\fR (G)
 Maximum number of outstanding simultaneous SMB2 operations.
+Number suffixes are allowed.
 
 Default: \fBsmb2 max credits = 8192\fR \" SMB2_MAX_CREDITS
 .TP
 \fBsmb2 max read\fR (G)
 Maximum length that may be used in a SMB2 READ request sent by a client.
+Number suffixes are allowed.
 
 Default: \fBsmb2 max read = 4MB\fR \" SMB3_DEFAULT_IOSIZE
 .TP
 \fBsmb2 max trans\fR (G)
 Maximum buffer size that may be used by a client in a sent SET_INFO request or a received QUERY_INFO, QUERY_DIRECTORY, or CHANGE_NOTIFY response.
+Number suffixes are allowed.
 
 Default: \fBsmb2 max trans = 1MB\fR \" SMB3_DEFAULT_TRANS_SIZE
 .TP
 \fBsmb2 max write\fR (G)
 Maximum length that may be used in a SMB2 WRITE request sent by a client.
+Number suffixes are allowed.
 
 Default: \fBsmb2 max write = 4MB\fR \" SMB3_DEFAULT_IOSIZE
 .TP
@@ -303,6 +310,7 @@ Default: \fBsmb3 encryption = auto\fR
 .TP
 \fBsmbd max io size\fR (G)
 Maximum read/write size of SMB-Direct.
+Number suffixes are allowed.
 
 Default: \fBsmbd max io size = 8MB\fR \" SMBD_DEFAULT_IOSIZE
 .TP

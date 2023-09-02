@@ -617,7 +617,7 @@ static void process_group_kv(gpointer _k, gpointer _v, gpointer user_data)
 	}
 
 	if (shm_share_config(k, KSMBD_SHARE_CONF_MAX_CONNECTIONS)) {
-		share->max_connections = cp_get_group_kv_long_base(v, 10);
+		share->max_connections = cp_memparse(v);
 		if (!share->max_connections ||
 		    share->max_connections > KSMBD_CONF_MAX_CONNECTIONS) {
 			pr_info("Limits exceeding the maximum simultaneous connections(%d)\n",
