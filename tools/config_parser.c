@@ -23,6 +23,11 @@ struct smbconf_global global_conf;
 struct smbconf_parser parser;
 struct smbconf_group *global_group, *ipc_group;
 
+typedef int process_entry_fn(char *entry);
+static process_entry_fn process_smbconf_entry,
+			process_pwddb_entry,
+			process_subauth_entry;
+
 unsigned long long memparse(const char *v)
 {
 	char *eptr;
@@ -179,78 +184,52 @@ static int process_smbconf_entry(char *entry)
 	return -EINVAL;
 }
 
-static int __mmap_parse_file(const char *fname, int (*callback)(char *data))
+static int __mmap_parse_file(const char *path, process_entry_fn *process_entry)
 {
+	GError *error = NULL;
 	GMappedFile *file;
-	GError *err = NULL;
-	gchar *contents;
-	int len;
-	char *delim;
-	int fd, ret = 0;
+	char *contents, *delim;
+	size_t len;
+	int fd, ret;
 
-	fd = g_open(fname, O_RDONLY, 0);
-	if (fd == -1) {
+	fd = open(path, O_RDONLY);
+	if (fd < 0) {
 		ret = -errno;
-		pr_debug("Can't open `%s': %m\n", fname);
-		return ret;
+		pr_debug("Can't open `%s': %m\n", path);
+		goto out;
 	}
 
-	file = g_mapped_file_new_from_fd(fd, FALSE, &err);
-	if (err) {
-		pr_err("Can't map `%s' to memory: %s\n", fname, err->message);
-		g_error_free(err);
+	file = g_mapped_file_new_from_fd(fd, 0, &error);
+	if (error) {
+		pr_err("%s\n", error->message);
+		g_error_free(error);
 		ret = -EINVAL;
-		goto out;
+		goto out_close;
 	}
 
 	contents = g_mapped_file_get_contents(file);
-	if (!contents)
-		goto out;
-
-	len = g_mapped_file_get_length(file);
-	while (len > 0) {
-		delim = memchr(contents, '\n', len);
-		if (!delim)
-			delim = contents + len - 1;
-
-		if (delim) {
-			size_t sz = delim - contents;
-			char *data;
-
-			if (delim == contents) {
-				contents = delim + 1;
-				len--;
-				continue;
-			}
-
-			if (!sz)
-				break;
-
-			data = g_strndup(contents, sz);
-			ret = callback(data);
-			if (ret) {
-				g_free(data);
-				goto out;
-			}
-
-			g_free(data);
-			contents = delim + 1;
-			len -= (sz + 1);
-		}
+	if (!contents) {
+		ret = 0;
+		goto out_unref;
 	}
 
-	ret = 0;
+	for (len = g_mapped_file_get_length(file);
+	     len > 0 && len != (size_t)-1;
+	     len -= delim - contents + 1, contents = delim + 1) {
+		g_autofree char *entry = NULL;
+
+		delim = memchr(contents, '\n', len) ?: contents + len;
+		entry = g_strndup(contents, delim - contents);
+		ret = process_entry(entry);
+		if (ret)
+			goto out_unref;
+	}
+
+out_unref:
+	g_mapped_file_unref(file);
+out_close:
+	close(fd);
 out:
-	if (file)
-		g_mapped_file_unref(file);
-
-	if (fd) {
-		g_close(fd, &err);
-		if (err) {
-			pr_err("Can't close `%s': %s\n", fname, err->message);
-			g_error_free(err);
-		}
-	}
 	return ret;
 }
 
