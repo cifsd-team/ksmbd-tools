@@ -279,11 +279,9 @@ char *cp_rtrim(const char *v, const char *p)
 	return (char *)p;
 }
 
-int cp_key_cmp(char *k, char *v)
+int cp_key_cmp(const char *lk, const char *rk)
 {
-	if (!k || !v)
-		return -1;
-	return g_ascii_strncasecmp(k, v, strlen(v));
+	return g_ascii_strncasecmp(lk, rk, strlen(rk));
 }
 
 char *cp_get_group_kv_string(char *v)
@@ -293,23 +291,19 @@ char *cp_get_group_kv_string(char *v)
 
 int cp_get_group_kv_bool(char *v)
 {
-	if (!g_ascii_strncasecmp(v, "yes", 3) ||
-		!g_ascii_strncasecmp(v, "1", 1) ||
-		!g_ascii_strncasecmp(v, "true", 4) ||
-		!g_ascii_strncasecmp(v, "enable", 6))
-		return 1;
-	return 0;
+	return !cp_key_cmp(v, "yes") ||
+	       !cp_key_cmp(v, "1") ||
+	       !cp_key_cmp(v, "true") ||
+	       !cp_key_cmp(v, "enable");
 }
 
 int cp_get_group_kv_config_opt(char *v)
 {
-	if (!g_ascii_strncasecmp(v, "disabled", 8))
-		return KSMBD_CONFIG_OPT_DISABLED;
-	if (!g_ascii_strncasecmp(v, "enabled", 7))
+	if (!cp_key_cmp(v, "enabled"))
 		return KSMBD_CONFIG_OPT_ENABLED;
-	if (!g_ascii_strncasecmp(v, "auto", 4))
+	if (!cp_key_cmp(v, "auto"))
 		return KSMBD_CONFIG_OPT_AUTO;
-	if (!g_ascii_strncasecmp(v, "mandatory", 9))
+	if (!cp_key_cmp(v, "mandatory"))
 		return KSMBD_CONFIG_OPT_MANDATORY;
 	return KSMBD_CONFIG_OPT_DISABLED;
 }

@@ -50,7 +50,7 @@ int cp_parse_subauth(void);
 unsigned long long cp_memparse(char *v);
 char *cp_ltrim(const char *v);
 char *cp_rtrim(const char *v, const char *p);
-int cp_key_cmp(char *k, char *v);
+int cp_key_cmp(const char *lk, const char *rk);
 char *cp_get_group_kv_string(char *v);
 int cp_get_group_kv_bool(char *v);
 unsigned long cp_get_group_kv_long_base(char *v, int base);
