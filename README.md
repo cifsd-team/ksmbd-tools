@@ -107,14 +107,10 @@ Example session:
 mkdir -vp $HOME/MyShare
 
 # Add a share to the default configuration file.
-# Initial share parameters for the share are given with `--options'.
-# `--options' takes a single argument, so quote it accordingly in your shell.
 # Note that `ksmbd.addshare' does not do variable expansion.
-# Newline is the only safe character to use as separator for share parameters.
-sudo ksmbd.addshare --add-share=MyShare --options="
-path = $HOME/MyShare
-read only = no
-"
+sudo ksmbd.addshare --add-share=MyShare \
+                    --option="path = $HOME/MyShare" \
+                    --option='read only = no'
 
 # The default configuration file now has a new section for `MyShare'.
 #
@@ -125,7 +121,6 @@ read only = no
 # Each share has its own section with share parameters that apply to it.
 # A share parameter given in `[global]' changes its default value.
 # `[global]' also has global parameters which are not share specific.
-# `ksmbd.addshare' will not change `[global]' so do it with a text editor.
 
 # Add a user to the default user database.
 # You will be prompted for a password.
@@ -135,10 +130,9 @@ sudo ksmbd.adduser --add-user=MyUser
 # We can force all users accessing the share to map to a system user and group.
 
 # Update share parameters of a share in the default configuration file.
-sudo ksmbd.addshare --update-share=MyShare --options="
-force user = $USER
-force group = $USER
-"
+sudo ksmbd.addshare --update-share=MyShare \
+                    --option="force user = $USER" \
+                    --option="force group = $USER"
 
 # The default configuration file now has the updated share parameters.
 #

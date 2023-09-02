@@ -33,7 +33,7 @@ static inline int cp_smbconf_eol(char *p)
 	return *p == 0x00 || *p == ';' || *p == '#';
 }
 
-void cp_parse_external_smbconf_group(char *name, char *opts);
+void cp_parse_external_smbconf_group(char *name, char **options);
 void cp_init_smbconf_parser(void);
 void cp_release_smbconf_parser(void);
 

@@ -760,36 +760,21 @@ int cp_parse_subauth(void)
 	return __mmap_parse_file(PATH_SUBAUTH, process_subauth_entry);
 }
 
-void cp_parse_external_smbconf_group(char *name, char *opts)
+void cp_parse_external_smbconf_group(char *name, char **options)
 {
-	char *pos;
-	int i, len;
-
-	len = strlen(opts);
-	/* fake smb.conf input */
-	for (i = 0; i < KSMBD_SHARE_CONF_MAX; i++) {
-		pos = strstr(opts, KSMBD_SHARE_CONF[i]);
-		if (!pos)
-			continue;
-		if (pos != opts)
-			*(pos - 1) = '\n';
-	}
-
 	add_group(name);
 
-	/* split input and feed to normal process_smbconf_entry() */
-	while (len) {
-		char *delim = strchr(opts, '\n');
+	for (; *options; options++) {
+		char *option = cp_ltrim(*options);
 
-		if (delim) {
-			*delim = 0x00;
-			len -= delim - opts;
-		} else {
-			len = 0;
+		if (cp_smbconf_eol(option))
+			continue;
+
+		if (is_a_key_value(option)) {
+			add_group_key_value(option);
+			continue;
 		}
 
-		process_smbconf_entry(opts);
-		if (delim)
-			opts = delim + 1;
+		pr_info("Ignored option `%s'\n", option);
 	}
 }

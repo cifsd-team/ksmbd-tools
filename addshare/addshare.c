@@ -27,7 +27,7 @@
 static void usage(int status)
 {
 	printf(
-		"Usage: ksmbd.addshare [-v] {-a SHARE | -u SHARE} {-o OPTIONS} [-c SMBCONF]\n"
+		"Usage: ksmbd.addshare [-v] {-a SHARE | -u SHARE} [-c SMBCONF] {-o OPTION}...\n"
 		"       ksmbd.addshare [-v] {-d SHARE} [-c SMBCONF]\n"
 		"       ksmbd.addshare {-V | -h}\n");
 
@@ -44,11 +44,9 @@ static void usage(int status)
 			"  -d, --del-share=SHARE       delete SHARE from configuration file\n"
 			"  -u, --update-share=SHARE    update SHARE in configuration file;\n"
 			"                              updated parameters must be given with `--options'\n"
-			"  -o, --options=OPTIONS       use OPTIONS as parameters;\n"
-			"                              OPTIONS is one argument and follows format\n"
-			"                              `1st par = 1st val<newline>2nd par = 2nd val...';\n"
-			"                              separators other than newline create ambiguity;\n"
-			"                              global parameters cannot be given\n"
+			"  -o, --option=OPTION         use OPTION as parameter;\n"
+			"                              global parameters cannot be given;\n"
+			"                              this option can be given multiple times\n"
 			"  -c, --config=SMBCONF        use SMBCONF as configuration file instead of\n"
 			"                              `" PATH_SMBCONF "'\n"
 			"  -v, --verbose               be verbose\n"
@@ -62,7 +60,7 @@ static const struct option opts[] = {
 	{"add-share",		required_argument,	NULL,	'a' },
 	{"del-share",		required_argument,	NULL,	'd' },
 	{"update-share",	required_argument,	NULL,	'u' },
-	{"options",		required_argument,	NULL,	'o' },
+	{"option",		required_argument,	NULL,	'o' },
 	{"config",		required_argument,	NULL,	'c' },
 	{"verbose",		no_argument,		NULL,	'v' },
 	{"version",		no_argument,		NULL,	'V' },
@@ -96,7 +94,9 @@ static int parse_configs(char *smbconf)
 int addshare_main(int argc, char **argv)
 {
 	int ret = -EINVAL;
-	char *smbconf = NULL, *name = NULL, *options = NULL;
+	char *smbconf = NULL, *name = NULL, **options = NULL;
+	g_autoptr(GPtrArray) __options =
+		g_ptr_array_new_with_free_func(g_free);
 	command_fn *command = NULL;
 	int c;
 
@@ -120,8 +120,7 @@ int addshare_main(int argc, char **argv)
 			command = command_update_share;
 			break;
 		case 'o':
-			g_free(options);
-			options = g_strdup(optarg);
+			gptrarray_printf(__options, "%s", optarg);
 			break;
 		case 'c':
 			g_free(smbconf);
@@ -141,6 +140,9 @@ int addshare_main(int argc, char **argv)
 			usage(ret ? EXIT_FAILURE : EXIT_SUCCESS);
 			goto out;
 		}
+
+	options = gptrarray_to_strv(__options);
+	__options = NULL;
 
 	if (argc < 2 || argc > optind || !name) {
 		usage(ret ? EXIT_FAILURE : EXIT_SUCCESS);

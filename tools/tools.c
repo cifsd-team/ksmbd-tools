@@ -226,6 +226,37 @@ retry:
 	return converted;
 }
 
+char **gptrarray_to_strv(GPtrArray *gptrarray)
+{
+	if (!gptrarray->len ||
+	    g_ptr_array_index(gptrarray, gptrarray->len - 1))
+		g_ptr_array_add(gptrarray, NULL);
+
+	return (char **)g_ptr_array_free(gptrarray, 0);
+}
+
+static char *strv_to_str(char **strv)
+{
+	char *str = g_strjoinv(NULL, strv);
+
+	g_strfreev(strv);
+	return str;
+}
+
+char *gptrarray_to_str(GPtrArray *gptrarray)
+{
+	return strv_to_str(gptrarray_to_strv(gptrarray));
+}
+
+void gptrarray_printf(GPtrArray *gptrarray, const char *fmt, ...)
+{
+	va_list args;
+
+	va_start(args, fmt);
+	g_ptr_array_add(gptrarray, g_strdup_vprintf(fmt, args));
+	va_end(args);
+}
+
 int send_signal_to_ksmbd_mountd(int signo)
 {
 	int fd, ret = -EINVAL;

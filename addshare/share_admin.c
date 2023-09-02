@@ -131,7 +131,7 @@ static void update_share_cb(gpointer key,
 	g_hash_table_insert(g, nk, nv);
 }
 
-int command_add_share(char *smbconf, char *name, char *opts)
+int command_add_share(char *smbconf, char *name, char **options)
 {
 	g_autofree char *new_name = NULL;
 
@@ -141,7 +141,7 @@ int command_add_share(char *smbconf, char *name, char *opts)
 	}
 
 	new_name = new_group_name(name);
-	cp_parse_external_smbconf_group(new_name, opts);
+	cp_parse_external_smbconf_group(new_name, options);
 
 	if (__open_smbconf(smbconf))
 		return -EINVAL;
@@ -152,7 +152,7 @@ int command_add_share(char *smbconf, char *name, char *opts)
 	return 0;
 }
 
-int command_update_share(char *smbconf, char *name, char *opts)
+int command_update_share(char *smbconf, char *name, char **options)
 {
 	struct smbconf_group *existing_group;
 	struct smbconf_group *update_group;
@@ -165,7 +165,7 @@ int command_update_share(char *smbconf, char *name, char *opts)
 	}
 
 	aux_name = aux_group_name(name);
-	cp_parse_external_smbconf_group(aux_name, opts);
+	cp_parse_external_smbconf_group(aux_name, options);
 
 	/* get rid of [] */
 	sprintf(aux_name, "%s%s", AUX_GROUP_PREFIX, name);
@@ -191,7 +191,7 @@ int command_update_share(char *smbconf, char *name, char *opts)
 	return 0;
 }
 
-int command_del_share(char *smbconf, char *name, char *unused)
+int command_del_share(char *smbconf, char *name, char **unused)
 {
 	struct smbconf_group *g;
 	(void)unused;
