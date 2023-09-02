@@ -170,10 +170,8 @@ static krb5_error_code acquire_creds_from_keytab(krb5_context context,
 out_err:
 	if (sprinc)
 		krb5_free_principal(context, sprinc);
-	if (service_name)
-		g_free(service_name);
-	if (host_name)
-		g_free(host_name);
+	g_free(service_name);
+	g_free(host_name);
 	if (*keytab)
 		krb5_kt_close(context, *keytab);
 	return retval;
@@ -383,10 +381,8 @@ static void cleanup_krb5(struct spnego_mech_ctx *mech_ctx)
 		g_free(krb5_ctx);
 		mech_ctx->private = NULL;
 	}
-	if (mech_ctx->params.krb5.service_name)
-		g_free(mech_ctx->params.krb5.service_name);
-	if (mech_ctx->params.krb5.keytab_name)
-		g_free(mech_ctx->params.krb5.keytab_name);
+	g_free(mech_ctx->params.krb5.service_name);
+	g_free(mech_ctx->params.krb5.keytab_name);
 }
 
 struct spnego_mech_operations spnego_krb5_operations = {

@@ -214,8 +214,7 @@ static int decode_negTokenInit(unsigned char *negToken, int token_len,
 
 	/* AP_REQ id */
 	if (asn1_read(&ctx, &id, 2) == 0 || id[0] != 1 || id[1] != 0) {
-		if (id)
-			g_free(id);
+		g_free(id);
 		pr_debug("Error decoding AP_REQ ID\n");
 		return -EINVAL;
 	}
