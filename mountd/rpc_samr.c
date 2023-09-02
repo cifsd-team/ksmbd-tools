@@ -1036,7 +1036,7 @@ int rpc_samr_init(void)
 	if (gethostname(hostname, NAME_MAX))
 		return -EINVAL;
 
-	domain_name = g_ascii_strup(hostname, strlen(hostname));
+	domain_name = g_ascii_strup(hostname, -1);
 	rpc_samr_add_domain_entry(domain_name);
 	rpc_samr_add_domain_entry("Builtin");
 	g_rw_lock_init(&ch_table_lock);

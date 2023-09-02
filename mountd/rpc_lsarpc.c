@@ -724,7 +724,7 @@ int rpc_lsarpc_init(void)
 	if (gethostname(domain_string, NAME_MAX))
 		return -EINVAL;
 
-	domain_name = g_ascii_strup(domain_string, strlen(domain_string));
+	domain_name = g_ascii_strup(domain_string, -1);
 	ph_table = g_hash_table_new(g_str_hash, g_str_equal);
 	g_rw_lock_init(&ph_table_lock);
 	return 0;

@@ -236,19 +236,21 @@ static char *shm_casefold_share_name(const char *name, size_t len)
 	if (!nfdi_name)
 		return g_ascii_strdown(name, len);
 
-	return g_utf8_casefold(nfdi_name, strlen(nfdi_name));
+	return g_utf8_casefold(nfdi_name, -1);
 }
 
 guint shm_share_name_hash(gconstpointer name)
 {
-	g_autofree char *cf_name = shm_casefold_share_name(name, strlen(name));
+	g_autofree char *cf_name = shm_casefold_share_name(name, -1);
+
 	return g_str_hash(cf_name);
 }
 
 gboolean shm_share_name_equal(gconstpointer lname, gconstpointer rname)
 {
-	g_autofree char *cf_lname = shm_casefold_share_name(lname, strlen(lname));
-	g_autofree char *cf_rname = shm_casefold_share_name(rname, strlen(rname));
+	g_autofree char *cf_lname = shm_casefold_share_name(lname, -1);
+	g_autofree char *cf_rname = shm_casefold_share_name(rname, -1);
+
 	return g_str_equal(cf_lname, cf_rname);
 }
 
