@@ -27,6 +27,17 @@ struct smbconf_parser {
 
 extern struct smbconf_parser parser;
 
+static inline int cp_printable(unsigned char *p)
+{
+	/* eighth bit is ok due to utf-8 mb */
+	return *p >= 0x20 && *p != 0x7F;
+}
+
+static inline int cp_smbconf_eol(char *p)
+{
+	return *p == 0x00 || *p == ';' || *p == '#';
+}
+
 void cp_parse_external_smbconf_group(char *name, char *opts);
 int cp_smbconfig_hash_create(const char *smbconf);
 void cp_smbconfig_destroy(void);

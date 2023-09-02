@@ -53,135 +53,129 @@ unsigned long long memparse(const char *v)
 	return ret;
 }
 
-static void kv_release_cb(gpointer p)
-{
-	g_free(p);
-}
-
 static int is_ascii_space_tab(char c)
 {
 	return c == ' ' || c == '\t';
 }
 
-static int is_a_comment(char *line)
+static int is_a_group(char *entry)
 {
-	return (*line == 0x00 || *line == ';' || *line == '\n' || *line == '#');
+	char *delim;
+	int is_group;
+
+	is_group = *entry == '[';
+	if (!is_group)
+		goto out;
+	entry++;
+	delim = strchr(entry, ']');
+	is_group = shm_share_name(entry, delim);
+	if (!is_group)
+		goto out;
+	entry = cp_ltrim(delim + 1);
+	is_group = cp_smbconf_eol(entry);
+	if (!is_group) {
+		pr_err("Group contains `%c' [0x%2X]\n",
+		       *entry,
+		       *entry);
+		goto out;
+	}
+	*entry = 0x00;
+out:
+	return is_group;
 }
 
-static int is_a_group(char *line)
+static int is_a_key_value(char *entry)
 {
-	char *p = line;
+	char *delim;
+	int is_key_value;
 
-	if (*p != '[')
-		return 0;
-	p++;
-	while (*p && *p != ']')
-		p = g_utf8_find_next_char(p, NULL);
-	if (*p != ']')
-		return 0;
-	return 1;
+	delim = strchr(entry, '=');
+	is_key_value = delim > entry;
+	if (!is_key_value)
+		goto out;
+	for (; entry < delim; entry++) {
+		is_key_value = cp_printable(entry) && !cp_smbconf_eol(entry);
+		if (!is_key_value) {
+			pr_err("Key contains `%c' [0x%2X]\n",
+			       *entry,
+			       *entry);
+			goto out;
+		}
+	}
+	entry = cp_ltrim(entry + 1);
+	for (; !cp_smbconf_eol(entry); entry++) {
+		is_key_value = cp_printable(entry) || *entry == '\t';
+		if (!is_key_value) {
+			pr_err("Value contains `%c' [0x%2X]\n",
+			       *entry,
+			       *entry);
+			goto out;
+		}
+	}
+	*entry = 0x00;
+out:
+	return is_key_value;
 }
 
-static int is_a_key_value(char *line)
+static void add_group(const char *entry)
 {
-	char *key = strchr(line, '=');
+	g_autofree char *name =
+		g_strndup(entry + 1, strchr(entry, ']') - entry - 1);
+	struct smbconf_group *g =
+		g_hash_table_lookup(parser.groups, name);
 
-	if (!key)
-		return 0;
-	do {
-		if (key == line)
-			return 0;
-	} while (is_ascii_space_tab(*--key));
-
-	return 1;
-}
-
-static void add_new_group(char *line)
-{
-	char *begin = line;
-	char *end = line;
-	char *name = NULL;
-	struct smbconf_group *group = NULL;
-	struct smbconf_group *lookup;
-
-	while (*end && *end != ']')
-		end = g_utf8_find_next_char(end, NULL);
-
-	name = g_strndup(begin + 1, end - begin - 1);
-	lookup = g_hash_table_lookup(parser.groups, name);
-	if (lookup) {
-		parser.current = lookup;
-		pr_info("Multiple definitions for group `%s'\n", name);
-		g_free(name);
+	if (g) {
+		parser.current = g;
 		return;
 	}
 
-	group = g_malloc(sizeof(struct smbconf_group));
-	group->cb_mode = GROUPS_CALLBACK_NONE;
-	group->name = name;
-	group->kv = g_hash_table_new_full(g_str_hash,
-					  g_str_equal,
-					  kv_release_cb,
-					  kv_release_cb);
+	g = g_malloc(sizeof(struct smbconf_group));
+	g->name = name;
+	g->kv = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+	g_hash_table_insert(parser.groups, name, g);
+	name = NULL;
 
-	parser.current = group;
-	g_hash_table_insert(parser.groups, group->name, group);
+	parser.current = g;
 }
 
-static void add_group_key_value(char *line)
+static void add_group_key_value(const char *entry)
 {
-	char *key, *value;
-
-	key = strchr(line, '=');
-	value = key;
-
-	while (is_ascii_space_tab(*--key))
-		;
-	while (is_ascii_space_tab(*++value))
-		;
-
-	if (is_a_comment(value))
-		return;
-
-	key = g_strndup(line, key - line + 1);
-	value = g_strdup(value);
+	const char *delim = strchr(entry, '=');
+	g_autofree char *k =
+		g_strndup(entry, cp_rtrim(entry, delim - 1) + 1 - entry);
+	g_autofree char *v =
+		g_strdup(cp_ltrim(delim + 1));
 
 	if (!parser.current) {
-		pr_info("Key-value definition for `%s' is not in a group\n", key);
-		g_free(key);
-		g_free(value);
+		pr_info("No group for key `%s'\n", k);
 		return;
 	}
 
-	if (g_hash_table_lookup(parser.current->kv, key)) {
-		pr_info("Multiple key-value definitions for `%s' in group `%s'\n",
-			key, parser.current->name);
-		g_free(key);
-		g_free(value);
+	if (cp_smbconf_eol(v) || g_hash_table_lookup(parser.current->kv, k))
 		return;
-	}
 
-	g_hash_table_insert(parser.current->kv, key, value);
+	g_hash_table_insert(parser.current->kv, k, v);
+	k = v = NULL;
 }
 
-static int process_smbconf_entry(char *data)
+static int process_smbconf_entry(char *entry)
 {
-	while (is_ascii_space_tab(*data))
-		data++;
+	entry = cp_ltrim(entry);
 
-	if (is_a_comment(data))
+	if (cp_smbconf_eol(entry))
 		return 0;
 
-	if (is_a_group(data)) {
-		add_new_group(data);
-		return 0;
-	}
-
-	if (is_a_key_value(data)) {
-		add_group_key_value(data);
+	if (is_a_group(entry)) {
+		add_group(entry);
 		return 0;
 	}
 
+	if (is_a_key_value(entry)) {
+		add_group_key_value(entry);
+		return 0;
+	}
+
+	pr_err("Invalid smbconf entry `%s'\n", entry);
 	return -EINVAL;
 }
 
@@ -651,7 +645,7 @@ static void cp_add_ipc_group(void)
 	if (ipc_group)
 		return;
 
-	add_new_group("[ipc$]");
+	add_group("[ipc$]");
 	add_group_key_value("comment = IPC share");
 	add_group_key_value("guest ok = yes");
 	ipc_group = g_hash_table_lookup(parser.groups, "ipc$");
@@ -731,7 +725,7 @@ void cp_parse_external_smbconf_group(char *name, char *opts)
 			*(pos - 1) = '\n';
 	}
 
-	add_new_group(name);
+	add_group(name);
 
 	/* split input and feed to normal process_smbconf_entry() */
 	while (len) {

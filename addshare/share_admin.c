@@ -29,9 +29,6 @@ static size_t wsz;
 
 static char *new_group_name(char *name)
 {
-	if (strchr(name, '['))
-		return name;
-
 	return g_strdup_printf("[%s]", name);
 }
 

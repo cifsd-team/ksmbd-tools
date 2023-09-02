@@ -92,29 +92,10 @@ static int parse_configs(char *smbconf)
 	return ret;
 }
 
-static int sanity_check_share_name_simple(char *name)
-{
-	int sz;
-
-	if (!name)
-		return -EINVAL;
-
-	sz = strlen(name);
-	if (sz < 1)
-		return -EINVAL;
-	if (sz >= KSMBD_REQ_MAX_SHARE_NAME)
-		return -EINVAL;
-
-	if (!g_ascii_strcasecmp(name, "global"))
-		return -EINVAL;
-
-	return 0;
-}
-
 int addshare_main(int argc, char **argv)
 {
 	int ret = -EINVAL;
-	char *share = NULL, *options = NULL, *smbconf = NULL;
+	char *smbconf = NULL, *name = NULL, *options = NULL;
 	command_fn command = NULL;
 	int c;
 
@@ -123,18 +104,18 @@ int addshare_main(int argc, char **argv)
 	while ((c = getopt_long(argc, argv, "a:d:u:o:c:vVh", opts, NULL)) != EOF)
 		switch (c) {
 		case 'a':
-			g_free(share);
-			share = g_strdup(optarg);
+			g_free(name);
+			name = g_strdup(optarg);
 			command = command_add_share;
 			break;
 		case 'd':
-			g_free(share);
-			share = g_strdup(optarg);
+			g_free(name);
+			name = g_strdup(optarg);
 			command = command_del_share;
 			break;
 		case 'u':
-			g_free(share);
-			share = g_strdup(optarg);
+			g_free(name);
+			name = g_strdup(optarg);
 			command = command_update_share;
 			break;
 		case 'o':
@@ -160,24 +141,21 @@ int addshare_main(int argc, char **argv)
 			goto out;
 		}
 
-	if (argc < 2 || argc > optind) {
+	if (argc < 2 || argc > optind || !name) {
 		usage(ret ? EXIT_FAILURE : EXIT_SUCCESS);
 		goto out;
 	}
 
-	if (!share) {
-		pr_err("No option with share name given\n");
+	if (!shm_share_name(name, strchr(name, 0x00)))
+		goto out;
+	if (shm_share_name_equal(name, "global")) {
+		pr_err("Share name is `global'\n");
 		goto out;
 	}
 
 	if ((command == command_add_share || command == command_update_share) &&
 	    !options) {
 		pr_err("No parameters given\n");
-		goto out;
-	}
-
-	if (sanity_check_share_name_simple(share)) {
-		pr_err("Share name sanity check failure\n");
 		goto out;
 	}
 
@@ -197,7 +175,7 @@ int addshare_main(int argc, char **argv)
 		goto out;
 
 	if (command) {
-		ret = command(smbconf, share, options);
+		ret = command(smbconf, name, options);
 		if (!ret && send_signal_to_ksmbd_mountd(SIGHUP))
 			pr_debug("Unable to notify ksmbd.mountd of changes\n");
 	}

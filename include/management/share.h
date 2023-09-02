@@ -123,6 +123,7 @@ enum KSMBD_SHARE_CONF {
 
 extern char *KSMBD_SHARE_CONF[KSMBD_SHARE_CONF_MAX];
 
+int shm_share_name(char *name, char *p);
 int shm_share_config(char *k, enum KSMBD_SHARE_CONF c);
 
 static inline void set_share_flag(struct ksmbd_share *share, int flag)
