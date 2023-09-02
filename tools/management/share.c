@@ -365,39 +365,49 @@ static void make_veto_list(struct ksmbd_share *share)
 	}
 }
 
-static void force_group(struct ksmbd_share *share, char *name)
+static int force_group(struct ksmbd_share *share, char *name)
 {
-	struct group *grp;
+	struct group *e = getgrnam(name);
 
-	grp = getgrnam(name);
-	if (grp) {
-		share->force_gid = grp->gr_gid;
-		if (share->force_gid == KSMBD_SHARE_INVALID_GID)
-			pr_err("Invalid force GID: %u\n", share->force_gid);
-	} else
-		pr_err("Unable to lookup up `/etc/group' entry: %s\n", name);
+	if (!e) {
+		pr_err("Can't get group file entry for `%s'\n", name);
+		return -EINVAL;
+	}
+
+	share->force_gid = e->gr_gid;
+	if (share->force_gid == KSMBD_SHARE_INVALID_GID) {
+		pr_err("Group `%s' is invalid\n", name);
+		return -EINVAL;
+	}
+
+	return 0;
 }
 
-static void force_user(struct ksmbd_share *share, char *name)
+static int force_user(struct ksmbd_share *share, char *name)
 {
-	struct passwd *passwd;
+	struct passwd *e = getpwnam(name);
 
-	passwd = getpwnam(name);
-	if (passwd) {
-		share->force_uid = passwd->pw_uid;
-		/*
-		 * smb.conf 'force group' has higher priority than
-		 * 'force user'.
-		 */
-		if (share->force_gid == KSMBD_SHARE_INVALID_GID)
-			share->force_gid = passwd->pw_gid;
-		if (share->force_uid == KSMBD_SHARE_INVALID_UID ||
-				share->force_gid == KSMBD_SHARE_INVALID_GID)
-			pr_err("Invalid force UID/GID: %u/%u\n",
-					share->force_uid, share->force_gid);
-	} else {
-		pr_err("Unable to lookup up `/etc/passwd' entry: %s\n", name);
+	if (!e) {
+		pr_err("Can't get password file entry for `%s'\n", name);
+		return -EINVAL;
 	}
+
+	share->force_uid = e->pw_uid;
+	if (share->force_uid == KSMBD_SHARE_INVALID_UID) {
+		pr_err("User `%s' is invalid\n", name);
+		return -EINVAL;
+	}
+
+	/* `force group' has precedence */
+	if (share->force_gid == KSMBD_SHARE_INVALID_GID) {
+		share->force_gid = e->pw_gid;
+		if (share->force_gid == KSMBD_SHARE_INVALID_GID) {
+			pr_err("Group `%s' is invalid\n", name);
+			return -EINVAL;
+		}
+	}
+
+	return 0;
 }
 
 static void process_group_kv(gpointer _k, gpointer _v, gpointer user_data)
@@ -498,12 +508,14 @@ static void process_group_kv(gpointer _k, gpointer _v, gpointer user_data)
 	}
 
 	if (shm_share_config(k, KSMBD_SHARE_CONF_FORCE_GROUP)) {
-		force_group(share, v);
+		if (force_group(share, v))
+			set_share_flag(share, KSMBD_SHARE_FLAG_INVALID);
 		return;
 	}
 
 	if (shm_share_config(k, KSMBD_SHARE_CONF_FORCE_USER)) {
-		force_user(share, v);
+		if (force_user(share, v))
+			set_share_flag(share, KSMBD_SHARE_FLAG_INVALID);
 		return;
 	}
 
