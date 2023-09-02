@@ -89,7 +89,7 @@ AS_IF([test "x$with_systemdsystemunitdir" != xno], [
 
 AC_SUBST([systemdsystemunitdir])
 
-PKG_CHECK_MODULES([GLIB], [glib-2.0 >= 2.40], [have_glib=yes], [have_glib=no])
+PKG_CHECK_MODULES([GLIB], [glib-2.0 >= 2.44], [have_glib=yes], [have_glib=no])
 AS_IF([test "x$have_glib" != xyes], [
 	AC_MSG_ERROR([glib (libglib2.0-dev or glib2-devel) was not found.])
 ])
