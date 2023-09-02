@@ -286,7 +286,7 @@ struct ksmbd_rpc_pipe {
 
 	int			num_entries;
 	int			num_processed;
-	GArray			*entries;
+	GPtrArray		*entries;
 
 	struct ksmbd_dcerpc	*dce;
 

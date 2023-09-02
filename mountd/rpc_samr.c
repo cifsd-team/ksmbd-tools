@@ -31,7 +31,7 @@
 
 static GHashTable	*ch_table;
 static GRWLock		ch_table_lock;
-static GArray		*domain_entries;
+static GPtrArray	*domain_entries;
 static gchar		*domain_name;
 static int		num_domain_entries;
 
@@ -141,14 +141,14 @@ int samr_ndr_write_domain_array(struct ksmbd_rpc_pipe *pipe)
 	int i, ret = 0;
 
 	for (i = 0; i < num_domain_entries; i++) {
-		gpointer entry;
+		char *entry;
 		size_t name_len;
 
 		ret = ndr_write_int32(dce, i);
 		if (ret)
 			return ret;
-		entry = g_array_index(domain_entries, gpointer, i);
-		name_len = strlen((char *)entry);
+		entry = g_ptr_array_index(domain_entries, i);
+		name_len = strlen(entry);
 		ret = ndr_write_int16(dce, name_len*2);
 		if (ret)
 			return ret;
@@ -165,10 +165,10 @@ int samr_ndr_write_domain_array(struct ksmbd_rpc_pipe *pipe)
 	}
 
 	for (i = 0; i < num_domain_entries; i++) {
-		gpointer entry;
+		char *entry;
 
-		entry = g_array_index(domain_entries,  gpointer, i);
-		ret = ndr_write_string(dce, (char *)entry);
+		entry = g_ptr_array_index(domain_entries, i);
+		ret = ndr_write_string(dce, entry);
 		if (ret)
 			return ret;
 	}
@@ -251,10 +251,10 @@ static int samr_lookup_domain_return(struct ksmbd_rpc_pipe *pipe)
 		return KSMBD_RPC_EBAD_DATA;
 
 	for (i = 0; i < num_domain_entries; i++) {
-		gpointer entry;
+		char *entry;
 
-		entry = g_array_index(domain_entries, gpointer, i);
-		if (!strcmp(STR_VAL(dce->sm_req.name), (char *)entry)) {
+		entry = g_ptr_array_index(domain_entries, i);
+		if (!strcmp(STR_VAL(dce->sm_req.name), entry)) {
 			smb_init_domain_sid(&sid);
 			if (smb_write_sid(dce, &sid))
 				return KSMBD_RPC_EBAD_DATA;
@@ -1007,18 +1007,8 @@ int rpc_samr_write_request(struct ksmbd_rpc_pipe *pipe)
 
 static void rpc_samr_add_domain_entry(char *name)
 {
-	char *domain_string;
-
-	domain_string = g_strdup(name);
-	domain_entries = g_array_append_val(domain_entries, domain_string);
+	g_ptr_array_add(domain_entries, g_strdup(name));
 	num_domain_entries++;
-}
-
-static void domain_entry_free(void *v)
-{
-	char **entry = v;
-
-	g_free(*entry);
 }
 
 int rpc_samr_init(void)
@@ -1026,8 +1016,7 @@ int rpc_samr_init(void)
 	char hostname[NAME_MAX];
 
 	ch_table = g_hash_table_new(g_str_hash, g_str_equal);
-	domain_entries = g_array_new(0, 0, sizeof(void *));
-	g_array_set_clear_func(domain_entries, domain_entry_free);
+	domain_entries = g_ptr_array_new_with_free_func(g_free);
 
 	/*
 	 * ksmbd supports the standalone server and
@@ -1066,7 +1055,7 @@ void rpc_samr_destroy(void)
 	num_domain_entries = 0;
 	g_free(domain_name);
 	if (domain_entries) {
-		g_array_free(domain_entries, 1);
+		g_ptr_array_free(domain_entries, 1);
 		domain_entries = NULL;
 	}
 }

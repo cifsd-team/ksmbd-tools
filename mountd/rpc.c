@@ -159,7 +159,7 @@ static void __rpc_pipe_free(struct ksmbd_rpc_pipe *pipe)
 	if (pipe->dce)
 		dcerpc_free(pipe->dce);
 	if (pipe->entries)
-		g_array_free(pipe->entries, 1);
+		g_ptr_array_free(pipe->entries, 1);
 	g_free(pipe);
 }
 
@@ -183,7 +183,7 @@ static struct ksmbd_rpc_pipe *rpc_pipe_alloc(void)
 		return NULL;
 
 	pipe->id = -1;
-	pipe->entries = g_array_new(0, 0, sizeof(void *));
+	pipe->entries = g_ptr_array_new();
 	return pipe;
 }
 
@@ -629,9 +629,9 @@ static int __max_entries(struct ksmbd_dcerpc *dce, struct ksmbd_rpc_pipe *pipe)
 
 	current_size = 0;
 	for (i = 0; i < pipe->num_entries; i++) {
-		gpointer entry;
+		void *entry;
 
-		entry = g_array_index(pipe->entries,  gpointer, i);
+		entry = g_ptr_array_index(pipe->entries, i);
 		current_size += dce->entry_size(dce, entry);
 
 		if (current_size < 4 * dce->payload_sz / 5)
@@ -648,17 +648,17 @@ int __ndr_write_array_of_structs(struct ksmbd_rpc_pipe *pipe, int max_entry_nr)
 	int i;
 
 	for (i = 0; i < max_entry_nr; i++) {
-		gpointer entry;
+		void *entry;
 
-		entry = g_array_index(pipe->entries,  gpointer, i);
+		entry = g_ptr_array_index(pipe->entries, i);
 		if (dce->entry_rep(dce, entry))
 			return KSMBD_RPC_EBAD_DATA;
 	}
 
 	for (i = 0; i < max_entry_nr; i++) {
-		gpointer entry;
+		void *entry;
 
-		entry = g_array_index(pipe->entries,  gpointer, i);
+		entry = g_ptr_array_index(pipe->entries, i);
 		if (dce->entry_data(dce, entry))
 			return KSMBD_RPC_EBAD_DATA;
 	}

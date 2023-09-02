@@ -253,11 +253,10 @@ static int lsarpc_query_info_policy_return(struct ksmbd_rpc_pipe *pipe)
 
 static int __lsarpc_entry_processed(struct ksmbd_rpc_pipe *pipe, int i)
 {
-	gpointer entry;
+	struct lsarpc_names_info *ni;
 
-	entry = g_array_index(pipe->entries, gpointer, i);
-	pipe->entries = g_array_remove_index(pipe->entries, i);
-	g_free(entry);
+	ni = g_ptr_array_remove_index(pipe->entries, i);
+	g_free(ni);
 	return 0;
 }
 
@@ -308,7 +307,7 @@ static int lsarpc_lookup_sid2_invoke(struct ksmbd_rpc_pipe *pipe)
 				    sizeof(ni->domain_str), &ni->type))
 			ni->index = -1;
 
-		pipe->entries = g_array_append_val(pipe->entries, ni);
+		g_ptr_array_add(pipe->entries, ni);
 		pipe->num_entries++;
 	}
 
@@ -349,8 +348,7 @@ static int lsarpc_lookup_sid2_return(struct ksmbd_rpc_pipe *pipe)
 	for (i = 0; i < pipe->num_entries; i++) {
 		struct lsarpc_names_info *ni;
 
-		ni = (struct lsarpc_names_info *)g_array_index(pipe->entries,
-				gpointer, i);
+		ni = g_ptr_array_index(pipe->entries, i);
 		if (ni->type == -1)
 			rc = KSMBD_RPC_SOME_NOT_MAPPED;
 		if (lsa_domain_account_rep(dce, ni->domain_str))
@@ -360,8 +358,7 @@ static int lsarpc_lookup_sid2_return(struct ksmbd_rpc_pipe *pipe)
 	for (i = 0; i < pipe->num_entries; i++) {
 		struct lsarpc_names_info *ni;
 
-		ni = (struct lsarpc_names_info *)g_array_index(pipe->entries,
-				gpointer, i);
+		ni = g_ptr_array_index(pipe->entries, i);
 		if (lsa_domain_account_data(dce, ni->domain_str, &ni->sid))
 			return KSMBD_RPC_EBAD_DATA;
 	}
@@ -381,8 +378,7 @@ static int lsarpc_lookup_sid2_return(struct ksmbd_rpc_pipe *pipe)
 		struct lsarpc_names_info *ni;
 		size_t len;
 
-		ni = (struct lsarpc_names_info *)g_array_index(pipe->entries,
-				gpointer, i);
+		ni = g_ptr_array_index(pipe->entries, i);
 		if (ndr_write_int16(dce, ni->type)) // sid type
 			return KSMBD_RPC_EBAD_DATA;
 
@@ -414,8 +410,7 @@ static int lsarpc_lookup_sid2_return(struct ksmbd_rpc_pipe *pipe)
 		struct lsarpc_names_info *ni;
 		char *username = "None";
 
-		ni = (struct lsarpc_names_info *)g_array_index(pipe->entries,
-				gpointer, i);
+		ni = g_ptr_array_index(pipe->entries, i);
 		if (ni->user)
 			username = ni->user->name;
 		if (ndr_write_string(dce, username)) // username
@@ -476,7 +471,7 @@ static int lsarpc_lookup_names3_invoke(struct ksmbd_rpc_pipe *pipe)
 			g_free(ni);
 			break;
 		}
-		pipe->entries = g_array_append_val(pipe->entries, ni);
+		g_ptr_array_add(pipe->entries, ni);
 		pipe->num_entries++;
 		smb_init_domain_sid(&ni->sid);
 	}
@@ -553,8 +548,7 @@ static int lsarpc_lookup_names3_return(struct ksmbd_rpc_pipe *pipe)
 	for (i = 0; i < pipe->num_entries; i++) {
 		struct lsarpc_names_info *ni;
 
-		ni = (struct lsarpc_names_info *)g_array_index(pipe->entries,
-				gpointer, i);
+		ni = g_ptr_array_index(pipe->entries, i);
 		ni->sid.sub_auth[ni->sid.num_subauth++] = ni->user->uid;
 
 		if (ndr_write_int32(dce, ni->sid.num_subauth)) // sid auth count

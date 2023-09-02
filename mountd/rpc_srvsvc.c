@@ -140,8 +140,7 @@ static int __share_entry_processed(struct ksmbd_rpc_pipe *pipe, int i)
 {
 	struct ksmbd_share *share;
 
-	share = g_array_index(pipe->entries,  gpointer, i);
-	pipe->entries = g_array_remove_index(pipe->entries, i);
+	share = g_ptr_array_remove_index(pipe->entries, i);
 	pipe->num_entries--;
 	pipe->num_processed++;
 	put_ksmbd_share(share);
@@ -167,7 +166,7 @@ static void __enum_all_shares(gpointer key, gpointer value, gpointer user_data)
 		return;
 	}
 
-	pipe->entries = g_array_append_val(pipe->entries, share);
+	g_ptr_array_add(pipe->entries, share);
 	pipe->num_entries++;
 }
 
@@ -210,7 +209,7 @@ static int srvsvc_share_get_info_invoke(struct ksmbd_rpc_pipe *pipe,
 		}
 	}
 
-	pipe->entries = g_array_append_val(pipe->entries, share);
+	g_ptr_array_add(pipe->entries, share);
 	pipe->num_entries++;
 	pipe->entry_processed = __share_entry_processed;
 	return 0;
