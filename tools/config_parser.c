@@ -765,9 +765,66 @@ int cp_smbconfig_hash_create(const char *smbconf)
 	return __mmap_parse_file(smbconf, process_smbconf_entry);
 }
 
+static int is_a_subauth(char *entry)
+{
+	int num_subauth = ARRAY_SIZE(global_conf.gen_subauth), is_subauth = 0;
+	int i;
+
+	for (i = 0; i < num_subauth; i++) {
+		char *delim = strchr(entry, i + 1 < num_subauth ? ':' : 0x00);
+
+		is_subauth = delim > entry;
+		if (!is_subauth) {
+			pr_err("Subauth is missing\n");
+			goto out;
+		}
+		for (; entry < delim; entry++) {
+			is_subauth = *entry >= '0' && *entry <= '9';
+			if (!is_subauth) {
+				pr_err("Subauth contains `%c' [0x%2X]\n",
+				       *entry,
+				       *entry);
+				goto out;
+			}
+		}
+		entry++;
+	}
+out:
+	return is_subauth;
+}
+
+static void add_subauth(const char *entry)
+{
+	int num_subauth = ARRAY_SIZE(global_conf.gen_subauth);
+	int i;
+
+	for (i = 0; i < num_subauth; i++) {
+		const char *delim =
+			strchr(entry, i + 1 < num_subauth ? ':' : 0x00);
+
+		global_conf.gen_subauth[i] = 0;
+		for (; entry < delim; entry++) {
+			global_conf.gen_subauth[i] *= 10;
+			global_conf.gen_subauth[i] += *entry - '0';
+		}
+		entry++;
+	}
+}
+
+static int process_subauth_entry(char *entry)
+{
+	if (is_a_subauth(entry)) {
+		add_subauth(entry);
+		return 0;
+	}
+
+	pr_err("Invalid subauth entry `%s'\n", entry);
+	return -EINVAL;
+}
+
 int cp_parse_subauth(void)
 {
-	return __mmap_parse_file(PATH_SUBAUTH, usm_add_subauth_global_conf);
+	return __mmap_parse_file(PATH_SUBAUTH, process_subauth_entry);
 }
 
 void cp_smbconfig_destroy(void)

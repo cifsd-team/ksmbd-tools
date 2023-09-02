@@ -249,33 +249,6 @@ int usm_add_guest_account(char *name)
 	return 0;
 }
 
-int usm_add_subauth_global_conf(char *data)
-{
-	char *pos = data;
-	char *spos;
-
-	spos = strchr(pos, ':');
-	if (!spos) {
-		pr_err("Invalid subauth entry: %s\n", data);
-		return -EINVAL;
-	}
-
-	*spos = 0x00;
-	global_conf.gen_subauth[0] = atoi(pos);
-	pos = spos + 1;
-
-	spos = strchr(pos, ':');
-	if (!spos) {
-		pr_err("Invalid subauth entry: %s\n", data);
-		return -EINVAL;
-	}
-	*spos = 0x00;
-	global_conf.gen_subauth[1] = atoi(pos);
-	global_conf.gen_subauth[2] = atoi(spos + 1);
-
-	return 0;
-}
-
 void for_each_ksmbd_user(walk_users cb, gpointer user_data)
 {
 	g_rw_lock_reader_lock(&users_table_lock);
