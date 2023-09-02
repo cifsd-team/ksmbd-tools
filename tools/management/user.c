@@ -235,21 +235,21 @@ int usm_add_new_user(char *name, char *pwd)
 
 int usm_add_guest_account(char *name)
 {
-	g_autofree char *account = g_strdup(name);
+	int ret;
 	struct ksmbd_user *user;
 
-	if (usm_add_new_user(name, g_strdup("NULL"))) {
-		pr_err("Unable to add guest account `%s'\n", account);
-		return -EINVAL;
+	ret = usm_add_new_user(g_strdup(name), g_strdup("NULL"));
+	if (ret)
+		return ret;
+
+	user = usm_lookup_user(name);
+	if (!user) {
+		ret = -EINVAL;
+	} else {
+		set_user_flag(user, KSMBD_USER_FLAG_GUEST_ACCOUNT);
+		put_ksmbd_user(user);
 	}
-
-	user = usm_lookup_user(account);
-	if (!user)
-		return -EINVAL;
-
-	set_user_flag(user, KSMBD_USER_FLAG_GUEST_ACCOUNT);
-	put_ksmbd_user(user);
-	return 0;
+	return ret;
 }
 
 void for_each_ksmbd_user(walk_users cb, gpointer user_data)

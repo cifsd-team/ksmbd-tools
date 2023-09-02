@@ -32,9 +32,6 @@ enum share_hosts {
 	KSMBD_SHARE_HOSTS_MAX,
 };
 
-#define KSMBD_SHARE_DEFAULT_CREATE_MASK	0744
-#define KSMBD_SHARE_DEFAULT_DIRECTORY_MASK	0755
-
 #define KSMBD_SHARE_INVALID_UID		((__u16)-1)
 #define KSMBD_SHARE_INVALID_GID		((__u16)-1)
 
@@ -122,10 +119,21 @@ enum KSMBD_SHARE_CONF {
 	KSMBD_SHARE_CONF_MAX
 };
 
-extern char *KSMBD_SHARE_CONF[KSMBD_SHARE_CONF_MAX];
+extern const char *KSMBD_SHARE_CONF[KSMBD_SHARE_CONF_MAX];
+extern const char *KSMBD_SHARE_DEFCONF[KSMBD_SHARE_CONF_MAX];
+
+#define KSMBD_SHARE_CONF_IS_GLOBAL(c) \
+	((c) == KSMBD_SHARE_CONF_GUEST_ACCOUNT || \
+	 (c) == KSMBD_SHARE_CONF_MAX_CONNECTIONS)
+
+#define KSMBD_SHARE_CONF_IS_BROKEN(c) \
+	((c) == KSMBD_SHARE_CONF_ADMIN_USERS || \
+	 (c) == KSMBD_SHARE_CONF_HOSTS_ALLOW || \
+	 (c) == KSMBD_SHARE_CONF_HOSTS_DENY || \
+	 (c) == KSMBD_SHARE_CONF_FOLLOW_SYMLINKS)
 
 int shm_share_name(char *name, char *p);
-int shm_share_config(char *k, enum KSMBD_SHARE_CONF c);
+int shm_share_config(const char *k, enum KSMBD_SHARE_CONF c);
 
 static inline void set_share_flag(struct ksmbd_share *share, int flag)
 {

@@ -57,7 +57,7 @@ Default: \fBcomment = \fR
 \fBcreate mask\fR (S)
 Octal bitmask that gets bitwise ANDed with DOS-to-UNIX-mapped permissions when creating a file.
 
-Default: \fBcreate mask = 0744\fR \" KSMBD_SHARE_DEFAULT_CREATE_MASK
+Default: \fBcreate mask = 0744\fR
 .TP
 \fBcrossmnt\fR (S)
 Allow path lookup to cross a mountpoint to the root of a different filesystem.
@@ -74,7 +74,7 @@ Default: \fBdeadtime = 0\fR
 \fBdirectory mask\fR (S)
 Octal bitmask that gets bitwise ANDed with DOS-to-UNIX-mapped permissions when creating a directory.
 
-Default: \fBdirectory mask = 0755\fR \" KSMBD_SHARE_DEFAULT_DIRECTORY_MASK
+Default: \fBdirectory mask = 0755\fR
 \" .TP
 \" \fBfollow symlinks\fR (S)
 \" 
@@ -105,7 +105,7 @@ Default: \fBforce user = \fR
 User that does not require a password when connecting to any share with \fBguest ok = yes\fR.
 When connecting to such a share with the user left empty, the parameter determines what system user to map to.
 
-Default: \fBguest account = nobody\fR \" KSMBD_CONF_DEFAULT_GUEST_ACCOUNT
+Default: \fBguest account = nobody\fR
 .TP
 \fBguest account\fR (S)
 User that does not require a password when connecting to the share with \fBguest ok = yes\fR given.
@@ -184,24 +184,24 @@ Maximum number of simultaneous connections to the server.
 With \fBmax connections = 0\fR, the value will be set to the maximum allowed number of 65536. \" KSMBD_CONF_MAX_CONNECTIONS
 Number suffixes are allowed.
 
-Default: \fBmax connections = 128\fR \" KSMBD_CONF_DEFAULT_CONNECTIONS
+Default: \fBmax connections = 128\fR
 .TP
 \fBmax connections\fR (S)
 Maximum number of simultaneous connections to the share.
 With \fBmax connections = 0\fR, the value will be set to the maximum allowed number of 65536. \" KSMBD_CONF_MAX_CONNECTIONS
 Number suffixes are allowed.
 
-Default: \fBmax connections = 128\fR \" KSMBD_CONF_DEFAULT_CONNECTIONS
+Default: \fBmax connections = 128\fR
 .TP
 \fBmax open files\fR (G)
 Maximum number of simultaneous open files for a client.
 
-Default: \fBmax open files = 10000\fR \" KSMBD_CONF_FILE_MAX
+Default: \fBmax open files = 10000\fR
 .TP
 \fBnetbios name\fR (G)
 NetBIOS name.
 
-Default: \fBnetbios name = KSMBD SERVER\fR \" KSMBD_CONF_DEFAULT_NETBIOS_NAME
+Default: \fBnetbios name = KSMBD SERVER\fR
 .TP
 \fBoplocks\fR (S)
 Issue oplocks to file open requests on the share.
@@ -263,7 +263,7 @@ Default: \fBserver signing = disabled\fR
 \fBserver string\fR (G)
 String that will appear in browse lists next to the machine name.
 
-Default: \fBserver string = SMB SERVER\fR \" KSMBD_CONF_DEFAULT_SERVER_STRING
+Default: \fBserver string = SMB SERVER\fR
 .TP
 \fBshare:fake_fscaps\fR (G)
 Decimal bitmask that gets bitwise ORed with the filesystem capability flags so as to fake them.
@@ -322,7 +322,7 @@ Default: \fBstore dos attributes = yes\fR
 \fBtcp port\fR (G)
 TCP port that is listened to.
 
-Default: \fBtcp port = 445\fR \" KSMBD_CONF_DEFAULT_TCP_PORT
+Default: \fBtcp port = 445\fR
 .TP
 \fBvalid users\fR (S)
 List of the users that are allowed to connect to the share.
@@ -346,7 +346,7 @@ Default: \fBvfs objects = \fR
 \fBworkgroup\fR (G)
 Workgroup the server will appear to be in when queried by clients.
 
-Default: \fBworkgroup = WORKGROUP\fR \" KSMBD_CONF_DEFAULT_WORK_GROUP
+Default: \fBworkgroup = WORKGROUP\fR
 .TP
 \fBwritable\fR (S)
 Users are allowed read-write access to the share.

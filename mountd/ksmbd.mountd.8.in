@@ -14,7 +14,7 @@ ksmbd.mountd \- start ksmbd.mountd and ksmbd daemons
 .SH OPTIONS
 .TP
 \fB\-p\fR, \fB\-\-port\fR=\fI\,PORT\/\fR
-Bind to \fI\,PORT\/\fR instead of TCP port \fB445\fR. \" KSMBD_CONF_DEFAULT_TCP_PORT
+Bind to \fI\,PORT\/\fR instead of TCP port \fB445\fR.
 .TP
 \fB\-c\fR, \fB\-\-config\fR=\fI\,SMBCONF\/\fR
 Use \fI\,SMBCONF\/\fR as configuration file instead of \fB@sysconfdir@/ksmbd/ksmbd.conf\fR. \" PATH_SMBCONF

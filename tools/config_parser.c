@@ -21,7 +21,6 @@
 
 struct smbconf_global global_conf;
 struct smbconf_parser parser;
-struct smbconf_group *global_group, *ipc_group;
 
 typedef int process_entry_fn(char *entry);
 static process_entry_fn process_smbconf_entry,
@@ -145,6 +144,10 @@ static void add_group(const char *entry)
 	name = NULL;
 
 	parser.current = g;
+	if (!parser.global && shm_share_name_equal(g->name, "global"))
+		parser.global = g;
+	else if (!parser.ipc && shm_share_name_equal(g->name, "ipc$"))
+		parser.ipc = g;
 }
 
 static void add_group_key_value(const char *entry)
@@ -237,32 +240,11 @@ out:
 	return ret;
 }
 
-static void init_smbconf_parser(void)
+static void release_smbconf_group(struct smbconf_group *g)
 {
-	if (parser.groups)
-		return;
-
-	parser.groups = g_hash_table_new(shm_share_name_hash,
-					 shm_share_name_equal);
-}
-
-static void release_smbconf_group(gpointer k, gpointer v, gpointer user_data)
-{
-	struct smbconf_group *g = v;
-
 	g_hash_table_destroy(g->kv);
 	g_free(g->name);
 	g_free(g);
-}
-
-static void release_smbconf_parser(void)
-{
-	if (!parser.groups)
-		return;
-
-	g_hash_table_foreach(parser.groups, release_smbconf_group, NULL);
-	g_hash_table_destroy(parser.groups);
-	parser.groups = NULL;
 }
 
 char *cp_ltrim(const char *v)
@@ -320,9 +302,6 @@ unsigned long cp_get_group_kv_long(char *v)
 
 char **cp_get_group_kv_list(char *v)
 {
-	/*
-	 * SMB conf lists are "tabs, spaces, commas" separated.
-	 */
 	return g_strsplit_set(v, "\t ,", -1);
 }
 
@@ -331,339 +310,322 @@ void cp_group_kv_list_free(char **list)
 	g_strfreev(list);
 }
 
-static gboolean global_group_kv(gpointer _k, gpointer _v, gpointer user_data)
+static void process_global_conf_kv(char *k, char *v, void *unused)
 {
-	if (!cp_key_cmp(_k, "server string")) {
-		global_conf.server_string = cp_get_group_kv_string(_v);
-		return TRUE;
+	(void)unused;
+
+	if (!cp_key_cmp(k, "server string")) {
+		global_conf.server_string = cp_get_group_kv_string(v);
+		return;
 	}
 
-	if (!cp_key_cmp(_k, "workgroup")) {
-		global_conf.work_group = cp_get_group_kv_string(_v);
-		return TRUE;
+	if (!cp_key_cmp(k, "workgroup")) {
+		global_conf.work_group = cp_get_group_kv_string(v);
+		return;
 	}
 
-	if (!cp_key_cmp(_k, "netbios name")) {
-		global_conf.netbios_name = cp_get_group_kv_string(_v);
-		return TRUE;
+	if (!cp_key_cmp(k, "netbios name")) {
+		global_conf.netbios_name = cp_get_group_kv_string(v);
+		return;
 	}
 
-	if (!cp_key_cmp(_k, "server min protocol")) {
-		global_conf.server_min_protocol = cp_get_group_kv_string(_v);
-		return TRUE;
+	if (!cp_key_cmp(k, "server min protocol")) {
+		global_conf.server_min_protocol = cp_get_group_kv_string(v);
+		return;
 	}
 
-	if (!cp_key_cmp(_k, "server signing")) {
-		global_conf.server_signing = cp_get_group_kv_config_opt(_v);
-		return TRUE;
+	if (!cp_key_cmp(k, "server signing")) {
+		global_conf.server_signing = cp_get_group_kv_config_opt(v);
+		return;
 	}
 
-	if (!cp_key_cmp(_k, "server max protocol")) {
-		global_conf.server_max_protocol = cp_get_group_kv_string(_v);
-		return TRUE;
+	if (!cp_key_cmp(k, "server max protocol")) {
+		global_conf.server_max_protocol = cp_get_group_kv_string(v);
+		return;
 	}
 
-	if (!cp_key_cmp(_k, "guest account")) {
-		global_conf.guest_account = cp_get_group_kv_string(_v);
-		return TRUE;
+	if (!cp_key_cmp(k, "guest account")) {
+		global_conf.guest_account = cp_get_group_kv_string(v);
+		return;
 	}
 
-	if (!cp_key_cmp(_k, "max active sessions")) {
-		global_conf.sessions_cap = cp_get_group_kv_long(_v);
-		return TRUE;
+	if (!cp_key_cmp(k, "max active sessions")) {
+		global_conf.sessions_cap = cp_get_group_kv_long(v);
+		if (global_conf.sessions_cap <= 0 ||
+		    global_conf.sessions_cap > KSMBD_CONF_MAX_ACTIVE_SESSIONS)
+			global_conf.sessions_cap =
+				KSMBD_CONF_MAX_ACTIVE_SESSIONS;
+		return;
 	}
 
-	if (!cp_key_cmp(_k, "tcp port")) {
+	if (!cp_key_cmp(k, "tcp port")) {
+		/* mountd option has precedence */
 		if (!global_conf.tcp_port)
-			global_conf.tcp_port = cp_get_group_kv_long(_v);
-		return TRUE;
+			global_conf.tcp_port = cp_get_group_kv_long(v);
+		return;
 	}
 
-	if (!cp_key_cmp(_k, "ipc timeout")) {
-		global_conf.ipc_timeout = cp_get_group_kv_long(_v);
-		return TRUE;
+	if (!cp_key_cmp(k, "ipc timeout")) {
+		global_conf.ipc_timeout = cp_get_group_kv_long(v);
+		return;
 	}
 
-	if (!cp_key_cmp(_k, "max open files")) {
-		global_conf.file_max = cp_get_group_kv_long(_v);
-		return TRUE;
+	if (!cp_key_cmp(k, "max open files")) {
+		global_conf.file_max = cp_get_group_kv_long(v);
+		if (!global_conf.file_max ||
+		    global_conf.file_max > KSMBD_CONF_MAX_OPEN_FILES)
+			global_conf.file_max = KSMBD_CONF_MAX_OPEN_FILES;
+		return;
 	}
 
-	if (!cp_key_cmp(_k, "restrict anonymous")) {
-		global_conf.restrict_anon = cp_get_group_kv_long(_v);
-		if (global_conf.restrict_anon > KSMBD_RESTRICT_ANON_TYPE_2 ||
-				global_conf.restrict_anon < 0) {
+	if (!cp_key_cmp(k, "restrict anonymous")) {
+		global_conf.restrict_anon = cp_get_group_kv_long(v);
+		if (global_conf.restrict_anon != KSMBD_RESTRICT_ANON_TYPE_1 &&
+		    global_conf.restrict_anon != KSMBD_RESTRICT_ANON_TYPE_2)
 			global_conf.restrict_anon = 0;
-			pr_err("Invalid restrict anonymous value\n");
-		}
-
-		return TRUE;
+		return;
 	}
 
-	if (!cp_key_cmp(_k, "map to guest")) {
-		global_conf.map_to_guest = KSMBD_CONF_MAP_TO_GUEST_NEVER;
-		if (!cp_key_cmp(_v, "bad user"))
+	if (!cp_key_cmp(k, "map to guest")) {
+		if (!cp_key_cmp(v, "bad user"))
 			global_conf.map_to_guest =
 				KSMBD_CONF_MAP_TO_GUEST_BAD_USER;
-		if (!cp_key_cmp(_v, "bad password"))
+/* broken */
+#if 0
+		else if(!cp_key_cmp(v, "bad password"))
 			global_conf.map_to_guest =
 				KSMBD_CONF_MAP_TO_GUEST_BAD_PASSWORD;
-		if (!cp_key_cmp(_v, "bad uid"))
+		else if(!cp_key_cmp(v, "bad uid"))
 			global_conf.map_to_guest =
 				KSMBD_CONF_MAP_TO_GUEST_BAD_UID;
-		return TRUE;
+#endif
+		else
+			global_conf.map_to_guest =
+				KSMBD_CONF_MAP_TO_GUEST_NEVER;
+		return;
 	}
 
-	if (!cp_key_cmp(_k, "bind interfaces only")) {
-		global_conf.bind_interfaces_only = cp_get_group_kv_bool(_v);
-		return TRUE;
+	if (!cp_key_cmp(k, "bind interfaces only")) {
+		global_conf.bind_interfaces_only = cp_get_group_kv_bool(v);
+		return;
 	}
 
-	if (!cp_key_cmp(_k, "interfaces")) {
-		global_conf.interfaces = cp_get_group_kv_list(_v);
-		return TRUE;
+	if (!cp_key_cmp(k, "interfaces")) {
+		global_conf.interfaces = cp_get_group_kv_list(v);
+		return;
 	}
 
-	if (!cp_key_cmp(_k, "deadtime")) {
-		global_conf.deadtime = cp_get_group_kv_long(_v);
-		return TRUE;
+	if (!cp_key_cmp(k, "deadtime")) {
+		global_conf.deadtime = cp_get_group_kv_long(v);
+		return;
 	}
 
-	if (!cp_key_cmp(_k, "smb2 leases")) {
-		if (cp_get_group_kv_bool(_v))
+	if (!cp_key_cmp(k, "smb2 leases")) {
+		if (cp_get_group_kv_bool(v))
 			global_conf.flags |= KSMBD_GLOBAL_FLAG_SMB2_LEASES;
 		else
 			global_conf.flags &= ~KSMBD_GLOBAL_FLAG_SMB2_LEASES;
-
-		return TRUE;
+		return;
 	}
 
-	if (!cp_key_cmp(_k, "root directory")) {
-		global_conf.root_dir = cp_get_group_kv_string(_v);
-		return TRUE;
+	if (!cp_key_cmp(k, "root directory")) {
+		global_conf.root_dir = cp_get_group_kv_string(v);
+		return;
 	}
 
-	if (!cp_key_cmp(_k, "smb2 max read")) {
-		global_conf.smb2_max_read = cp_memparse(_v);
-		return TRUE;
+	if (!cp_key_cmp(k, "smb2 max read")) {
+		global_conf.smb2_max_read = cp_memparse(v);
+		return;
 	}
 
-	if (!cp_key_cmp(_k, "smb2 max write")) {
-		global_conf.smb2_max_write = cp_memparse(_v);
-		return TRUE;
+	if (!cp_key_cmp(k, "smb2 max write")) {
+		global_conf.smb2_max_write = cp_memparse(v);
+		return;
 	}
 
-	if (!cp_key_cmp(_k, "smb2 max trans")) {
-		global_conf.smb2_max_trans = cp_memparse(_v);
-		return TRUE;
+	if (!cp_key_cmp(k, "smb2 max trans")) {
+		global_conf.smb2_max_trans = cp_memparse(v);
+		return;
 	}
 
-	if (!cp_key_cmp(_k, "smb3 encryption")) {
-		switch (cp_get_group_kv_config_opt(_v)) {
+	if (!cp_key_cmp(k, "smb3 encryption")) {
+		switch (cp_get_group_kv_config_opt(v)) {
 		case KSMBD_CONFIG_OPT_DISABLED:
-			global_conf.flags |= KSMBD_GLOBAL_FLAG_SMB3_ENCRYPTION_OFF;
-			global_conf.flags &= ~KSMBD_GLOBAL_FLAG_SMB3_ENCRYPTION;
+			global_conf.flags |=
+				KSMBD_GLOBAL_FLAG_SMB3_ENCRYPTION_OFF;
+			global_conf.flags &=
+				~KSMBD_GLOBAL_FLAG_SMB3_ENCRYPTION;
 			break;
 		case KSMBD_CONFIG_OPT_MANDATORY:
-			global_conf.flags |= KSMBD_GLOBAL_FLAG_SMB3_ENCRYPTION;
-			global_conf.flags &= ~KSMBD_GLOBAL_FLAG_SMB3_ENCRYPTION_OFF;
+			global_conf.flags |=
+				KSMBD_GLOBAL_FLAG_SMB3_ENCRYPTION;
+			global_conf.flags &=
+				~KSMBD_GLOBAL_FLAG_SMB3_ENCRYPTION_OFF;
 			break;
 		default:
-			global_conf.flags &= ~KSMBD_GLOBAL_FLAG_SMB3_ENCRYPTION;
-			global_conf.flags &= ~KSMBD_GLOBAL_FLAG_SMB3_ENCRYPTION_OFF;
+			global_conf.flags &=
+				~KSMBD_GLOBAL_FLAG_SMB3_ENCRYPTION;
+			global_conf.flags &=
+				~KSMBD_GLOBAL_FLAG_SMB3_ENCRYPTION_OFF;
 			break;
 		}
-
-		return TRUE;
+		return;
 	}
 
-	if (!cp_key_cmp(_k, "share:fake_fscaps")) {
-		global_conf.share_fake_fscaps = cp_get_group_kv_long(_v);
-		return TRUE;
+	if (!cp_key_cmp(k, "share:fake_fscaps")) {
+		global_conf.share_fake_fscaps = cp_get_group_kv_long(v);
+		return;
 	}
 
-	if (!cp_key_cmp(_k, "kerberos service name")) {
-		global_conf.krb5_service_name = cp_get_group_kv_string(_v);
-		return TRUE;
+	if (!cp_key_cmp(k, "kerberos service name")) {
+		global_conf.krb5_service_name = cp_get_group_kv_string(v);
+		return;
 	}
 
-	if (!cp_key_cmp(_k, "kerberos keytab file")) {
-		global_conf.krb5_keytab_file = cp_get_group_kv_string(_v);
-		return TRUE;
+	if (!cp_key_cmp(k, "kerberos keytab file")) {
+		global_conf.krb5_keytab_file = cp_get_group_kv_string(v);
+		return;
 	}
 
-	if (!cp_key_cmp(_k, "server multi channel support")) {
-		if (cp_get_group_kv_bool(_v))
-			global_conf.flags |= KSMBD_GLOBAL_FLAG_SMB3_MULTICHANNEL;
+	if (!cp_key_cmp(k, "server multi channel support")) {
+		if (cp_get_group_kv_bool(v))
+			global_conf.flags |=
+				KSMBD_GLOBAL_FLAG_SMB3_MULTICHANNEL;
 		else
-			global_conf.flags &= ~KSMBD_GLOBAL_FLAG_SMB3_MULTICHANNEL;
-
-		return TRUE;
+			global_conf.flags &=
+				~KSMBD_GLOBAL_FLAG_SMB3_MULTICHANNEL;
+		return;
 	}
 
-	if (!cp_key_cmp(_k, "smb2 max credits")) {
-		global_conf.smb2_max_credits = cp_memparse(_v);
-		return TRUE;
+	if (!cp_key_cmp(k, "smb2 max credits")) {
+		global_conf.smb2_max_credits = cp_memparse(v);
+		return;
 	}
 
-	if (!cp_key_cmp(_k, "smbd max io size")) {
-		global_conf.smbd_max_io_size = cp_memparse(_v);
-		return TRUE;
+	if (!cp_key_cmp(k, "smbd max io size")) {
+		global_conf.smbd_max_io_size = cp_memparse(v);
+		return;
 	}
 
-	if (!cp_key_cmp(_k, "max connections")) {
-		global_conf.max_connections = cp_memparse(_v);
+	if (!cp_key_cmp(k, "max connections")) {
+		global_conf.max_connections = cp_memparse(v);
 		if (!global_conf.max_connections ||
-		    global_conf.max_connections > KSMBD_CONF_MAX_CONNECTIONS) {
-			pr_info("Limits exceeding the maximum simultaneous connections(%d)\n",
-				KSMBD_CONF_MAX_CONNECTIONS);
-			global_conf.max_connections = KSMBD_CONF_MAX_CONNECTIONS;
-		}
-		return TRUE;
-	}
-
-	/* At this point, this is an option that must be applied to all shares */
-	return FALSE;
-}
-
-static void global_conf_default(void)
-{
-	/* The SPARSE_FILES file system capability flag is set by default */
-	global_conf.share_fake_fscaps = 64;
-	global_conf.max_connections = KSMBD_CONF_DEFAULT_CONNECTIONS;
-}
-
-static void global_conf_create(void)
-{
-	if (!global_group || global_group->cb_mode != GROUPS_CALLBACK_INIT)
+		    global_conf.max_connections > KSMBD_CONF_MAX_CONNECTIONS)
+			global_conf.max_connections =
+				KSMBD_CONF_MAX_CONNECTIONS;
 		return;
-
-	/*
-	 * This will transfer server options to global_conf, and leave behind
-	 * in the global parser group, the options that must be applied to every
-	 * share
-	 */
-	g_hash_table_foreach_remove(global_group->kv, global_group_kv, NULL);
-}
-
-static void append_key_value(gpointer _k, gpointer _v, gpointer user_data)
-{
-	GHashTable *receiver = (GHashTable *)user_data;
-
-	/* Don't override local share options */
-	if (!g_hash_table_lookup(receiver, _k))
-		g_hash_table_insert(receiver, g_strdup(_k), g_strdup(_v));
-}
-
-static void global_conf_update(struct smbconf_group *group)
-{
-	if (!global_group)
-		return;
-
-	g_hash_table_remove(global_group->kv, "guest account");
-	g_hash_table_remove(global_group->kv, "max connections");
-	g_hash_table_foreach(global_group->kv, append_key_value, group->kv);
-}
-
-static void global_conf_fixup_missing(void)
-{
-	/*
-	 * Set default global parameters which were not specified
-	 * in smb.conf
-	 */
-	if (!global_conf.file_max)
-		global_conf.file_max = KSMBD_CONF_FILE_MAX;
-	if (!global_conf.server_string)
-		global_conf.server_string =
-			cp_get_group_kv_string(
-					KSMBD_CONF_DEFAULT_SERVER_STRING);
-	if (!global_conf.netbios_name)
-		global_conf.netbios_name =
-			cp_get_group_kv_string(KSMBD_CONF_DEFAULT_NETBIOS_NAME);
-	if (!global_conf.work_group)
-		global_conf.work_group =
-			cp_get_group_kv_string(KSMBD_CONF_DEFAULT_WORK_GROUP);
-	if (!global_conf.tcp_port)
-		global_conf.tcp_port = KSMBD_CONF_DEFAULT_TCP_PORT;
-
-	if (global_conf.sessions_cap <= 0)
-		global_conf.sessions_cap = KSMBD_CONF_DEFAULT_SESS_CAP;
-
-	if (!global_conf.guest_account)
-		global_conf.guest_account =
-			cp_get_group_kv_string(
-					KSMBD_CONF_DEFAULT_GUEST_ACCOUNT);
-
-	if (usm_add_guest_account(g_strdup(global_conf.guest_account))) {
-		g_free(global_conf.guest_account);
-		global_conf.guest_account = NULL;
 	}
 }
 
-static void groups_callback(gpointer _k, gpointer _v, gpointer user_data)
+static void add_group_global_conf(void)
 {
-	struct smbconf_group *group = (struct smbconf_group *)_v;
-	unsigned short cb_mode = *(unsigned short *)user_data;
-
-	if (group == global_group)
+	if (ksmbd_health_status & KSMBD_SHOULD_RELOAD_CONFIG)
 		return;
 
-	group->cb_mode = cb_mode;
+	add_group_key_value("guest account = nobody");
+	add_group_key_value("max active sessions = 1024");
+	add_group_key_value("max connections = 128");
+	add_group_key_value("max open files = 10000");
+	add_group_key_value("netbios name = KSMBD SERVER");
+	add_group_key_value("server string = SMB SERVER");
+	add_group_key_value("share:fake_fscaps = 64"); /* sparse files */
+	add_group_key_value("tcp port = 445");
+	add_group_key_value("workgroup = WORKGROUP");
 
-	if (group != ipc_group)
-		global_conf_update(group);
-
-	shm_add_new_share(group);
+	g_hash_table_foreach(parser.current->kv,
+			     (GHFunc)process_global_conf_kv,
+			     NULL);
 }
 
-static void cp_add_ipc_group(void)
+static void add_group_global_share_conf(void)
 {
-	ipc_group = g_hash_table_lookup(parser.groups, "ipc$");
-	if (ipc_group)
-		return;
+	enum KSMBD_SHARE_CONF c;
 
-	add_group("[ipc$]");
+	for (c = 0; c < KSMBD_SHARE_CONF_MAX; c++) {
+		const char *k = KSMBD_SHARE_CONF[c], *v = NULL;
+		g_autofree char *entry = NULL;
+
+		if (!KSMBD_SHARE_CONF_IS_GLOBAL(c))
+			v = g_hash_table_lookup(parser.global->kv, k);
+		if (!v)
+			v = KSMBD_SHARE_DEFCONF[c];
+
+		entry = g_strdup_printf("%s = %s", k, v);
+		add_group_key_value(entry);
+	}
+}
+
+static void add_group_ipc_share_conf(void)
+{
 	add_group_key_value("comment = IPC share");
 	add_group_key_value("guest ok = yes");
-	ipc_group = g_hash_table_lookup(parser.groups, "ipc$");
+	add_group_key_value("read only = yes");
 }
 
-static int __cp_parse_smbconfig(const char *smbconf, GHFunc cb,
-				unsigned short cb_mode)
+static int process_groups(void)
 {
 	int ret;
+	GHashTableIter iter;
 
-	global_conf_default();
+	add_group("[global]");
+	add_group_global_conf();
 
-	ret = cp_smbconfig_hash_create(smbconf);
+	ret = usm_add_guest_account(global_conf.guest_account);
 	if (ret)
-		goto out;
+		return ret;
 
-	cp_add_ipc_group();
+	add_group("[ipc$]");
+	add_group_ipc_share_conf();
 
-	global_group = g_hash_table_lookup(parser.groups, "global");
-	if (global_group)
-		global_group->cb_mode = cb_mode;
+	for (g_hash_table_iter_init(&iter, parser.groups);
+	     g_hash_table_iter_next(&iter, NULL, (gpointer *)&parser.current);
+	     g_hash_table_iter_steal(&iter)) {
+		if (parser.current == parser.global)
+			continue;
 
-	global_conf_create();
-	g_hash_table_foreach(parser.groups, groups_callback, &cb_mode);
-	global_conf_fixup_missing();
+		add_group_global_share_conf();
+		shm_add_new_share(parser.current);
+		release_smbconf_group(parser.current);
+	}
 
-out:
-	cp_smbconfig_destroy();
+	release_smbconf_group(parser.global);
 	return ret;
 }
 
-int cp_parse_reload_smbconf(const char *smbconf)
+void cp_init_smbconf_parser(void)
 {
-	return __cp_parse_smbconfig(smbconf, groups_callback,
-				    GROUPS_CALLBACK_REINIT);
+	if (parser.groups)
+		return;
+
+	parser.groups = g_hash_table_new_full(
+		shm_share_name_hash,
+		shm_share_name_equal,
+		NULL,
+		(GDestroyNotify)release_smbconf_group);
+	parser.current = parser.global = parser.ipc = NULL;
 }
 
-int cp_parse_smbconf(const char *smbconf)
+void cp_release_smbconf_parser(void)
 {
-	return __cp_parse_smbconfig(smbconf, groups_callback,
-				    GROUPS_CALLBACK_INIT);
+	if (!parser.groups)
+		return;
+
+	g_hash_table_destroy(parser.groups);
+	parser.groups = NULL;
+}
+
+int cp_parse_smbconf(char *smbconf)
+{
+	int is_init = !!parser.groups, ret;
+
+	cp_init_smbconf_parser();
+	ret = __mmap_parse_file(smbconf, process_smbconf_entry);
+	if (ret || is_init)
+		return ret;
+
+	ret = process_groups();
+	cp_release_smbconf_parser();
+	return ret;
 }
 
 static int is_a_user_password(char *entry)
@@ -731,15 +693,9 @@ static int process_pwddb_entry(char *entry)
 	return -EINVAL;
 }
 
-int cp_parse_pwddb(const char *pwddb)
+int cp_parse_pwddb(char *pwddb)
 {
 	return __mmap_parse_file(pwddb, process_pwddb_entry);
-}
-
-int cp_smbconfig_hash_create(const char *smbconf)
-{
-	init_smbconf_parser();
-	return __mmap_parse_file(smbconf, process_smbconf_entry);
 }
 
 static int is_a_subauth(char *entry)
@@ -802,11 +758,6 @@ static int process_subauth_entry(char *entry)
 int cp_parse_subauth(void)
 {
 	return __mmap_parse_file(PATH_SUBAUTH, process_subauth_entry);
-}
-
-void cp_smbconfig_destroy(void)
-{
-	release_smbconf_parser();
 }
 
 void cp_parse_external_smbconf_group(char *name, char *opts)

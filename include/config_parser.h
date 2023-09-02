@@ -10,19 +10,14 @@
 
 #include <glib.h>
 
-#define GROUPS_CALLBACK_NONE	(0)
-#define GROUPS_CALLBACK_INIT	(1 << 0)
-#define GROUPS_CALLBACK_REINIT	(1 << 1)
-
 struct smbconf_group {
-	unsigned short		cb_mode;
 	char			*name;
 	GHashTable		*kv;
 };
 
 struct smbconf_parser {
 	GHashTable		*groups;
-	struct smbconf_group	*current;
+	struct smbconf_group	*current, *global, *ipc;
 };
 
 extern struct smbconf_parser parser;
@@ -39,12 +34,11 @@ static inline int cp_smbconf_eol(char *p)
 }
 
 void cp_parse_external_smbconf_group(char *name, char *opts);
-int cp_smbconfig_hash_create(const char *smbconf);
-void cp_smbconfig_destroy(void);
+void cp_init_smbconf_parser(void);
+void cp_release_smbconf_parser(void);
 
-int cp_parse_pwddb(const char *pwddb);
-int cp_parse_smbconf(const char *smbconf);
-int cp_parse_reload_smbconf(const char *smbconf);
+int cp_parse_smbconf(char *smbconf);
+int cp_parse_pwddb(char *pwddb);
 int cp_parse_subauth(void);
 
 unsigned long long cp_memparse(char *v);

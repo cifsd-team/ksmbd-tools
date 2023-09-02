@@ -86,7 +86,8 @@ static int parse_configs(char *smbconf)
 		return ret;
 	}
 
-	ret = cp_smbconfig_hash_create(smbconf);
+	cp_init_smbconf_parser();
+	ret = cp_parse_smbconf(smbconf);
 	if (ret)
 		pr_err("Failed to parse configuration file\n");
 	return ret;
@@ -181,6 +182,6 @@ int addshare_main(int argc, char **argv)
 	}
 
 out:
-	cp_smbconfig_destroy();
+	cp_release_smbconf_parser();
 	return ret ? EXIT_FAILURE : EXIT_SUCCESS;
 }

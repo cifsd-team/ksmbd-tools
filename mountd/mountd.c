@@ -49,7 +49,7 @@ static void usage(int status)
 	else
 		printf(
 			"\n"
-			"  -p, --port=PORT         bind to PORT instead of TCP port " STR(KSMBD_CONF_DEFAULT_TCP_PORT) "\n"
+			"  -p, --port=PORT         bind to PORT instead of TCP port 445\n"
 			"  -c, --config=SMBCONF    use SMBCONF as configuration file instead of\n"
 			"                          `" PATH_SMBCONF "'\n"
 			"  -u, --users=PWDDB       use PWDDB as user database instead of\n"
