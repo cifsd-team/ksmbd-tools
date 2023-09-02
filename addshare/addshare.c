@@ -97,7 +97,7 @@ int addshare_main(int argc, char **argv)
 {
 	int ret = -EINVAL;
 	char *smbconf = NULL, *name = NULL, *options = NULL;
-	command_fn command = NULL;
+	command_fn *command = NULL;
 	int c;
 
 	set_logger_app_name("ksmbd.addshare");

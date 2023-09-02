@@ -106,7 +106,7 @@ int adduser_main(int argc, char **argv)
 	int ret = -EINVAL;
 	char *pwddb = NULL, *name = NULL, *password = NULL;
 	char *smbconf = NULL;
-	command_fn command = NULL;
+	command_fn *command = NULL;
 	int c;
 
 	set_logger_app_name("ksmbd.adduser");
