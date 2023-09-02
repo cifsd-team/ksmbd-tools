@@ -1005,18 +1005,13 @@ int rpc_samr_write_request(struct ksmbd_rpc_pipe *pipe)
 	return samr_invoke(pipe);
 }
 
-static int rpc_samr_add_domain_entry(char *name)
+static void rpc_samr_add_domain_entry(char *name)
 {
 	char *domain_string;
 
-	domain_string = strdup(name);
-	if (!domain_string)
-		return KSMBD_RPC_ENOMEM;
-
+	domain_string = g_strdup(name);
 	domain_entries = g_array_append_val(domain_entries, domain_string);
 	num_domain_entries++;
-
-	return 0;
 }
 
 static void domain_entry_free(void *v)
@@ -1039,13 +1034,11 @@ int rpc_samr_init(void)
 	 * uses the hostname as the domain name.
 	 */
 	if (gethostname(hostname, NAME_MAX))
-		return -ENOMEM;
+		return -EINVAL;
 
 	domain_name = g_ascii_strup(hostname, strlen(hostname));
-	if (rpc_samr_add_domain_entry(domain_name))
-		return -ENOMEM;
-	if (rpc_samr_add_domain_entry("Builtin"))
-		return -ENOMEM;
+	rpc_samr_add_domain_entry(domain_name);
+	rpc_samr_add_domain_entry("Builtin");
 	g_rw_lock_init(&ch_table_lock);
 	return 0;
 }

@@ -722,7 +722,7 @@ int rpc_lsarpc_init(void)
 	 * uses the hostname as the domain name.
 	 */
 	if (gethostname(domain_string, NAME_MAX))
-		return -ENOMEM;
+		return -EINVAL;
 
 	domain_name = g_ascii_strup(domain_string, strlen(domain_string));
 	ph_table = g_hash_table_new(g_str_hash, g_str_equal);

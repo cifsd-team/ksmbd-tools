@@ -42,19 +42,19 @@ int spnego_init(void)
 	mech_ctx->ops = &spnego_mskrb5_operations;
 	if (global_conf.krb5_service_name)
 		mech_ctx->params.krb5.service_name =
-			strdup(global_conf.krb5_service_name);
+			g_strdup(global_conf.krb5_service_name);
 	if (global_conf.krb5_keytab_file)
 		mech_ctx->params.krb5.keytab_name =
-			strdup(global_conf.krb5_keytab_file);
+			g_strdup(global_conf.krb5_keytab_file);
 
 	mech_ctx = &mech_ctxs[SPNEGO_MECH_KRB5];
 	mech_ctx->ops = &spnego_krb5_operations;
 	if (global_conf.krb5_service_name)
 		mech_ctx->params.krb5.service_name =
-			strdup(global_conf.krb5_service_name);
+			g_strdup(global_conf.krb5_service_name);
 	if (global_conf.krb5_keytab_file)
 		mech_ctx->params.krb5.keytab_name =
-			strdup(global_conf.krb5_keytab_file);
+			g_strdup(global_conf.krb5_keytab_file);
 
 	for (i = 0; i < SPNEGO_MAX_MECHS; i++) {
 		if (mech_ctxs[i].ops->setup &&

@@ -537,7 +537,7 @@ char *ndr_read_vstring(struct ksmbd_dcerpc *dce)
 		charset = KSMBD_CHARSET_UTF8;
 
 	if (raw_len == 0) {
-		out = strdup("");
+		out = g_strdup("");
 		return out;
 	}
 
@@ -584,14 +584,14 @@ int ndr_read_uniq_vstring_ptr(struct ksmbd_dcerpc *dce,
 
 void ndr_free_vstring_ptr(struct ndr_char_ptr *ctr)
 {
-	free(ctr->ptr);
+	g_free(ctr->ptr);
 	ctr->ptr = NULL;
 }
 
 void ndr_free_uniq_vstring_ptr(struct ndr_uniq_char_ptr *ctr)
 {
 	ctr->ref_id = 0;
-	free(ctr->ptr);
+	g_free(ctr->ptr);
 	ctr->ptr = NULL;
 }
 
@@ -738,9 +738,9 @@ int rpc_init(void)
 	pipes_table = g_hash_table_new(g_int_hash, g_int_equal);
 	g_rw_lock_init(&pipes_table_lock);
 	if (rpc_samr_init())
-		return -ENOMEM;
+		return -EINVAL;
 	if (rpc_lsarpc_init())
-		return -ENOMEM;
+		return -EINVAL;
 	return 0;
 }
 

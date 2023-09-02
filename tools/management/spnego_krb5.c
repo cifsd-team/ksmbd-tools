@@ -54,7 +54,7 @@ struct spnego_krb5_ctx {
 
 static char *get_service_name(void)
 {
-	return strdup(SERVICE_NAME);
+	return g_strdup(SERVICE_NAME);
 }
 
 static char *get_host_name(void)
@@ -72,7 +72,7 @@ static char *get_host_name(void)
 	if (getaddrinfo(hostname, NULL, &hint, &ai))
 		return NULL;
 
-	host_name = strdup(ai->ai_canonname);
+	host_name = g_strdup(ai->ai_canonname);
 	freeaddrinfo(ai);
 	return host_name;
 }
@@ -96,33 +96,26 @@ static int parse_service_full_name(char *service_full_name,
 	name = service_full_name;
 	delim = strchr(name, '/');
 	if (!delim) {
-		*service_name = strdup(name);
+		*service_name = g_strdup(name);
 		*host_name = get_host_name();
 		goto out;
 	}
-	*service_name = strndup(name, delim - name);
-	if (*service_name == NULL)
-		return -ENOMEM;
+	*service_name = g_strndup(name, delim - name);
 
 	name = delim + 1;
 	delim = strchr(name, '@');
 	if (!delim) {
-		*host_name = strdup(name);
+		*host_name = g_strdup(name);
 		goto out;
 	}
-	*host_name = strndup(name, delim - name);
-	if (*host_name == NULL) {
-		free(*service_name);
-		*service_name = NULL;
-		return -ENOMEM;
-	}
+	*host_name = g_strndup(name, delim - name);
 out:
 	/* we assume the host name is FQDN if it has "." */
-	if (*host_name && strchr(*host_name, '.'))
+	if (strchr(*host_name, '.'))
 		return 0;
 
-	free(*service_name);
-	free(*host_name);
+	g_free(*service_name);
+	g_free(*host_name);
 	*service_name = NULL;
 	*host_name = NULL;
 	return -EINVAL;
@@ -171,16 +164,16 @@ static krb5_error_code acquire_creds_from_keytab(krb5_context context,
 		goto out_err;
 	}
 
-	free(host_name);
-	free(service_name);
+	g_free(host_name);
+	g_free(service_name);
 	return 0;
 out_err:
 	if (sprinc)
 		krb5_free_principal(context, sprinc);
 	if (service_name)
-		free(service_name);
+		g_free(service_name);
 	if (host_name)
-		free(host_name);
+		g_free(host_name);
 	if (*keytab)
 		krb5_kt_close(context, *keytab);
 	return retval;
@@ -285,17 +278,18 @@ static int handle_krb5_authen(struct spnego_mech_ctx *mech_ctx,
 	}
 
 	memset(auth_out, 0, sizeof(*auth_out));
-	auth_out->user_name = strdup(client_name);
+	auth_out->user_name = g_try_malloc(strlen(client_name) + 1);
 	if (!auth_out->user_name) {
 		krb5_free_unparsed_name(krb5_ctx->context, client_name);
 		retval = -ENOMEM;
 		goto out_free_client;
 	}
+	strcpy(auth_out->user_name, client_name);
 	krb5_free_unparsed_name(krb5_ctx->context, client_name);
 
 	auth_out->sess_key = g_try_malloc(KRB5_KEY_LENGTH(session_key));
 	if (!auth_out->sess_key) {
-		free(auth_out->user_name);
+		g_free(auth_out->user_name);
 		retval = -ENOMEM;
 		goto out_free_client;
 	}
@@ -305,7 +299,7 @@ static int handle_krb5_authen(struct spnego_mech_ctx *mech_ctx,
 	if (spnego_encode(ap_rep.data, ap_rep.length,
 			mech_ctx->oid, mech_ctx->oid_len,
 			&auth_out->spnego_blob, &auth_out->blob_len)) {
-		free(auth_out->user_name);
+		g_free(auth_out->user_name);
 		g_free(auth_out->sess_key);
 		goto out_free_client;
 	}
@@ -390,9 +384,9 @@ static void cleanup_krb5(struct spnego_mech_ctx *mech_ctx)
 		mech_ctx->private = NULL;
 	}
 	if (mech_ctx->params.krb5.service_name)
-		free(mech_ctx->params.krb5.service_name);
+		g_free(mech_ctx->params.krb5.service_name);
 	if (mech_ctx->params.krb5.keytab_name)
-		free(mech_ctx->params.krb5.keytab_name);
+		g_free(mech_ctx->params.krb5.keytab_name);
 }
 
 struct spnego_mech_operations spnego_krb5_operations = {

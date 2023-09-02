@@ -118,7 +118,7 @@ static int spnego_authen_request(struct ksmbd_ipc_msg *msg)
 out_free_auth:
 	g_free(auth_out.spnego_blob);
 	g_free(auth_out.sess_key);
-	free(auth_out.user_name);
+	g_free(auth_out.user_name);
 out:
 	if (resp_msg) {
 		ipc_msg_send(resp_msg);

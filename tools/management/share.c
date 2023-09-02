@@ -114,7 +114,7 @@ static void kill_ksmbd_share(struct ksmbd_share *share)
 
 	g_free(share->name);
 	g_free(share->path);
-	free(share->comment);
+	g_free(share->comment);
 	g_free(share->veto_list);
 	g_free(share->guest_account);
 	g_rw_lock_clear(&share->update_lock);
@@ -613,7 +613,7 @@ static void process_group_kv(gpointer _k, gpointer _v, gpointer user_data)
 static void fixup_missing_fields(struct ksmbd_share *share)
 {
 	if (!share->comment)
-		share->comment = strdup("");
+		share->comment = g_strdup("");
 }
 
 static void init_share_from_group(struct ksmbd_share *share,
