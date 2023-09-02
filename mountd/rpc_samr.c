@@ -1023,7 +1023,7 @@ static void domain_entry_free(void *v)
 {
 	char **entry = v;
 
-	free(*entry);
+	g_free(*entry);
 }
 
 int rpc_samr_init(void)

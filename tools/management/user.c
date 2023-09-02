@@ -22,9 +22,9 @@ static void kill_ksmbd_user(struct ksmbd_user *user)
 {
 	pr_debug("Kill user `%s'\n", user->name);
 
-	free(user->name);
-	free(user->pass_b64);
-	free(user->pass);
+	g_free(user->name);
+	g_free(user->pass_b64);
+	g_free(user->pass);
 	g_rw_lock_clear(&user->update_lock);
 	g_free(user);
 }
@@ -174,8 +174,8 @@ int usm_add_new_user(char *name, char *pwd)
 	struct ksmbd_user *user = new_ksmbd_user(name, pwd);
 
 	if (!user) {
-		free(name);
-		free(pwd);
+		g_free(name);
+		g_free(pwd);
 		return -ENOMEM;
 	}
 
@@ -217,8 +217,8 @@ int usm_add_update_user_from_pwdentry(char *data)
 		usm_update_user_password(user, pwd);
 		put_ksmbd_user(user);
 
-		free(name);
-		free(pwd);
+		g_free(name);
+		g_free(pwd);
 		return 0;
 	}
 	return usm_add_new_user(name, pwd);
@@ -285,8 +285,8 @@ void usm_update_user_password(struct ksmbd_user *user, char *pswd)
 
 	pr_debug("Update user password: %s\n", user->name);
 	g_rw_lock_writer_lock(&user->update_lock);
-	free(user->pass_b64);
-	free(user->pass);
+	g_free(user->pass_b64);
+	g_free(user->pass);
 	user->pass_b64 = pass_b64;
 	user->pass = pass;
 	user->pass_sz = (int)pass_sz;

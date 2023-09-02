@@ -73,8 +73,8 @@ int shm_share_config(char *k, enum KSMBD_SHARE_CONF c)
 
 static void list_hosts_callback(gpointer k, gpointer v, gpointer user_data)
 {
-	free(k);
-	free(v);
+	g_free(k);
+	g_free(v);
 }
 
 static void free_hosts_map(GHashTable *map)
@@ -112,11 +112,11 @@ static void kill_ksmbd_share(struct ksmbd_share *share)
 
 	g_rw_lock_clear(&share->maps_lock);
 
-	free(share->name);
-	free(share->path);
+	g_free(share->name);
+	g_free(share->path);
 	free(share->comment);
-	free(share->veto_list);
-	free(share->guest_account);
+	g_free(share->veto_list);
+	g_free(share->guest_account);
 	g_rw_lock_clear(&share->update_lock);
 	g_free(share);
 }

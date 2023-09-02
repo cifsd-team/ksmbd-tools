@@ -257,7 +257,7 @@ static int __lsarpc_entry_processed(struct ksmbd_rpc_pipe *pipe, int i)
 
 	entry = g_array_index(pipe->entries, gpointer, i);
 	pipe->entries = g_array_remove_index(pipe->entries, i);
-	free(entry);
+	g_free(entry);
 	return 0;
 }
 
