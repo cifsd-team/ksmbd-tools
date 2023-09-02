@@ -183,10 +183,6 @@ int addshare_main(int argc, char **argv)
 
 	if (!smbconf) {
 		smbconf = g_strdup(PATH_SMBCONF);
-		if (!smbconf) {
-			pr_err("Out of memory\n");
-			goto out;
-		}
 		if (!g_file_test(smbconf, G_FILE_TEST_EXISTS) &&
 		    g_file_test(PATH_SMBCONF_FALLBACK, G_FILE_TEST_EXISTS)) {
 			pr_err("Use of `%s' is deprecated, rename it to `%s' now!\n",

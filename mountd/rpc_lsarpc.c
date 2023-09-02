@@ -726,8 +726,6 @@ int rpc_lsarpc_init(void)
 
 	domain_name = g_ascii_strup(domain_string, strlen(domain_string));
 	ph_table = g_hash_table_new(g_str_hash, g_str_equal);
-	if (!ph_table)
-		return -ENOMEM;
 	g_rw_lock_init(&ph_table_lock);
 	return 0;
 }

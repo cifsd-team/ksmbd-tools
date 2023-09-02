@@ -75,14 +75,8 @@ static char *__prompt_password_stdin(size_t *sz)
 	char *pswd_raw, *pswd_raw_re, *pswd_raw_cur;
 	size_t i, len;
 
-	pswd_raw = g_try_malloc0(MAX_NT_PWD_LEN + 1);
-	pswd_raw_re = g_try_malloc0(MAX_NT_PWD_LEN + 1);
-	if (!pswd_raw || !pswd_raw_re) {
-		g_free(pswd_raw);
-		g_free(pswd_raw_re);
-		pr_err("Out of memory\n");
-		return NULL;
-	}
+	pswd_raw = g_malloc0(MAX_NT_PWD_LEN + 1);
+	pswd_raw_re = g_malloc0(MAX_NT_PWD_LEN + 1);
 
 	for (pswd_raw_cur = pswd_raw;;
 	     pswd_raw_cur = pswd_raw_cur == pswd_raw ? pswd_raw_re : pswd_raw) {
@@ -101,8 +95,7 @@ static char *__prompt_password_stdin(size_t *sz)
 			fgets_m = g_strdup_printf("%m");
 			term_toggle_echo(1);
 			g_print("\n");
-			pr_err("fgets() returned an error: %s\n",
-			       fgets_m ? fgets_m : "Out of memory");
+			pr_err("fgets() returned an error: %s\n", fgets_m);
 			g_free(fgets_m);
 			g_free(pswd_raw);
 			g_free(pswd_raw_re);
@@ -155,7 +148,7 @@ static char *prompt_password(char *pswd_raw_opt, size_t *sz_raw)
 
 	*sz_raw = strlen(pswd_raw_opt);
 	if (__sanity_check_sz_raw(*sz_raw))
-		exit(EXIT_FAILURE);
+		return NULL;
 	return pswd_raw_opt;
 }
 
@@ -169,7 +162,7 @@ static char *get_utf16le_password(char *pswd_raw_opt, long *len)
 
 	pswd_raw = prompt_password(pswd_raw_opt, &sz_raw);
 	if (!pswd_raw)
-		return NULL;
+		exit(EXIT_FAILURE);
 
 	pswd_utf16le = ksmbd_gconvert(pswd_raw,
 				      sz_raw,
@@ -178,7 +171,7 @@ static char *get_utf16le_password(char *pswd_raw_opt, long *len)
 				      &bytes_read,
 				      &bytes_written);
 	if (!pswd_utf16le)
-		return NULL;
+		exit(EXIT_FAILURE);
 
 	*len = bytes_written;
 	return pswd_utf16le;
@@ -209,15 +202,7 @@ static char *get_base64_password(char *pswd_raw_opt)
 	char *pswd_b64;
 
 	pswd_utf16le = get_utf16le_password(pswd_raw_opt, &len);
-	if (!pswd_utf16le)
-		return NULL;
-
-	pswd_hash = g_try_malloc0(sizeof(mctx.hash) + 1);
-	if (!pswd_hash) {
-		pr_err("Out of memory\n");
-		return NULL;
-	}
-
+	pswd_hash = g_malloc0(sizeof(mctx.hash) + 1);
 	md4_init(&mctx);
 	md4_update(&mctx, pswd_utf16le, len);
 	md4_final(&mctx, pswd_hash);
@@ -334,11 +319,6 @@ int command_add_user(char *pwddb, char *account, char *password)
 	}
 
 	pswd = get_base64_password(password);
-	if (!pswd) {
-		pr_err("Out of memory\n");
-		return -ENOMEM;
-	}
-
 	/* pswd is already g_strdup-ed */
 	if (usm_add_new_user(account, pswd)) {
 		pr_err("Unable to add new user `%s'\n", account);
@@ -366,18 +346,7 @@ int command_update_user(char *pwddb, char *account, char *password)
 	}
 
 	pswd = get_base64_password(password);
-	if (!pswd) {
-		pr_err("Out of memory\n");
-		put_ksmbd_user(user);
-		return -ENOMEM;
-	}
-
-	if (usm_update_user_password(user, pswd)) {
-		pr_err("Out of memory\n");
-		put_ksmbd_user(user);
-		return -ENOMEM;
-	}
-
+	usm_update_user_password(user, pswd);
 	put_ksmbd_user(user);
 
 	if (__opendb_file(pwddb))

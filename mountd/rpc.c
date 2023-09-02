@@ -184,10 +184,6 @@ static struct ksmbd_rpc_pipe *rpc_pipe_alloc(void)
 
 	pipe->id = -1;
 	pipe->entries = g_array_new(0, 0, sizeof(void *));
-	if (!pipe->entries) {
-		rpc_pipe_free(pipe);
-		return NULL;
-	}
 	return pipe;
 }
 
@@ -740,8 +736,6 @@ int ndr_write_array_of_structs(struct ksmbd_rpc_pipe *pipe)
 int rpc_init(void)
 {
 	pipes_table = g_hash_table_new(g_int_hash, g_int_equal);
-	if (!pipes_table)
-		return -ENOMEM;
 	g_rw_lock_init(&pipes_table_lock);
 	if (rpc_samr_init())
 		return -ENOMEM;

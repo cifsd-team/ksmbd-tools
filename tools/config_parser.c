@@ -82,7 +82,21 @@ static int is_a_group(char *line)
 	return 1;
 }
 
-static int add_new_group(char *line)
+static int is_a_key_value(char *line)
+{
+	char *key = strchr(line, '=');
+
+	if (!key)
+		return 0;
+	do {
+		if (key == line)
+			return 0;
+	} while (is_ascii_space_tab(*--key));
+
+	return 1;
+}
+
+static void add_new_group(char *line)
 {
 	char *begin = line;
 	char *end = line;
@@ -94,15 +108,12 @@ static int add_new_group(char *line)
 		end = g_utf8_find_next_char(end, NULL);
 
 	name = g_strndup(begin + 1, end - begin - 1);
-	if (!name)
-		goto out_free;
-
 	lookup = g_hash_table_lookup(parser.groups, name);
 	if (lookup) {
 		parser.current = lookup;
 		pr_info("Multiple definitions for group `%s'\n", name);
 		g_free(name);
-		return 0;
+		return;
 	}
 
 	group = g_malloc(sizeof(struct smbconf_group));
@@ -112,58 +123,34 @@ static int add_new_group(char *line)
 					  g_str_equal,
 					  kv_release_cb,
 					  kv_release_cb);
-	if (!group->kv)
-		goto out_free;
 
 	parser.current = group;
 	g_hash_table_insert(parser.groups, group->name, group);
-	return 0;
-
-out_free:
-	g_free(name);
-	if (group && group->kv)
-		g_hash_table_destroy(group->kv);
-	g_free(group);
-	return -ENOMEM;
 }
 
-static int add_group_key_value(char *line)
+static void add_group_key_value(char *line)
 {
 	char *key, *value;
 
 	key = strchr(line, '=');
-	if (!key)
-		return -EINVAL;
-
 	value = key;
-	*key = 0x00;
 
-	do {
-		if (key == line)
-			return -EINVAL;
-	} while (is_ascii_space_tab(*--key));
-
-	do {
+	while (is_ascii_space_tab(*--key))
 		;
-	} while (is_ascii_space_tab(*++value));
+	while (is_ascii_space_tab(*++value))
+		;
 
 	if (is_a_comment(value))
-		return 0;
+		return;
 
 	key = g_strndup(line, key - line + 1);
 	value = g_strdup(value);
 
-	if (!key || !value) {
-		g_free(key);
-		g_free(value);
-		return -ENOMEM;
-	}
-
 	if (!parser.current) {
-		pr_err("Key-value definition for `%s' is not in a group\n", key);
+		pr_info("Key-value definition for `%s' is not in a group\n", key);
 		g_free(key);
 		g_free(value);
-		return -EINVAL;
+		return;
 	}
 
 	if (g_hash_table_lookup(parser.current->kv, key)) {
@@ -171,11 +158,10 @@ static int add_group_key_value(char *line)
 			key, parser.current->name);
 		g_free(key);
 		g_free(value);
-		return 0;
+		return;
 	}
 
 	g_hash_table_insert(parser.current->kv, key, value);
-	return 0;
 }
 
 static int process_smbconf_entry(char *data)
@@ -186,10 +172,17 @@ static int process_smbconf_entry(char *data)
 	if (is_a_comment(data))
 		return 0;
 
-	if (is_a_group(data))
-		return add_new_group(data);
+	if (is_a_group(data)) {
+		add_new_group(data);
+		return 0;
+	}
 
-	return add_group_key_value(data);
+	if (is_a_key_value(data)) {
+		add_group_key_value(data);
+		return 0;
+	}
+
+	return -EINVAL;
 }
 
 static int __mmap_parse_file(const char *fname, int (*callback)(char *data))
@@ -267,16 +260,13 @@ out:
 	return ret;
 }
 
-static int init_smbconf_parser(void)
+static void init_smbconf_parser(void)
 {
 	if (parser.groups)
-		return 0;
+		return;
 
 	parser.groups = g_hash_table_new(shm_share_name_hash,
 					 shm_share_name_equal);
-	if (!parser.groups)
-		return -ENOMEM;
-	return 0;
 }
 
 static void release_smbconf_group(gpointer k, gpointer v, gpointer user_data)
@@ -653,31 +643,16 @@ static void groups_callback(gpointer _k, gpointer _v, gpointer user_data)
 	shm_add_new_share(group);
 }
 
-static int cp_add_ipc_group(void)
+static void cp_add_ipc_group(void)
 {
-	char *comment = NULL, *guest = NULL;
-	int ret = 0;
-
 	ipc_group = g_hash_table_lookup(parser.groups, "ipc$");
 	if (ipc_group)
-		return ret;
+		return;
 
-	comment = g_strdup("comment = IPC share");
-	guest = g_strdup("guest ok = yes");
-	ret = add_new_group("[IPC$]");
-	ret |= add_group_key_value(comment);
-	ret |= add_group_key_value(guest);
-	if (ret) {
-		pr_err("Unable to add IPC$ share\n");
-		ret = -EINVAL;
-		goto out;
-	}
-
+	add_new_group("[ipc$]");
+	add_group_key_value("comment = IPC share");
+	add_group_key_value("guest ok = yes");
 	ipc_group = g_hash_table_lookup(parser.groups, "ipc$");
-out:
-	g_free(comment);
-	g_free(guest);
-	return ret;
 }
 
 static int __cp_parse_smbconfig(const char *smbconf, GHFunc cb,
@@ -689,11 +664,9 @@ static int __cp_parse_smbconfig(const char *smbconf, GHFunc cb,
 
 	ret = cp_smbconfig_hash_create(smbconf);
 	if (ret)
-		return ret;
-
-	ret = cp_add_ipc_group();
-	if (ret)
 		goto out;
+
+	cp_add_ipc_group();
 
 	global_group = g_hash_table_lookup(parser.groups, "global");
 	if (global_group)
@@ -702,6 +675,7 @@ static int __cp_parse_smbconfig(const char *smbconf, GHFunc cb,
 	global_conf_create();
 	g_hash_table_foreach(parser.groups, groups_callback, &cb_mode);
 	global_conf_fixup_missing();
+
 out:
 	cp_smbconfig_destroy();
 	return ret;
@@ -726,10 +700,7 @@ int cp_parse_pwddb(const char *pwddb)
 
 int cp_smbconfig_hash_create(const char *smbconf)
 {
-	int ret = init_smbconf_parser();
-
-	if (ret)
-		return ret;
+	init_smbconf_parser();
 	return __mmap_parse_file(smbconf, process_smbconf_entry);
 }
 
@@ -743,16 +714,10 @@ void cp_smbconfig_destroy(void)
 	release_smbconf_parser();
 }
 
-int cp_parse_external_smbconf_group(char *name, char *opts)
+void cp_parse_external_smbconf_group(char *name, char *opts)
 {
 	char *pos;
 	int i, len;
-
-	if (init_smbconf_parser())
-		return -EINVAL;
-
-	if (!opts || !name)
-		return -EINVAL;
 
 	len = strlen(opts);
 	/* fake smb.conf input */
@@ -764,8 +729,7 @@ int cp_parse_external_smbconf_group(char *name, char *opts)
 			*(pos - 1) = '\n';
 	}
 
-	if (add_new_group(name))
-		goto error;
+	add_new_group(name);
 
 	/* split input and feed to normal process_smbconf_entry() */
 	while (len) {
@@ -782,9 +746,4 @@ int cp_parse_external_smbconf_group(char *name, char *opts)
 		if (delim)
 			opts = delim + 1;
 	}
-	return 0;
-
-error:
-	cp_smbconfig_destroy();
-	return -EINVAL;
 }

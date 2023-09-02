@@ -27,7 +27,7 @@ struct smbconf_parser {
 
 extern struct smbconf_parser parser;
 
-int cp_parse_external_smbconf_group(char *name, char *opts);
+void cp_parse_external_smbconf_group(char *name, char *opts);
 int cp_smbconfig_hash_create(const char *smbconf);
 void cp_smbconfig_destroy(void);
 

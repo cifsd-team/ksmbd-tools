@@ -129,8 +129,6 @@ static void update_share_cb(gpointer key,
 
 	nk = g_strdup(key);
 	nv = g_strdup(value);
-	if (!nk || !nv)
-		exit(EXIT_FAILURE);
 
 	/* This will call .dtor for already existing key/value pairs */
 	g_hash_table_insert(g, nk, nv);
@@ -146,8 +144,7 @@ int command_add_share(char *smbconf, char *name, char *opts)
 	}
 
 	new_name = new_group_name(name);
-	if (cp_parse_external_smbconf_group(new_name, opts))
-		return -EINVAL;
+	cp_parse_external_smbconf_group(new_name, opts);
 
 	if (__open_smbconf(smbconf))
 		return -EINVAL;
@@ -156,7 +153,6 @@ int command_add_share(char *smbconf, char *name, char *opts)
 	g_hash_table_foreach(parser.groups, write_share_cb, NULL);
 	close(conf_fd);
 	return 0;
-
 }
 
 int command_update_share(char *smbconf, char *name, char *opts)
@@ -172,8 +168,7 @@ int command_update_share(char *smbconf, char *name, char *opts)
 	}
 
 	aux_name = aux_group_name(name);
-	if (cp_parse_external_smbconf_group(aux_name, opts))
-		return -EINVAL;
+	cp_parse_external_smbconf_group(aux_name, opts);
 
 	/* get rid of [] */
 	sprintf(aux_name, "%s%s", AUX_GROUP_PREFIX, name);

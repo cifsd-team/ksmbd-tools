@@ -1031,12 +1031,7 @@ int rpc_samr_init(void)
 	char hostname[NAME_MAX];
 
 	ch_table = g_hash_table_new(g_str_hash, g_str_equal);
-	if (!ch_table)
-		return -ENOMEM;
 	domain_entries = g_array_new(0, 0, sizeof(void *));
-	if (!domain_entries)
-		return -ENOMEM;
-
 	g_array_set_clear_func(domain_entries, domain_entry_free);
 
 	/*

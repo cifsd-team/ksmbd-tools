@@ -256,8 +256,6 @@ int shm_init(void)
 {
 	shares_table = g_hash_table_new(shm_share_name_hash,
 					shm_share_name_equal);
-	if (!shares_table)
-		return -ENOMEM;
 	g_rw_lock_init(&shares_table_lock);
 	return 0;
 }
@@ -286,13 +284,8 @@ static GHashTable *parse_list(GHashTable *map, char **list, char grc)
 {
 	int i;
 
-	if (!list)
-		return map;
-
 	if (!map)
 		map = g_hash_table_new(g_str_hash, g_str_equal);
-	if (!map)
-		return map;
 
 	for (i = 0;  list[i] != NULL; i++) {
 		struct ksmbd_user *user;
@@ -382,15 +375,11 @@ static void process_group_kv(gpointer _k, gpointer _v, gpointer user_data)
 
 	if (shm_share_config(k, KSMBD_SHARE_CONF_COMMENT)) {
 		share->comment = cp_get_group_kv_string(v);
-		if (share->comment == NULL)
-			set_share_flag(share, KSMBD_SHARE_FLAG_INVALID);
 		return;
 	}
 
 	if (shm_share_config(k, KSMBD_SHARE_CONF_PATH)) {
 		share->path = cp_get_group_kv_string(v);
-		if (share->path == NULL)
-			set_share_flag(share, KSMBD_SHARE_FLAG_INVALID);
 		return;
 	}
 
@@ -406,8 +395,6 @@ static void process_group_kv(gpointer _k, gpointer _v, gpointer user_data)
 			return;
 		}
 		share->guest_account = cp_get_group_kv_string(v);
-		if (!share->guest_account)
-			set_share_flag(share, KSMBD_SHARE_FLAG_INVALID);
 		return;
 	}
 
@@ -502,8 +489,6 @@ static void process_group_kv(gpointer _k, gpointer _v, gpointer user_data)
 		share->maps[KSMBD_SHARE_VALID_USERS_MAP] =
 			parse_list(share->maps[KSMBD_SHARE_VALID_USERS_MAP],
 				   users_list, '@');
-		if (share->maps[KSMBD_SHARE_VALID_USERS_MAP] == NULL)
-			set_share_flag(share, KSMBD_SHARE_FLAG_INVALID);
 		cp_group_kv_list_free(users_list);
 		return;
 	}
@@ -515,8 +500,6 @@ static void process_group_kv(gpointer _k, gpointer _v, gpointer user_data)
 		share->maps[KSMBD_SHARE_INVALID_USERS_MAP] =
 			parse_list(share->maps[KSMBD_SHARE_INVALID_USERS_MAP],
 				   users_list, '@');
-		if (share->maps[KSMBD_SHARE_INVALID_USERS_MAP] == NULL)
-			set_share_flag(share, KSMBD_SHARE_FLAG_INVALID);
 		cp_group_kv_list_free(users_list);
 		return;
 	}
@@ -528,8 +511,6 @@ static void process_group_kv(gpointer _k, gpointer _v, gpointer user_data)
 		share->maps[KSMBD_SHARE_READ_LIST_MAP] =
 			parse_list(share->maps[KSMBD_SHARE_READ_LIST_MAP],
 				   users_list, '@');
-		if (share->maps[KSMBD_SHARE_READ_LIST_MAP] == NULL)
-			set_share_flag(share, KSMBD_SHARE_FLAG_INVALID);
 		cp_group_kv_list_free(users_list);
 		return;
 	}
@@ -541,8 +522,6 @@ static void process_group_kv(gpointer _k, gpointer _v, gpointer user_data)
 		share->maps[KSMBD_SHARE_WRITE_LIST_MAP] =
 			parse_list(share->maps[KSMBD_SHARE_WRITE_LIST_MAP],
 				   users_list, '@');
-		if (share->maps[KSMBD_SHARE_WRITE_LIST_MAP] == NULL)
-			set_share_flag(share, KSMBD_SHARE_FLAG_INVALID);
 		cp_group_kv_list_free(users_list);
 		return;
 	}
@@ -554,8 +533,6 @@ static void process_group_kv(gpointer _k, gpointer _v, gpointer user_data)
 		share->maps[KSMBD_SHARE_ADMIN_USERS_MAP] =
 			parse_list(share->maps[KSMBD_SHARE_ADMIN_USERS_MAP],
 				   users_list, '@');
-		if (share->maps[KSMBD_SHARE_ADMIN_USERS_MAP] == NULL)
-			set_share_flag(share, KSMBD_SHARE_FLAG_INVALID);
 		cp_group_kv_list_free(users_list);
 		return;
 	}
@@ -566,8 +543,6 @@ static void process_group_kv(gpointer _k, gpointer _v, gpointer user_data)
 		hosts_list = cp_get_group_kv_list(v);
 		share->hosts_allow_map = parse_list(share->hosts_allow_map,
 						    hosts_list, 0x00);
-		if (share->hosts_allow_map == NULL)
-			set_share_flag(share, KSMBD_SHARE_FLAG_INVALID);
 		cp_group_kv_list_free(hosts_list);
 		return;
 	}
@@ -578,8 +553,6 @@ static void process_group_kv(gpointer _k, gpointer _v, gpointer user_data)
 		hosts_list = cp_get_group_kv_list(v);
 		share->hosts_deny_map = parse_list(share->hosts_deny_map,
 						   hosts_list, 0x00);
-		if (share->hosts_deny_map == NULL)
-			set_share_flag(share, KSMBD_SHARE_FLAG_INVALID);
 		cp_group_kv_list_free(hosts_list);
 		return;
 	}
@@ -597,12 +570,8 @@ static void process_group_kv(gpointer _k, gpointer _v, gpointer user_data)
 
 	if (shm_share_config(k, KSMBD_SHARE_CONF_VETO_FILES)) {
 		share->veto_list = cp_get_group_kv_string(v + 1);
-		if (share->veto_list == NULL) {
-			set_share_flag(share, KSMBD_SHARE_FLAG_INVALID);
-		} else {
-			share->veto_list_sz = strlen(share->veto_list);
-			make_veto_list(share);
-		}
+		share->veto_list_sz = strlen(share->veto_list);
+		make_veto_list(share);
 		return;
 	}
 
@@ -618,20 +587,18 @@ static void process_group_kv(gpointer _k, gpointer _v, gpointer user_data)
 		int i;
 		char **objects = cp_get_group_kv_list(v);
 
-		if (objects) {
-			clear_share_flag(share, KSMBD_SHARE_FLAG_ACL_XATTR);
-			clear_share_flag(share, KSMBD_SHARE_FLAG_STREAMS);
-			for (i = 0;  objects[i] != NULL; i++) {
-				p = cp_ltrim(objects[i]);
-				if (!p)
-					continue;
-				if (!strcmp(p, "acl_xattr"))
-					set_share_flag(share, KSMBD_SHARE_FLAG_ACL_XATTR);
-				else if (!strcmp(p, "streams_xattr"))
-					set_share_flag(share, KSMBD_SHARE_FLAG_STREAMS);
-			}
-			cp_group_kv_list_free(objects);
+		clear_share_flag(share, KSMBD_SHARE_FLAG_ACL_XATTR);
+		clear_share_flag(share, KSMBD_SHARE_FLAG_STREAMS);
+		for (i = 0;  objects[i] != NULL; i++) {
+			p = cp_ltrim(objects[i]);
+			if (!p)
+				continue;
+			if (!strcmp(p, "acl_xattr"))
+				set_share_flag(share, KSMBD_SHARE_FLAG_ACL_XATTR);
+			else if (!strcmp(p, "streams_xattr"))
+				set_share_flag(share, KSMBD_SHARE_FLAG_STREAMS);
 		}
+		cp_group_kv_list_free(objects);
 	}
 
 	if (shm_share_config(k, KSMBD_SHARE_CONF_CROSSMNT)) {

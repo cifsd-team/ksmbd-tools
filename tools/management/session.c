@@ -229,8 +229,6 @@ void sm_destroy(void)
 int sm_init(void)
 {
 	sessions_table = g_hash_table_new(g_int64_hash, g_int64_equal);
-	if (!sessions_table)
-		return -ENOMEM;
 	g_rw_lock_init(&sessions_table_lock);
 	return 0;
 }

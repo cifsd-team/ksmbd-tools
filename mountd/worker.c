@@ -324,23 +324,10 @@ void wp_destroy(void)
 
 int wp_init(void)
 {
-	GError *err;
-
 	pool = g_thread_pool_new(worker_pool_fn,
 				 NULL,
 				 MAX_WORKER_THREADS,
 				 0,
-				 &err);
-	if (!pool) {
-		if (err) {
-			pr_err("Can't create pool: %s\n", err->message);
-			g_error_free(err);
-		}
-		goto out_error;
-	}
-
+				 NULL);
 	return 0;
-out_error:
-	wp_destroy();
-	return -ENOMEM;
 }

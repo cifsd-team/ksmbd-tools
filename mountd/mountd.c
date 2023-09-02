@@ -102,7 +102,7 @@ retry:
 			}
 		} else {
 			pr_debug("Can't create `%s': %s\n", KSMBD_LOCK_FILE,
-				 open_m ? open_m : "Out of memory");
+				 open_m);
 			goto out;
 		}
 
@@ -549,10 +549,6 @@ int mountd_main(int argc, char **argv)
 
 	if (!global_conf.smbconf) {
 		global_conf.smbconf = g_strdup(PATH_SMBCONF);
-		if (!global_conf.smbconf) {
-			pr_err("Out of memory\n");
-			goto out;
-		}
 		if (!g_file_test(global_conf.smbconf, G_FILE_TEST_EXISTS) &&
 		    g_file_test(PATH_SMBCONF_FALLBACK, G_FILE_TEST_EXISTS)) {
 			pr_err("Use of `%s' is deprecated, rename it to `%s' now!\n",
@@ -562,13 +558,8 @@ int mountd_main(int argc, char **argv)
 		}
 	}
 
-	if (!global_conf.pwddb) {
+	if (!global_conf.pwddb)
 		global_conf.pwddb = g_strdup(PATH_PWDDB);
-		if (!global_conf.pwddb) {
-			pr_err("Out of memory\n");
-			goto out;
-		}
-	}
 
 	setup_signals(manager_sig_handler);
 	ret = manager_process_init();

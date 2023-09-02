@@ -141,8 +141,6 @@ void usm_destroy(void)
 int usm_init(void)
 {
 	users_table = g_hash_table_new(g_str_hash, g_str_equal);
-	if (!users_table)
-		return -ENOMEM;
 	g_rw_lock_init(&users_table_lock);
 	return 0;
 }
@@ -204,7 +202,6 @@ int usm_add_update_user_from_pwdentry(char *data)
 	char *name;
 	char *pwd;
 	char *pos = strchr(data, ':');
-	int ret;
 
 	if (!pos) {
 		pr_err("Invalid pwd entry: %s\n", data);
@@ -215,20 +212,14 @@ int usm_add_update_user_from_pwdentry(char *data)
 	name = g_strdup(data);
 	pwd = g_strdup(pos + 1);
 
-	if (!name || !pwd) {
-		free(name);
-		free(pwd);
-		return -ENOMEM;
-	}
-
 	user = usm_lookup_user(name);
 	if (user) {
-		ret = usm_update_user_password(user, pwd);
+		usm_update_user_password(user, pwd);
 		put_ksmbd_user(user);
 
 		free(name);
 		free(pwd);
-		return ret;
+		return 0;
 	}
 	return usm_add_new_user(name, pwd);
 }
@@ -256,9 +247,6 @@ int usm_add_subauth_global_conf(char *data)
 {
 	char *pos = data;
 	char *spos;
-
-	if (!pos)
-		return -EINVAL;
 
 	spos = strchr(pos, ':');
 	if (!spos) {
@@ -289,18 +277,11 @@ void for_each_ksmbd_user(walk_users cb, gpointer user_data)
 	g_rw_lock_reader_unlock(&users_table_lock);
 }
 
-int usm_update_user_password(struct ksmbd_user *user, char *pswd)
+void usm_update_user_password(struct ksmbd_user *user, char *pswd)
 {
 	size_t pass_sz;
 	char *pass_b64 = g_strdup(pswd);
 	char *pass = base64_decode(pass_b64, &pass_sz);
-
-	if (!pass_b64 || !pass) {
-		free(pass_b64);
-		free(pass);
-		pr_err("Out of memory\n");
-		return -ENOMEM;
-	}
 
 	pr_debug("Update user password: %s\n", user->name);
 	g_rw_lock_writer_lock(&user->update_lock);
@@ -310,8 +291,6 @@ int usm_update_user_password(struct ksmbd_user *user, char *pswd)
 	user->pass = pass;
 	user->pass_sz = (int)pass_sz;
 	g_rw_lock_writer_unlock(&user->update_lock);
-
-	return 0;
 }
 
 static int usm_copy_user_passhash(struct ksmbd_user *user,
