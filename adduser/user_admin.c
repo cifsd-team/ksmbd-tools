@@ -361,7 +361,15 @@ int command_update_user(char *pwddb, char *account, char *password)
 int command_del_user(char *pwddb, char *account, char *unused)
 {
 	char *del_account = account;
+	struct ksmbd_user *user;
 	(void)unused;
+
+	user = usm_lookup_user(account);
+	if (!user) {
+		pr_err("User `%s' does not exist\n", account);
+		return -EINVAL;
+	}
+	put_ksmbd_user(user);
 
 	if (global_conf.guest_account &&
 	    !strcmp(global_conf.guest_account, account)) {

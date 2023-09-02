@@ -193,7 +193,14 @@ int command_update_share(char *smbconf, char *name, char *opts)
 
 int command_del_share(char *smbconf, char *name, char *unused)
 {
+	struct smbconf_group *g;
 	(void)unused;
+
+	g = g_hash_table_lookup(parser.groups, name);
+	if (!g) {
+		pr_err("Share `%s' does not exist\n", name);
+		return -EINVAL;
+	}
 
 	if (__open_smbconf(smbconf))
 		return -EINVAL;
