@@ -14,13 +14,13 @@ ksmbd.addshare \- configure shares for ksmbd.conf of ksmbd.mountd
 \fBksmbd.addshare\fR configures shares for \fBksmbd.conf\fP(5) configuration file of \fBksmbd.mountd\fP(8) user mode daemon.
 \fBksmbd.addshare\fR modifies \fBksmbd.conf\fR such that its existing formatting is not retained.
 \fBksmbd.addshare\fR notifies \fBksmbd.mountd\fR of changes if it had made any.
+\fBksmbd.addshare\fR will only make changes that do not require restarting \fBksmbd.mountd\fR and \fBksmbd\fR to take effect.
 .SH OPTIONS
 .TP
 \fB\-a\fR, \fB\-\-add-share\fR=\fI\,SHARE\/\fR
 Add \fI\,SHARE\/\fR to configuration file.
 \fI\,SHARE\/\fR must be UTF-8 and [1, 64) bytes. \" KSMBD_REQ_MAX_SHARE_NAME
 \fI\,SHARE\/\fR is case-insensitive.
-\fI\,SHARE\/\fR cannot be \fBglobal\fR.
 Initial parameters must be given with \fB\-\-option\fR.
 .TP
 \fB\-d\fR, \fB\-\-del-share\fR=\fI\,SHARE\/\fR

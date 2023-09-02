@@ -18,6 +18,7 @@
 #include <tools.h>
 #include <management/user.h>
 #include <management/share.h>
+#include <addshare/share_admin.h>
 
 struct smbconf_global global_conf;
 struct smbconf_parser parser;
@@ -762,6 +763,9 @@ int cp_parse_subauth(void)
 
 void cp_parse_external_smbconf_group(char *name, char **options)
 {
+	int is_global =
+		shm_share_name_equal(name, "[" AUX_GROUP_PREFIX "global" "]");
+
 	add_group(name);
 
 	for (; *options; options++) {
@@ -771,8 +775,18 @@ void cp_parse_external_smbconf_group(char *name, char **options)
 			continue;
 
 		if (is_a_key_value(option)) {
-			add_group_key_value(option);
-			continue;
+			enum KSMBD_SHARE_CONF c;
+
+			for (c = 0; c < KSMBD_SHARE_CONF_MAX; c++)
+				if ((!is_global ||
+				     !KSMBD_SHARE_CONF_IS_GLOBAL(c)) &&
+				    shm_share_config(option, c))
+					break;
+
+			if (c < KSMBD_SHARE_CONF_MAX) {
+				add_group_key_value(option);
+				continue;
+			}
 		}
 
 		pr_info("Ignored option `%s'\n", option);

@@ -39,7 +39,6 @@ static void usage(int status)
 			"  -a, --add-share=SHARE       add SHARE to configuration file;\n"
 			"                              SHARE must be UTF-8 and [1, " STR(KSMBD_REQ_MAX_SHARE_NAME) ") bytes;\n"
 			"                              SHARE is case-insensitive;\n"
-			"                              SHARE cannot be `global';\n"
 			"                              initial parameters must be given with `--options'\n"
 			"  -d, --del-share=SHARE       delete SHARE from configuration file\n"
 			"  -u, --update-share=SHARE    update SHARE in configuration file;\n"
@@ -151,10 +150,6 @@ int addshare_main(int argc, char **argv)
 
 	if (!shm_share_name(name, strchr(name, 0x00)))
 		goto out;
-	if (shm_share_name_equal(name, "global")) {
-		pr_err("Share name is `global'\n");
-		goto out;
-	}
 
 	if ((command == command_add_share || command == command_update_share) &&
 	    !options) {

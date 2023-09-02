@@ -6,6 +6,7 @@ ksmbd.conf \- the configuration file for ksmbd.mountd
 \fBksmbd.addshare\fP(8) can be used for configuring shares for \fBksmbd.conf\fR.
 \fBksmbd.addshare\fR modifies \fBksmbd.conf\fR such that its existing formatting is not retained.
 \fBksmbd.addshare\fR notifies \fBksmbd.mountd\fR of changes, if it had made any, by sending the \fBSIGHUP\fR signal to \fBksmbd.mountd\fR.
+Changes made with \fBksmbd.addshare\fR will never require restarting \fBksmbd.mountd\fR and \fBksmbd\fR to take effect.
 \fBksmbd.control --reload\fR can be used for notifying \fBksmbd.mountd\fR of changes when not using \fBksmbd.addshare\fR.
 \fBksmbd.conf\fR is expected to be at \fB@sysconfdir@/ksmbd/ksmbd.conf\fR by default. \" PATH_SMBCONF
 A configuration file that may serve as an example can be found at \fB@sysconfdir@/ksmbd/ksmbd.conf.example\fR.

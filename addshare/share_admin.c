@@ -25,8 +25,6 @@ static int conf_fd = -1;
 static char wbuf[16384];
 static size_t wsz;
 
-#define AUX_GROUP_PREFIX	"_a_u_x_grp_"
-
 static char *new_group_name(char *name)
 {
 	return g_strdup_printf("[%s]", name);
@@ -131,6 +129,31 @@ static void update_share_cb(gpointer key,
 	g_hash_table_insert(g, nk, nv);
 }
 
+static char **__get_options(GHashTable *kv, int is_global)
+{
+	GPtrArray *options = g_ptr_array_new();
+	enum KSMBD_SHARE_CONF c;
+
+	for (c = 0; c < KSMBD_SHARE_CONF_MAX; c++) {
+		const char *k = KSMBD_SHARE_CONF[c], *v = NULL, *pre;
+
+		if (is_global && KSMBD_SHARE_CONF_IS_GLOBAL(c) ||
+		    KSMBD_SHARE_CONF_IS_BROKEN(c))
+			pre = "; ";
+		else
+			pre = "";
+
+		if (kv)
+			v = g_hash_table_lookup(kv, k);
+		if (!v)
+			v = "";
+
+		gptrarray_printf(options, "%s%s = %s", pre, k, v);
+	}
+
+	return gptrarray_to_strv(options);
+}
+
 int command_add_share(char *smbconf, char *name, char **options)
 {
 	g_autofree char *new_name = NULL;
@@ -191,15 +214,22 @@ int command_update_share(char *smbconf, char *name, char **options)
 	return 0;
 }
 
-int command_del_share(char *smbconf, char *name, char **unused)
+int command_del_share(char *smbconf, char *name, char **options)
 {
 	struct smbconf_group *g;
-	(void)unused;
+	int is_global;
 
 	g = g_hash_table_lookup(parser.groups, name);
 	if (!g) {
 		pr_err("Share `%s' does not exist\n", name);
 		return -EINVAL;
+	}
+
+	is_global = g == parser.global;
+	if (is_global) {
+		g_strfreev(options);
+		options = __get_options(NULL, is_global);
+		return command_update_share(smbconf, name, options);
 	}
 
 	if (__open_smbconf(smbconf))
