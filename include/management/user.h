@@ -12,6 +12,8 @@
 #include <pwd.h>
 #include <glib.h>
 
+#include "linux/ksmbd_server.h"
+
 struct ksmbd_user {
 	char		*name;
 	char		*pass_b64;
@@ -29,14 +31,19 @@ struct ksmbd_user {
 	unsigned int	failed_login_count;
 };
 
-static inline void set_user_flag(struct ksmbd_user *user, int bit)
+static inline void set_user_flag(struct ksmbd_user *user, int flag)
 {
-	user->flags |= bit;
+	if (flag == KSMBD_USER_FLAG_INVALID)
+		user->flags = flag;
+	else
+		user->flags |= flag;
 }
 
-static inline int test_user_flag(struct ksmbd_user *user, int bit)
+static inline int test_user_flag(struct ksmbd_user *user, int flag)
 {
-	return user->flags & bit;
+	if (flag == KSMBD_USER_FLAG_INVALID)
+		return user->flags == flag;
+	return user->flags & flag;
 }
 
 struct ksmbd_user *get_ksmbd_user(struct ksmbd_user *user);
