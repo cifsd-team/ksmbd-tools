@@ -128,71 +128,6 @@ out:
 	return ret;
 }
 
-/*
- * Write to file safely; by using a tmp and atomic rename.
- * Avoids a corrupt file if the write would be interrupted due
- * to a power failure.
- */
-static int write_file_safe(char *path, char *buff, size_t length, int mode)
-{
-	int fd;
-	g_autofree char *path_tmp = g_strdup_printf("%s.tmp", path);
-
-	if (g_file_test(path_tmp, G_FILE_TEST_EXISTS))
-		unlink(path_tmp);
-
-	fd = open(path_tmp, O_CREAT | O_EXCL | O_WRONLY, mode);
-	if (fd < 0) {
-		pr_err("Can't create `%s': %m\n", path_tmp);
-		return -EINVAL;
-	}
-
-	if (write(fd, buff, length) == -1) {
-		pr_err("Can't write `%s': %m\n", path_tmp);
-		close(fd);
-		return -EINVAL;
-	}
-
-	fsync(fd);
-	close(fd);
-
-	if (rename(path_tmp, path) == -1) {
-		pr_err("Can't rename `%s' to `%s': %m\n", path_tmp, path);
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
-static int create_subauth_file(void)
-{
-	GRand *rnd = g_rand_new();
-	g_autofree char *subauth_buf = g_strdup_printf("%d:%d:%d\n", g_rand_int_range(rnd, 0, INT_MAX),
-		g_rand_int_range(rnd, 0, INT_MAX),
-		g_rand_int_range(rnd, 0, INT_MAX));
-
-	return write_file_safe(PATH_SUBAUTH, subauth_buf, strlen(subauth_buf),
-		S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
-}
-
-static int generate_sub_auth(void)
-{
-	int ret = -EINVAL;
-
-retry:
-	if (g_file_test(PATH_SUBAUTH, G_FILE_TEST_EXISTS))
-		ret = cp_parse_subauth();
-
-	if (ret) {
-		ret = create_subauth_file();
-		if (ret)
-			return ret;
-		goto retry;
-	}
-
-	return ret;
-}
-
 static void delete_lock_file(void)
 {
 	if (lock_fd == -1)
@@ -452,8 +387,8 @@ static int manager_process_init(void)
 		goto out;
 	}
 
-	if (generate_sub_auth())
-		pr_debug("Unable to generate subauth for domain SID: %m\n");
+	if (cp_parse_subauth())
+		pr_info("Unable to parse subauth file\n");
 
 	worker_pid = start_worker_process(worker_process_init);
 	if (worker_pid < 0)

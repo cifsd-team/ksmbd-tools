@@ -257,7 +257,7 @@ void gptrarray_printf(GPtrArray *gptrarray, const char *fmt, ...)
 	va_end(args);
 }
 
-int set_conf_contents(char *conf, char *contents)
+int set_conf_contents(const char *conf, char *contents)
 {
 	GError *error = NULL;
 	mode_t mask = umask(~(S_IRWXU | S_IRGRP));

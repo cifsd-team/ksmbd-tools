@@ -757,7 +757,24 @@ static int process_subauth_entry(char *entry)
 
 int cp_parse_subauth(void)
 {
-	return __mmap_parse_file(PATH_SUBAUTH, process_subauth_entry);
+	int ret;
+
+	ret = __mmap_parse_file(PATH_SUBAUTH, process_subauth_entry);
+	if (ret) {
+		g_autoptr(GRand) rand = g_rand_new();
+		g_autofree char *contents =
+			g_strdup_printf("%u:%u:%u\n",
+					g_rand_int(rand),
+					g_rand_int(rand),
+					g_rand_int(rand));
+
+		if (ret == -ENOENT)
+			ret = set_conf_contents(PATH_SUBAUTH, contents);
+
+		*strchr(contents, '\n') = 0x00;
+		add_subauth(contents);
+	}
+	return ret;
 }
 
 void cp_parse_external_smbconf_group(char *name, char **options)
