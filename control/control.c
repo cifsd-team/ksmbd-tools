@@ -63,9 +63,9 @@ static int ksmbd_control_shutdown(void)
 
 	ret = send_signal_to_ksmbd_mountd(SIGTERM);
 	if (ret)
-		pr_err("Failed to terminate ksmbd.mountd\n");
+		pr_err("Failed to terminate mountd\n");
 	else
-		pr_info("Terminated ksmbd.mountd\n");
+		pr_info("Terminated mountd\n");
 
 	fd = open(path, O_WRONLY);
 	if (fd < 0) {
@@ -94,9 +94,9 @@ static int ksmbd_control_reload(void)
 
 	ret = send_signal_to_ksmbd_mountd(SIGHUP);
 	if (ret)
-		pr_err("Failed to notify ksmbd.mountd of changes\n");
+		pr_err("Failed to notify mountd\n");
 	else
-		pr_info("Notified ksmbd.mountd of changes\n");
+		pr_info("Notified mountd\n");
 	return ret;
 }
 

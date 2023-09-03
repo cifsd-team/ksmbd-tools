@@ -193,8 +193,12 @@ int adduser_main(int argc, char **argv)
 
 	ret = command(pwddb, name, password);
 	pwddb = name = password = NULL;
-	if (!ret && send_signal_to_ksmbd_mountd(SIGHUP))
-		pr_debug("Unable to notify ksmbd.mountd of changes\n");
+	if (!ret) {
+		if (!send_signal_to_ksmbd_mountd(SIGHUP))
+			pr_info("Notified mountd\n");
+		else
+			pr_info("Unable to notify mountd\n");
+	}
 out:
 	shm_destroy();
 	usm_destroy();

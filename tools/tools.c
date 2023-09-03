@@ -314,7 +314,7 @@ int test_file_access(char *conf)
 
 	fd = open(conf, O_RDWR | O_CREAT, S_IRWXU | S_IRGRP);
 	if (fd < 0) {
-		pr_debug("Can't open `%s': %m\n", conf);
+		pr_debug("Can't access `%s': %m\n", conf);
 		return -EINVAL;
 	}
 
