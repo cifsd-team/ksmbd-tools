@@ -170,16 +170,8 @@ int addshare_main(int argc, char **argv)
 	if (!shm_share_name(name, strchr(name, 0x00)))
 		goto out;
 
-	if (!smbconf) {
+	if (!smbconf)
 		smbconf = g_strdup(PATH_SMBCONF);
-		if (!g_file_test(smbconf, G_FILE_TEST_EXISTS) &&
-		    g_file_test(PATH_SMBCONF_FALLBACK, G_FILE_TEST_EXISTS)) {
-			pr_err("Use of `%s' is deprecated, rename it to `%s' now!\n",
-					PATH_SMBCONF_FALLBACK, PATH_SMBCONF);
-			g_free(smbconf);
-			smbconf = g_strdup(PATH_SMBCONF_FALLBACK);
-		}
-	}
 
 	if (!pwddb)
 		pwddb = g_strdup(PATH_PWDDB);

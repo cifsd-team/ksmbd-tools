@@ -80,7 +80,6 @@ extern struct smbconf_global global_conf;
 
 #define PATH_PWDDB		SYSCONFDIR "/ksmbd/ksmbdpwd.db"
 #define PATH_SMBCONF		SYSCONFDIR "/ksmbd/ksmbd.conf"
-#define PATH_SMBCONF_FALLBACK	SYSCONFDIR "/ksmbd/smb.conf"
 #define PATH_SUBAUTH		SYSCONFDIR "/ksmbd/ksmbd.subauth"
 
 #define KSMBD_HEALTH_START		(0)
