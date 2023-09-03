@@ -123,6 +123,9 @@ sudo ksmbd.addshare --add-share=MyShare \
 # A share parameter given in `[global]' changes its default value.
 # `[global]' also has global parameters which are not share specific.
 
+# You can interactively update a share by omitting `--option'.
+sudo ksmbd.addshare --update-share=MyShare
+
 # Add a user to the default user database.
 # You will be prompted for a password.
 sudo ksmbd.adduser --add-user=MyUser

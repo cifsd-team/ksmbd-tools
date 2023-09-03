@@ -20,6 +20,7 @@
 #include "config_parser.h"
 #include "tools.h"
 #include "management/share.h"
+#include "management/user.h"
 #include "linux/ksmbd_server.h"
 #include "share_admin.h"
 #include "version.h"
@@ -27,8 +28,8 @@
 static void usage(int status)
 {
 	printf(
-		"Usage: ksmbd.addshare [-v] {-a SHARE | -u SHARE} [-c SMBCONF] {-o OPTION}...\n"
-		"       ksmbd.addshare [-v] {-d SHARE} [-c SMBCONF]\n"
+		"Usage: ksmbd.addshare [-v] {-a SHARE | -u SHARE} [-c SMBCONF] [-i PWDDB] [-o OPTION]...\n"
+		"       ksmbd.addshare [-v] {-d SHARE} [-c SMBCONF] [-i PWDDB]\n"
 		"       ksmbd.addshare {-V | -h}\n");
 
 	if (status != EXIT_SUCCESS)
@@ -38,16 +39,16 @@ static void usage(int status)
 			"\n"
 			"  -a, --add-share=SHARE       add SHARE to configuration file;\n"
 			"                              SHARE must be UTF-8 and [1, " STR(KSMBD_REQ_MAX_SHARE_NAME) ") bytes;\n"
-			"                              SHARE is case-insensitive;\n"
-			"                              initial parameters must be given with `--options'\n"
+			"                              SHARE is case-insensitive\n"
 			"  -d, --del-share=SHARE       delete SHARE from configuration file\n"
-			"  -u, --update-share=SHARE    update SHARE in configuration file;\n"
-			"                              updated parameters must be given with `--options'\n"
-			"  -o, --option=OPTION         use OPTION as parameter;\n"
+			"  -u, --update-share=SHARE    update SHARE in configuration file\n"
+			"  -o, --option=OPTION         use OPTION as parameter instead of prompting;\n"
 			"                              global parameters cannot be given;\n"
 			"                              this option can be given multiple times\n"
 			"  -c, --config=SMBCONF        use SMBCONF as configuration file instead of\n"
 			"                              `" PATH_SMBCONF "'\n"
+			"  -i, --import-users=PWDDB    use PWDDB as user database instead of\n"
+			"                              `" PATH_PWDDB "'\n"
 			"  -v, --verbose               be verbose\n"
 			"  -V, --version               output version information and exit\n"
 			"  -h, --help                  display this help and exit\n"
@@ -61,6 +62,7 @@ static const struct option opts[] = {
 	{"update-share",	required_argument,	NULL,	'u' },
 	{"option",		required_argument,	NULL,	'o' },
 	{"config",		required_argument,	NULL,	'c' },
+	{"import-users",	required_argument,	NULL,	'i' },
 	{"verbose",		no_argument,		NULL,	'v' },
 	{"version",		no_argument,		NULL,	'V' },
 	{"help",		no_argument,		NULL,	'h' },
@@ -73,7 +75,7 @@ static int show_version(void)
 	return 0;
 }
 
-static int parse_configs(char *smbconf)
+static int parse_configs(char *smbconf, char *pwddb)
 {
 	int ret;
 
@@ -83,8 +85,20 @@ static int parse_configs(char *smbconf)
 		return ret;
 	}
 
-	cp_init_smbconf_parser();
+	ret = cp_parse_pwddb(pwddb);
+	if (ret == -ENOENT) {
+		pr_info("User database does not exist, "
+			"cannot provide user completions\n");
+	} else if (ret) {
+		pr_err("Failed to parse user database\n");
+		return ret;
+	}
+
 	ret = cp_parse_smbconf(smbconf);
+	if (!ret) {
+		cp_init_smbconf_parser();
+		ret = cp_parse_smbconf(smbconf);
+	}
 	if (ret)
 		pr_err("Failed to parse configuration file\n");
 	return ret;
@@ -93,7 +107,7 @@ static int parse_configs(char *smbconf)
 int addshare_main(int argc, char **argv)
 {
 	int ret = -EINVAL;
-	g_autofree char *smbconf = NULL, *name = NULL;
+	g_autofree char *smbconf = NULL, *name = NULL, *pwddb = NULL;
 	g_auto(GStrv) options = NULL;
 	g_autoptr(GPtrArray) __options =
 		g_ptr_array_new_with_free_func(g_free);
@@ -102,7 +116,7 @@ int addshare_main(int argc, char **argv)
 
 	set_logger_app_name("ksmbd.addshare");
 
-	while ((c = getopt_long(argc, argv, "a:d:u:o:c:vVh", opts, NULL)) != EOF)
+	while ((c = getopt_long(argc, argv, "a:d:u:o:c:i:vVh", opts, NULL)) != EOF)
 		switch (c) {
 		case 'a':
 			g_free(name);
@@ -125,6 +139,10 @@ int addshare_main(int argc, char **argv)
 		case 'c':
 			g_free(smbconf);
 			smbconf = g_strdup(optarg);
+			break;
+		case 'i':
+			g_free(pwddb);
+			pwddb = g_strdup(optarg);
 			break;
 		case 'v':
 			set_log_level(PR_DEBUG);
@@ -152,12 +170,6 @@ int addshare_main(int argc, char **argv)
 	if (!shm_share_name(name, strchr(name, 0x00)))
 		goto out;
 
-	if ((command == command_add_share || command == command_update_share) &&
-	    !options) {
-		pr_err("No parameters given\n");
-		goto out;
-	}
-
 	if (!smbconf) {
 		smbconf = g_strdup(PATH_SMBCONF);
 		if (!g_file_test(smbconf, G_FILE_TEST_EXISTS) &&
@@ -169,7 +181,22 @@ int addshare_main(int argc, char **argv)
 		}
 	}
 
-	ret = parse_configs(smbconf);
+	if (!pwddb)
+		pwddb = g_strdup(PATH_PWDDB);
+
+	ret = usm_init();
+	if (ret) {
+		pr_err("Failed to init user management\n");
+		goto out;
+	}
+
+	ret = shm_init();
+	if (ret) {
+		pr_err("Failed to init share management\n");
+		goto out;
+	}
+
+	ret = parse_configs(smbconf, pwddb);
 	if (ret)
 		goto out;
 
@@ -182,5 +209,7 @@ int addshare_main(int argc, char **argv)
 
 out:
 	cp_release_smbconf_parser();
+	shm_destroy();
+	usm_destroy();
 	return ret ? EXIT_FAILURE : EXIT_SUCCESS;
 }

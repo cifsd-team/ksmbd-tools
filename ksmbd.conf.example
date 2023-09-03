@@ -49,12 +49,12 @@
 	oplocks = yes
 	path = 
 	read list = 
+	read only = yes
 	store dos attributes = yes
 	valid users = 
 	veto files = 
 	vfs objects = 
 	write list = 
-	writeable = no
 
 [example]
 	; share parameters
