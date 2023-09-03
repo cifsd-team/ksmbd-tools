@@ -31,7 +31,7 @@ static void kill_ksmbd_user(struct ksmbd_user *user)
 	g_free(user);
 }
 
-static int __usm_remove_user(struct ksmbd_user *user)
+int usm_remove_user(struct ksmbd_user *user)
 {
 	int ret = 0;
 
@@ -74,7 +74,7 @@ void put_ksmbd_user(struct ksmbd_user *user)
 	if (!drop)
 		return;
 
-	__usm_remove_user(user);
+	usm_remove_user(user);
 }
 
 static gboolean put_user_callback(gpointer _k, gpointer _v, gpointer data)
@@ -259,10 +259,10 @@ void for_each_ksmbd_user(walk_users cb, gpointer user_data)
 	g_rw_lock_reader_unlock(&users_table_lock);
 }
 
-void usm_update_user_password(struct ksmbd_user *user, char *pswd)
+void usm_update_user_password(struct ksmbd_user *user, char *pwd)
 {
 	size_t pass_sz;
-	char *pass_b64 = g_strdup(pswd);
+	char *pass_b64 = g_strdup(pwd);
 	char *pass = base64_decode(pass_b64, &pass_sz);
 
 	pr_debug("Update user password: %s\n", user->name);

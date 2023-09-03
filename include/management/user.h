@@ -46,6 +46,7 @@ static inline int test_user_flag(struct ksmbd_user *user, int flag)
 	return user->flags & flag;
 }
 
+int usm_remove_user(struct ksmbd_user *user);
 struct ksmbd_user *get_ksmbd_user(struct ksmbd_user *user);
 void put_ksmbd_user(struct ksmbd_user *user);
 

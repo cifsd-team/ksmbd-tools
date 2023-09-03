@@ -104,8 +104,8 @@ static int parse_configs(char *pwddb, char *smbconf)
 int adduser_main(int argc, char **argv)
 {
 	int ret = -EINVAL;
-	char *pwddb = NULL, *name = NULL, *password = NULL;
-	char *smbconf = NULL;
+	g_autofree char *pwddb = NULL, *name = NULL, *password = NULL;
+	g_autofree char *smbconf = NULL;
 	command_fn *command = NULL;
 	int c;
 
@@ -195,6 +195,7 @@ int adduser_main(int argc, char **argv)
 
 	if (command) {
 		ret = command(pwddb, name, password);
+		pwddb = name = password = NULL;
 		if (!ret && send_signal_to_ksmbd_mountd(SIGHUP))
 			pr_debug("Unable to notify ksmbd.mountd of changes\n");
 	}
