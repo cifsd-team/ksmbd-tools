@@ -28,41 +28,40 @@
 static void usage(int status)
 {
 	printf(
-		"Usage: ksmbd.addshare [-v] {-a SHARE | -u SHARE} [-c SMBCONF] [-i PWDDB] [-o OPTION]...\n"
-		"       ksmbd.addshare [-v] {-d SHARE} [-c SMBCONF] [-i PWDDB]\n"
-		"       ksmbd.addshare {-V | -h}\n");
+		"Usage: ksmbd.addshare [-v] [-C CONF] [-P PWDDB] [-a | -u | -d] [-o OPT]... SHARE\n");
 
 	if (status != EXIT_SUCCESS)
 		printf("Try `ksmbd.addshare --help' for more information.\n");
 	else
 		printf(
 			"\n"
-			"  -a, --add-share=SHARE       add SHARE to configuration file;\n"
-			"                              SHARE must be UTF-8 and [1, " STR(KSMBD_REQ_MAX_SHARE_NAME) ") bytes;\n"
-			"                              SHARE is case-insensitive\n"
-			"  -d, --del-share=SHARE       delete SHARE from configuration file\n"
-			"  -u, --update-share=SHARE    update SHARE in configuration file\n"
-			"  -o, --option=OPTION         use OPTION as parameter instead of prompting;\n"
-			"                              global parameters cannot be given;\n"
-			"                              this option can be given multiple times\n"
-			"  -c, --config=SMBCONF        use SMBCONF as configuration file instead of\n"
-			"                              `" PATH_SMBCONF "'\n"
-			"  -i, --import-users=PWDDB    use PWDDB as user database instead of\n"
-			"                              `" PATH_PWDDB "'\n"
-			"  -v, --verbose               be verbose\n"
-			"  -V, --version               output version information and exit\n"
-			"  -h, --help                  display this help and exit\n"
+			"If neither `-a', `-u', nor `-d' is given, either add or update SHARE.\n"
+			"SHARE must be UTF-8 and [1, " STR(KSMBD_REQ_MAX_SHARE_NAME) ") bytes.\n"
+			"SHARE is case-insensitive.\n"
+			"\n"
+			"  -a, --add            add SHARE to configuration file\n"
+			"  -u, --update         update SHARE in configuration file\n"
+			"  -d, --delete         delete SHARE from configuration file\n"
+			"  -o, --option=OPT     use OPT as share parameter instead of prompting;\n"
+			"                       this option can be given multiple times\n"
+			"  -C, --config=CONF    use CONF as configuration file instead of\n"
+			"                       `" PATH_SMBCONF "'\n"
+			"  -P, --pwddb=PWDDB    use PWDDB as user database instead of\n"
+			"                       `" PATH_PWDDB "'\n"
+			"  -v, --verbose        be verbose\n"
+			"  -V, --version        output version information and exit\n"
+			"  -h, --help           display this help and exit\n"
 			"\n"
 			"See ksmbd.addshare(8) for more details.\n");
 }
 
 static const struct option opts[] = {
-	{"add-share",		required_argument,	NULL,	'a' },
-	{"del-share",		required_argument,	NULL,	'd' },
-	{"update-share",	required_argument,	NULL,	'u' },
+	{"add",			no_argument,		NULL,	'a' },
+	{"update",		no_argument,		NULL,	'u' },
+	{"delete",		no_argument,		NULL,	'd' },
 	{"option",		required_argument,	NULL,	'o' },
-	{"config",		required_argument,	NULL,	'c' },
-	{"import-users",	required_argument,	NULL,	'i' },
+	{"config",		required_argument,	NULL,	'C' },
+	{"pwddb",		required_argument,	NULL,	'P' },
 	{"verbose",		no_argument,		NULL,	'v' },
 	{"version",		no_argument,		NULL,	'V' },
 	{"help",		no_argument,		NULL,	'h' },
@@ -116,31 +115,25 @@ int addshare_main(int argc, char **argv)
 
 	set_logger_app_name("ksmbd.addshare");
 
-	while ((c = getopt_long(argc, argv, "a:d:u:o:c:i:vVh", opts, NULL)) != EOF)
+	while ((c = getopt_long(argc, argv, "audo:C:P:vVh", opts, NULL)) != EOF)
 		switch (c) {
 		case 'a':
-			g_free(name);
-			name = g_strdup(optarg);
 			command = command_add_share;
 			break;
-		case 'd':
-			g_free(name);
-			name = g_strdup(optarg);
-			command = command_del_share;
-			break;
 		case 'u':
-			g_free(name);
-			name = g_strdup(optarg);
 			command = command_update_share;
+			break;
+		case 'd':
+			command = command_delete_share;
 			break;
 		case 'o':
 			gptrarray_printf(__options, "%s", optarg);
 			break;
-		case 'c':
+		case 'C':
 			g_free(smbconf);
 			smbconf = g_strdup(optarg);
 			break;
-		case 'i':
+		case 'P':
 			g_free(pwddb);
 			pwddb = g_strdup(optarg);
 			break;
@@ -162,7 +155,9 @@ int addshare_main(int argc, char **argv)
 	options = gptrarray_to_strv(__options);
 	__options = NULL;
 
-	if (argc < 2 || argc > optind || !name) {
+	if (optind == argc - 1) {
+		name = g_strdup(argv[optind]);
+	} else {
 		usage(ret ? EXIT_FAILURE : EXIT_SUCCESS);
 		goto out;
 	}
@@ -192,13 +187,17 @@ int addshare_main(int argc, char **argv)
 	if (ret)
 		goto out;
 
-	if (command) {
-		ret = command(smbconf, name, options);
-		smbconf = name = (char *)(options = NULL);
-		if (!ret && send_signal_to_ksmbd_mountd(SIGHUP))
-			pr_debug("Unable to notify ksmbd.mountd of changes\n");
+	if (!command) {
+		if (g_hash_table_lookup(parser.groups, name))
+			command = command_update_share;
+		else
+			command = command_add_share;
 	}
 
+	ret = command(smbconf, name, options);
+	smbconf = name = (char *)(options = NULL);
+	if (!ret && send_signal_to_ksmbd_mountd(SIGHUP))
+		pr_debug("Unable to notify ksmbd.mountd of changes\n");
 out:
 	cp_release_smbconf_parser();
 	shm_destroy();

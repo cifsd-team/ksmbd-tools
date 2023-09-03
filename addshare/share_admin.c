@@ -677,7 +677,7 @@ out:
 	return ret;
 }
 
-int command_del_share(char *smbconf, char *name, char **options)
+int command_delete_share(char *smbconf, char *name, char **options)
 {
 	g_autofree char *contents = NULL;
 	struct smbconf_group *g;

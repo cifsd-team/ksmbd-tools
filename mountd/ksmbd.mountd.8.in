@@ -3,10 +3,7 @@
 ksmbd.mountd \- start ksmbd.mountd and ksmbd daemons
 .SH SYNOPSIS
 .B ksmbd.mountd
-[-v] [-p \fI\,PORT\/\fR] [-c \fI\,SMBCONF\/\fR] [-u \fI\,PWDDB\/\fR] [-n[\fI\,WAY\/\fR]]
-.br
-.B ksmbd.mountd
-{-V | -h}
+[-v] [-p \fI\,PORT\/\fR] [-n[\fI\,WAY\/\fR]] [-C \fI\,CONF\/\fR] [-P \fI\,PWDDB\/\fR]
 .SH DESCRIPTION
 \fBksmbd.mountd\fR starts \fBksmbd.mountd\fR user mode and \fBksmbd\fR kernel mode daemons.
 \fBksmbd.mountd\fR has to parse \fBksmbd.conf\fP(5) configuration file in order to start.
@@ -16,16 +13,16 @@ ksmbd.mountd \- start ksmbd.mountd and ksmbd daemons
 \fB\-p\fR, \fB\-\-port\fR=\fI\,PORT\/\fR
 Bind to \fI\,PORT\/\fR instead of TCP port \fB445\fR.
 .TP
-\fB\-c\fR, \fB\-\-config\fR=\fI\,SMBCONF\/\fR
-Use \fI\,SMBCONF\/\fR as configuration file instead of \fB@sysconfdir@/ksmbd/ksmbd.conf\fR. \" PATH_SMBCONF
-.TP
-\fB\-u\fR, \fB\-\-users\fR=\fI\,PWDDB\/\fR
-Use \fI\,PWDDB\/\fR as user database instead of \fB@sysconfdir@/ksmbd/ksmbdpwd.db\fR. \" PATH_PWDDB
-.TP
 \fB\-n\fR, \fB\-\-nodetach\fR[=\fI\,WAY\/\fR]
 Do not detach process from foreground.
 If \fI\,WAY\/\fR is \fB1\fR, become process group leader (default).
 If \fI\,WAY\/\fR is \fB0\fR, detach.
+.TP
+\fB\-C\fR, \fB\-\-config\fR=\fI\,CONF\/\fR
+Use \fI\,CONF\/\fR as configuration file instead of \fB@sysconfdir@/ksmbd/ksmbd.conf\fR. \" PATH_SMBCONF
+.TP
+\fB\-P\fR, \fB\-\-pwddb\fR=\fI\,PWDDB\/\fR
+Use \fI\,PWDDB\/\fR as user database instead of \fB@sysconfdir@/ksmbd/ksmbdpwd.db\fR. \" PATH_PWDDB
 .TP
 \fB\-v\fR, \fB\-\-verbose\fR
 Be verbose.

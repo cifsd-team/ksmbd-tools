@@ -41,8 +41,7 @@ typedef int (*worker_fn)(void);
 static void usage(int status)
 {
 	printf(
-		"Usage: ksmbd.mountd [-v] [-p PORT] [-c SMBCONF] [-u PWDDB] [-n[WAY]]\n"
-		"       ksmbd.mountd {-V | -h}\n");
+		"Usage: ksmbd.mountd [-v] [-p PORT] [-n[WAY]] [-C CONF] [-P PWDDB]\n");
 
 	if (status != EXIT_SUCCESS)
 		printf("Try `ksmbd.mountd --help' for more information.\n");
@@ -50,13 +49,13 @@ static void usage(int status)
 		printf(
 			"\n"
 			"  -p, --port=PORT         bind to PORT instead of TCP port 445\n"
-			"  -c, --config=SMBCONF    use SMBCONF as configuration file instead of\n"
-			"                          `" PATH_SMBCONF "'\n"
-			"  -u, --users=PWDDB       use PWDDB as user database instead of\n"
-			"                          `" PATH_PWDDB "'\n"
 			"  -n, --nodetach[=WAY]    do not detach process from foreground;\n"
 			"                          if WAY is 1, become process group leader (default);\n"
 			"                          if WAY is 0, detach\n"
+			"  -C, --config=CONF       use CONF as configuration file instead of\n"
+			"                          `" PATH_SMBCONF "'\n"
+			"  -P, --pwddb=PWDDB       use PWDDB as user database instead of\n"
+			"                          `" PATH_PWDDB "'\n"
 			"  -v, --verbose           be verbose\n"
 			"  -V, --version           output version information and exit\n"
 			"  -h, --help              display this help and exit\n"
@@ -66,9 +65,9 @@ static void usage(int status)
 
 static struct option opts[] = {
 	{"port",	required_argument,	NULL,	'p' },
-	{"config",	required_argument,	NULL,	'c' },
-	{"users",	required_argument,	NULL,	'u' },
 	{"nodetach",	optional_argument,	NULL,	'n' },
+	{"config",	required_argument,	NULL,	'C' },
+	{"pwddb",	required_argument,	NULL,	'P' },
 	{"verbose",	no_argument,		NULL,	'v' },
 	{"version",	no_argument,		NULL,	'V' },
 	{"help",	no_argument,		NULL,	'h' },
@@ -442,25 +441,25 @@ int mountd_main(int argc, char **argv)
 	set_logger_app_name("ksmbd.mountd");
 
 	memset(&global_conf, 0x00, sizeof(struct smbconf_global));
-	while ((c = getopt_long(argc, argv, "p:c:u:n::vVh", opts, NULL)) != EOF)
+	while ((c = getopt_long(argc, argv, "p:n::C:P:vVh", opts, NULL)) != EOF)
 		switch (c) {
 		case 'p':
 			pr_debug("TCP port option override\n");
 			global_conf.tcp_port = cp_get_group_kv_long(optarg);
-			break;
-		case 'c':
-			g_free(global_conf.smbconf);
-			global_conf.smbconf = g_strdup(optarg);
-			break;
-		case 'u':
-			g_free(global_conf.pwddb);
-			global_conf.pwddb = g_strdup(optarg);
 			break;
 		case 'n':
 			if (!optarg)
 				no_detach = 1;
 			else
 				no_detach = cp_get_group_kv_long(optarg);
+			break;
+		case 'C':
+			g_free(global_conf.smbconf);
+			global_conf.smbconf = g_strdup(optarg);
+			break;
+		case 'P':
+			g_free(global_conf.pwddb);
+			global_conf.pwddb = g_strdup(optarg);
 			break;
 		case 'v':
 			set_log_level(PR_DEBUG);

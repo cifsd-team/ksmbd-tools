@@ -3,40 +3,35 @@
 ksmbd.adduser \- configure users for ksmbdpwd.db of ksmbd.mountd
 .SH SYNOPSIS
 .B ksmbd.adduser
-[-v] {-a \fI\,USER\/\fR | -u \fI\,USER\/\fR} [-p \fI\,PWD\/\fR] [-i \fI\,PWDDB\/\fR] [-c \fI\,SMBCONF\/\fR]
-.br
-.B ksmbd.adduser
-[-v] {-d \fI\,USER\/\fR} [-i \fI\,PWDDB\/\fR] [-c \fI\,SMBCONF\/\fR]
-.br
-.B ksmbd.adduser
-{-V | -h}
+[-v] [-P \fI\,PWDDB\/\fR] [-C \fI\,CONF\/\fR] [-a | -u | -d] [-p \fI\,PWD\/\fR] \fI\,USER\/\fR
 .SH DESCRIPTION
 \fBksmbd.adduser\fR configures users for \fBksmbdpwd.db\fP(5) user database of \fBksmbd.mountd\fP(8) user mode daemon.
 \fBksmbd.adduser\fR can parse \fBksmbd.conf\fP(5) configuration file so as to guard against deletion of users that are depended on.
 \fBksmbd.adduser\fR notifies \fBksmbd.mountd\fR of changes if it had made any.
 .SH OPTIONS
-.TP
-\fB\-a\fR, \fB\-\-add-user\fR=\fI\,USER\/\fR
-Add \fI\,USER\/\fR to user database.
+.PP
+If neither \fB-a\fR, \fB-u\fR, nor \fB-d\fR is given, either add or update \fI\,USER\/\fR.
 \fI\,USER\/\fR must be UTF-8 and [1, 48) bytes. \" KSMBD_REQ_MAX_ACCOUNT_NAME_SZ
 \fI\,USER\/\fR cannot contain colon (\fB:\fR).
 .TP
-\fB\-d\fR, \fB\-\-del-user\fR=\fI\,USER\/\fR
-Delete \fI\,USER\/\fR from user database.
+\fB\-a\fR, \fB\-\-add\/\fR
+Add \fI\,USER\/\fR to user database.
 .TP
-\fB\-u\fR, \fB\-\-update-user\fR=\fI\,USER\/\fR
+\fB\-u\fR, \fB\-\-update\/\fR
 Update \fI\,USER\/\fR in user database.
+.TP
+\fB\-d\fR, \fB\-\-delete\/\fR
+Delete \fI\,USER\/\fR from user database.
 .TP
 \fB\-p\fR, \fB\-\-password\fR=\fI\,PWD\/\fR
 Use \fI\,PWD\/\fR as user password instead of prompting.
 \fI\,PWD\/\fR must be UTF-8 and [0, 129) bytes. \" MAX_NT_PWD_LEN
 .TP
-\fB\-i\fR, \fB\-\-import-users\fR=\fI\,PWDDB\/\fR
+\fB\-P\fR, \fB\-\-pwddb\fR=\fI\,PWDDB\/\fR
 Use \fI\,PWDDB\/\fR as user database instead of \fB@sysconfdir@/ksmbd/ksmbdpwd.db\fR. \" PATH_PWDDB
-This option does nothing by itself.
 .TP
-\fB\-c\fR, \fB\-\-config\fR=\fI\,SMBCONF\/\fR
-Use \fI\,SMBCONF\/\fR as configuration file instead of \fB@sysconfdir@/ksmbd/ksmbd.conf\fR. \" PATH_SMBCONF
+\fB\-C\fR, \fB\-\-config\fR=\fI\,CONF\/\fR
+Use \fI\,CONF\/\fR as configuration file instead of \fB@sysconfdir@/ksmbd/ksmbd.conf\fR. \" PATH_SMBCONF
 .TP
 \fB\-v\fR, \fB\-\-verbose\fR
 Be verbose.

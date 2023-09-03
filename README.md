@@ -108,9 +108,11 @@ mkdir -vp $HOME/MyShare
 
 # Add a share to the default configuration file.
 # Note that `ksmbd.addshare' does not do variable expansion.
-sudo ksmbd.addshare --add-share=MyShare \
-                    --option="path = $HOME/MyShare" \
-                    --option='read only = no'
+# Without `--add', `ksmbd.addshare' will update `MyShare' if it exists.
+sudo ksmbd.addshare --add \
+                    --option "path = $HOME/MyShare" \
+                    --option 'read only = no' \
+                    MyShare
 
 # The default configuration file now has a new section for `MyShare'.
 #
@@ -124,19 +126,21 @@ sudo ksmbd.addshare --add-share=MyShare \
 # `[global]' also has global parameters which are not share specific.
 
 # You can interactively update a share by omitting `--option'.
-sudo ksmbd.addshare --update-share=MyShare
+# Without `--update', `ksmbd.addshare' will add `MyShare' if it does not exist.
+sudo ksmbd.addshare --update MyShare
 
 # Add a user to the default user database.
 # You will be prompted for a password.
-sudo ksmbd.adduser --add-user=MyUser
+sudo ksmbd.adduser --add MyUser
 
 # There is no system user called `MyUser' so it has to be mapped to one.
 # We can force all users accessing the share to map to a system user and group.
 
 # Update share parameters of a share in the default configuration file.
-sudo ksmbd.addshare --update-share=MyShare \
-                    --option="force user = $USER" \
-                    --option="force group = $USER"
+sudo ksmbd.addshare --update \
+                    --option "force user = $USER" \
+                    --option "force group = $USER" \
+                    MyShare
 
 # The default configuration file now has the updated share parameters.
 #
@@ -167,17 +171,17 @@ sudo umount /mnt
 
 # Update the password of a user in the default user database.
 # `--password' can be used to give the password instead of prompting.
-sudo ksmbd.adduser --update-user=MyUser --password=MyNewPassword
+sudo ksmbd.adduser --update --password MyNewPassword MyUser
 
 # Delete a user from the default user database.
-sudo ksmbd.adduser --del-user=MyUser
+sudo ksmbd.adduser --delete MyUser
 
 # The utilities notify ksmbd.mountd of changes by sending it the SIGHUP signal.
 # This can be done manually when changes are made without using the utilities.
 sudo ksmbd.control --reload
 
 # Toggle ksmbd debug printing of the `smb' component.
-sudo ksmbd.control --debug=smb
+sudo ksmbd.control --debug smb
 
 # Some changes require restarting the user and kernel mode daemons.
 # Modifying any global parameter is one example of such a change.

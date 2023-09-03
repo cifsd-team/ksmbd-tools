@@ -331,7 +331,7 @@ out:
 	return is_transient;
 }
 
-int command_del_user(char *pwddb, char *name, char *password)
+int command_delete_user(char *pwddb, char *name, char *password)
 {
 	g_autofree char *contents = NULL;
 	struct ksmbd_user *user;

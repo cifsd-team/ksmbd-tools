@@ -15,8 +15,10 @@
 static void usage(int status)
 {
 	printf(
-		"Usage: ksmbd.control [-v] {-s | -r | -d COMPONENT | -c}\n"
-		"       ksmbd.control {-V | -h}\n");
+		"Usage: ksmbd.control [-v] -s\n"
+		"       ksmbd.control [-v] -r\n"
+		"       ksmbd.control [-v] -d COMPONENT\n"
+		"       ksmbd.control [-v] -c\n");
 
 	if (status != EXIT_SUCCESS)
 		printf("Try `ksmbd.control --help' for more information.\n");

@@ -3,13 +3,7 @@
 ksmbd.addshare \- configure shares for ksmbd.conf of ksmbd.mountd
 .SH SYNOPSIS
 .B ksmbd.addshare
-[-v] {-a \fI\,SHARE\/\fR | -u \fI\,SHARE\/\fR} [-c \fI\,SMBCONF\/\fR] [-i \fI\,PWDDB\/\fR] [-o \fI\,OPTION\/\fR]...
-.br
-.B ksmbd.addshare
-[-v] {-d \fI\,SHARE\/\fR} [-c \fI\,SMBCONF\/\fR] [-i \fI\,PWDDB\/\fR]
-.br
-.B ksmbd.addshare
-{-V | -h}
+[-v] [-C \fI\,CONF\/\fR] [-P \fI\,PWDDB\/\fR] [-a | -u | -d] [-o \fI\,OPT\/\fR]... \fI\,SHARE\/\fR
 .SH DESCRIPTION
 \fBksmbd.addshare\fR configures shares for \fBksmbd.conf\fP(5) configuration file of \fBksmbd.mountd\fP(8) user mode daemon.
 \fBksmbd.addshare\fR modifies \fBksmbd.conf\fR such that its existing formatting is not retained.
@@ -17,27 +11,28 @@ ksmbd.addshare \- configure shares for ksmbd.conf of ksmbd.mountd
 \fBksmbd.addshare\fR notifies \fBksmbd.mountd\fR of changes if it had made any.
 \fBksmbd.addshare\fR will only make changes that do not require restarting \fBksmbd.mountd\fR and \fBksmbd\fR to take effect.
 .SH OPTIONS
-.TP
-\fB\-a\fR, \fB\-\-add-share\fR=\fI\,SHARE\/\fR
-Add \fI\,SHARE\/\fR to configuration file.
+.PP
+If neither \fB-a\fR, \fB-u\fR, nor \fB-d\fR is given, either add or update \fI\,SHARE\/\fR.
 \fI\,SHARE\/\fR must be UTF-8 and [1, 64) bytes. \" KSMBD_REQ_MAX_SHARE_NAME
 \fI\,SHARE\/\fR is case-insensitive.
 .TP
-\fB\-d\fR, \fB\-\-del-share\fR=\fI\,SHARE\/\fR
-Delete \fI\,SHARE\/\fR from configuration file.
+\fB\-a\fR, \fB\-\-add\/\fR
+Add \fI\,SHARE\/\fR to configuration file.
 .TP
-\fB\-u\fR, \fB\-\-update-share\fR=\fI\,SHARE\/\fR
+\fB\-u\fR, \fB\-\-update\/\fR
 Update \fI\,SHARE\/\fR in configuration file.
 .TP
-\fB\-o\fR, \fB\-\-option\fR=\fI\,OPTION\/\fR
-Use \fI\,OPTION\/\fR as parameter instead of prompting.
-Global parameters cannot be given.
+\fB\-d\fR, \fB\-\-delete\/\fR
+Delete \fI\,SHARE\/\fR from configuration file.
+.TP
+\fB\-o\fR, \fB\-\-option\fR=\fI\,OPT\/\fR
+Use \fI\,OPT\/\fR as share parameter instead of prompting.
 This option can be given multiple times.
 .TP
-\fB\-c\fR, \fB\-\-config\fR=\fI\,SMBCONF\/\fR
-Use \fI\,SMBCONF\/\fR as configuration file instead of \fB@sysconfdir@/ksmbd/ksmbd.conf\fR. \" PATH_SMBCONF
+\fB\-C\fR, \fB\-\-config\fR=\fI\,CONF\/\fR
+Use \fI\,CONF\/\fR as configuration file instead of \fB@sysconfdir@/ksmbd/ksmbd.conf\fR. \" PATH_SMBCONF
 .TP
-\fB\-i\fR, \fB\-\-import-users\fR=\fI\,PWDDB\/\fR
+\fB\-P\fR, \fB\-\-pwddb\fR=\fI\,PWDDB\/\fR
 Use \fI\,PWDDB\/\fR as user database instead of \fB@sysconfdir@/ksmbd/ksmbdpwd.db\fR. \" PATH_PWDDB
 .TP
 \fB\-v\fR, \fB\-\-verbose\fR

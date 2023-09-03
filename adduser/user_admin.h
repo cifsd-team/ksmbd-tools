@@ -12,6 +12,6 @@
 
 typedef int command_fn(char *pwddb, char *name, char *password);
 
-command_fn command_add_user, command_update_user, command_del_user;
+command_fn command_add_user, command_update_user, command_delete_user;
 
 #endif /* __KSMBD_USER_ADMIN_H__ */

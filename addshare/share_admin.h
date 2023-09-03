@@ -10,6 +10,6 @@
 
 typedef int command_fn(char *smbconf, char *name, char **options);
 
-command_fn command_add_share, command_update_share, command_del_share;
+command_fn command_add_share, command_update_share, command_delete_share;
 
 #endif /* __KSMBD_SHARE_ADMIN_H__ */
