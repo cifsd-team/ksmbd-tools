@@ -257,6 +257,22 @@ void gptrarray_printf(GPtrArray *gptrarray, const char *fmt, ...)
 	va_end(args);
 }
 
+int set_conf_contents(char *conf, char *contents)
+{
+	GError *error = NULL;
+	mode_t mask = umask(~(S_IRWXU | S_IRGRP));
+
+	g_file_set_contents(conf, contents, -1, &error);
+	umask(mask);
+	if (error) {
+		pr_err("%s\n", error->message);
+		g_error_free(error);
+		return -EINVAL;
+	}
+	pr_info("Wrote `%s'\n", conf);
+	return 0;
+}
+
 int send_signal_to_ksmbd_mountd(int signo)
 {
 	int fd, ret = -EINVAL;

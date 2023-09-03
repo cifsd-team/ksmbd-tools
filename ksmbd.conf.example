@@ -1,7 +1,7 @@
 ; see ksmbd.conf(5) for details
 
 [global]
-	; global section parameters
+	; global parameters
 	bind interfaces only = no
 	deadtime = 0
 	guest account = nobody
@@ -32,10 +32,11 @@
 	tcp port = 445
 	workgroup = WORKGROUP
 
-	; share parameters for all sections
+	; default share parameters
 	browseable = yes
 	comment = 
 	create mask = 0744
+	crossmnt = yes
 	directory mask = 0755
 	force create mode = 0000
 	force directory mode = 0000
@@ -54,9 +55,8 @@
 	vfs objects = 
 	write list = 
 	writeable = no
-	crossmnt = yes
 
 [example]
-	; share parameter overrides for `example' share
+	; share parameters
 	comment = read only /tmp access
 	path = /tmp

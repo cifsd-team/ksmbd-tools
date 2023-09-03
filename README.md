@@ -114,7 +114,8 @@ sudo ksmbd.addshare --add-share=MyShare \
 
 # The default configuration file now has a new section for `MyShare'.
 #
-# [myshare]
+# [MyShare]
+#         ; share parameters
 #         path = /home/tester/MyShare
 #         read only = no
 #
@@ -136,10 +137,11 @@ sudo ksmbd.addshare --update-share=MyShare \
 
 # The default configuration file now has the updated share parameters.
 #
-# [myshare]
+# [MyShare]
+#         ; share parameters
+#         force group = tester
 #         force user = tester
 #         path = /home/tester/MyShare
-#         force group = tester
 #         read only = no
 #
 

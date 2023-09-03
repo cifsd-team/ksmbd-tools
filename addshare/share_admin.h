@@ -8,8 +8,6 @@
 #ifndef __KSMBD_SHARE_ADMIN_H__
 #define __KSMBD_SHARE_ADMIN_H__
 
-#define AUX_GROUP_PREFIX	"_a_u_x_grp_"
-
 typedef int command_fn(char *smbconf, char *name, char **options);
 
 command_fn command_add_share, command_update_share, command_del_share;

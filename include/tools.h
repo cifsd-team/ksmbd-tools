@@ -163,6 +163,7 @@ extern char *ksmbd_conv_charsets[KSMBD_CHARSET_MAX + 1];
 char **gptrarray_to_strv(GPtrArray *gptrarray);
 char *gptrarray_to_str(GPtrArray *gptrarray);
 void gptrarray_printf(GPtrArray *gptrarray, const char *fmt, ...);
+int set_conf_contents(char *conf, char *contents);
 
 int send_signal_to_ksmbd_mountd(int signo);
 int test_file_access(char *conf);

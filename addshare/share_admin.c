@@ -21,114 +21,6 @@
 #include <linux/ksmbd_server.h>
 #include <share_admin.h>
 
-static int conf_fd = -1;
-static char wbuf[16384];
-static size_t wsz;
-
-static char *new_group_name(char *name)
-{
-	return g_strdup_printf("[%s]", name);
-}
-
-static char *aux_group_name(char *name)
-{
-	return g_strdup_printf("[%s%s]", AUX_GROUP_PREFIX, name);
-}
-
-static int __open_smbconf(char *smbconf)
-{
-	conf_fd = open(smbconf, O_WRONLY);
-	if (conf_fd == -1) {
-		pr_err("Can't open `%s': %m\n", smbconf);
-		return -EINVAL;
-	}
-
-	if (ftruncate(conf_fd, 0) == -1) {
-		pr_err("Can't truncate `%s': %m\n", smbconf);
-		close(conf_fd);
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
-static void __write(void)
-{
-	int nr = 0;
-	int ret;
-
-	while (wsz && (ret = write(conf_fd, wbuf + nr, wsz)) != 0) {
-		if (ret == -1) {
-			if (errno == EINTR)
-				continue;
-			pr_err("Failed to write share entry: %m\n");
-			exit(EXIT_FAILURE);
-		}
-
-		nr += ret;
-		wsz -= ret;
-	}
-}
-
-static void __write_share(gpointer key, gpointer value, gpointer buf)
-{
-	char *k = (char *)key;
-	char *v = (char *)value;
-
-	wsz = snprintf(wbuf, sizeof(wbuf), "\t%s = %s\n", k, v);
-	if (wsz > sizeof(wbuf)) {
-		pr_err("Share entry size is above limit: %zu > %zu\n",
-		       wsz, sizeof(wbuf));
-		exit(EXIT_FAILURE);
-	}
-	__write();
-}
-
-static void write_share(struct smbconf_group *g)
-{
-	wsz = snprintf(wbuf, sizeof(wbuf), "[%s]\n", g->name);
-	__write();
-	g_hash_table_foreach(g->kv, __write_share, NULL);
-}
-
-static void write_share_cb(gpointer key, gpointer value, gpointer share_data)
-{
-	struct smbconf_group *g = (struct smbconf_group *)value;
-
-	/*
-	 * Do not write AUX group
-	 */
-	if (!strstr(g->name, AUX_GROUP_PREFIX))
-		write_share(g);
-}
-
-static void write_remove_share_cb(gpointer key,
-				  gpointer value,
-				  gpointer name)
-{
-	struct smbconf_group *g = (struct smbconf_group *)value;
-
-	if (shm_share_name_equal(g->name, name)) {
-		pr_info("Share `%s' removed\n", (char *)name);
-		return;
-	}
-
-	write_share(g);
-}
-
-static void update_share_cb(gpointer key,
-			    gpointer value,
-			    gpointer g)
-{
-	char *nk, *nv;
-
-	nk = g_strdup(key);
-	nv = g_strdup(value);
-
-	/* This will call .dtor for already existing key/value pairs */
-	g_hash_table_insert(g, nk, nv);
-}
-
 static char **__get_options(GHashTable *kv, int is_global)
 {
 	GPtrArray *options = g_ptr_array_new();
@@ -154,75 +46,161 @@ static char **__get_options(GHashTable *kv, int is_global)
 	return gptrarray_to_strv(options);
 }
 
+static GList *new_share_nl(void)
+{
+	GList *nl = g_hash_table_get_keys(parser.groups), *l = NULL;
+
+	nl = g_list_sort(nl, (GCompareFunc)strcmp);
+	if (parser.ipc) {
+		l = g_list_find(nl, parser.ipc->name);
+		nl = g_list_remove_link(nl, l);
+	}
+	nl = g_list_concat(l, nl);
+	if (parser.global) {
+		l = g_list_find(nl, parser.global->name);
+		nl = g_list_remove_link(nl, l);
+	}
+	return g_list_concat(l, nl);
+}
+
+static GList *new_share_kl(struct smbconf_group *g)
+{
+	GList *l = g_hash_table_get_keys(g->kv), *kl = NULL;
+	int is_global = g == parser.global;
+	enum KSMBD_SHARE_CONF c;
+	char *k;
+
+	for (c = 0; c < KSMBD_SHARE_CONF_MAX; c++)
+		if ((!is_global || !KSMBD_SHARE_CONF_IS_GLOBAL(c)) &&
+		    !KSMBD_SHARE_CONF_IS_BROKEN(c) &&
+		    g_hash_table_lookup_extended(g->kv,
+						 KSMBD_SHARE_CONF[c],
+						 (gpointer *)&k,
+						 NULL)) {
+			l = g_list_remove(l, k);
+			kl = g_list_insert_sorted(kl, k, (GCompareFunc)strcmp);
+		}
+	l = g_list_sort(l, (GCompareFunc)strcmp);
+	if (kl)
+		kl = g_list_insert(kl, NULL, 0);
+	return g_list_concat(l, kl);
+}
+
+static void __gptrarray_add_share_kl(GPtrArray *gptrarray,
+				     GList *kl,
+				     GHashTable *kv,
+				     int is_global)
+{
+	GList *l;
+
+	if (kl && kl->data)
+		gptrarray_printf(
+			gptrarray,
+			"\t" "; " "%s" "parameters\n",
+			is_global ? "global " : "");
+
+	for (l = kl; l; l = l->next) {
+		char *k, *v;
+
+		if (!l->data) {
+			gptrarray_printf(
+				gptrarray,
+				"%s" "\t" "; " "%s" "share parameters\n",
+				kl->data ? "\n" : "",
+				is_global ? "default " : "");
+			continue;
+		}
+
+		k = l->data;
+		v = g_hash_table_lookup(kv, k);
+		gptrarray_printf(gptrarray, "\t" "%s = %s\n", k, v);
+	}
+}
+
+static char *get_conf_contents(void)
+{
+	GPtrArray *lines = g_ptr_array_new();
+	g_autoptr(GList) nl = new_share_nl();
+	GList *l;
+
+	gptrarray_printf(lines, "; see ksmbd.conf(5) for details\n" "\n");
+	for (l = nl; l; l = l->next) {
+		struct smbconf_group *g =
+			g_hash_table_lookup(parser.groups, l->data);
+		g_autoptr(GList) kl = new_share_kl(g);
+
+		gptrarray_printf(lines, "[%s]\n", g->name);
+		__gptrarray_add_share_kl(lines, kl, g->kv, g == parser.global);
+		gptrarray_printf(lines, "\n");
+	}
+	return gptrarray_to_str(lines);
+}
+
 int command_add_share(char *smbconf, char *name, char **options)
 {
-	g_autofree char *new_name = NULL;
+	g_autofree char *contents = NULL;
+	int ret;
 
 	if (g_hash_table_lookup(parser.groups, name)) {
 		pr_err("Share `%s' already exists\n", name);
-		return -EEXIST;
+		ret = -EEXIST;
+		goto out;
 	}
 
-	new_name = new_group_name(name);
-	cp_parse_external_smbconf_group(new_name, options);
+	cp_parse_external_smbconf_group(name, options);
 
-	if (__open_smbconf(smbconf))
-		return -EINVAL;
+	contents = get_conf_contents();
+	ret = set_conf_contents(smbconf, contents);
+	if (ret)
+		goto out;
 
-	pr_info("Adding share `%s'\n", name);
-	g_hash_table_foreach(parser.groups, write_share_cb, NULL);
-	close(conf_fd);
-	return 0;
+	pr_info("Added share `%s'\n", name);
+out:
+	g_free(smbconf);
+	g_free(name);
+	g_strfreev(options);
+	return ret;
 }
 
 int command_update_share(char *smbconf, char *name, char **options)
 {
-	struct smbconf_group *existing_group;
-	struct smbconf_group *update_group;
-	g_autofree char *aux_name = NULL;
-
-	existing_group = g_hash_table_lookup(parser.groups, name);
-	if (!existing_group) {
-		pr_err("Share `%s' does not exist\n", name);
-		return -EINVAL;
-	}
-
-	aux_name = aux_group_name(name);
-	cp_parse_external_smbconf_group(aux_name, options);
-
-	/* get rid of [] */
-	sprintf(aux_name, "%s%s", AUX_GROUP_PREFIX, name);
-	update_group = g_hash_table_lookup(parser.groups, aux_name);
-	if (!update_group) {
-		pr_err("External group `%s' does not exist\n", aux_name);
-		return -EINVAL;
-	}
-
-	g_free(existing_group->name);
-	existing_group->name = g_strdup(name);
-
-	g_hash_table_foreach(update_group->kv,
-			     update_share_cb,
-			     existing_group->kv);
-
-	if (__open_smbconf(smbconf))
-		return -EINVAL;
-
-	pr_info("Updating share `%s'\n", name);
-	g_hash_table_foreach(parser.groups, write_share_cb, NULL);
-	close(conf_fd);
-	return 0;
-}
-
-int command_del_share(char *smbconf, char *name, char **options)
-{
+	g_autofree char *contents = NULL;
 	struct smbconf_group *g;
-	int is_global;
+	int ret;
 
 	g = g_hash_table_lookup(parser.groups, name);
 	if (!g) {
 		pr_err("Share `%s' does not exist\n", name);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto out;
+	}
+
+	cp_parse_external_smbconf_group(name, options);
+
+	contents = get_conf_contents();
+	ret = set_conf_contents(smbconf, contents);
+	if (ret)
+		goto out;
+
+	pr_info("Updated share `%s'\n", name);
+out:
+	g_free(smbconf);
+	g_free(name);
+	g_strfreev(options);
+	return ret;
+}
+
+int command_del_share(char *smbconf, char *name, char **options)
+{
+	g_autofree char *contents = NULL;
+	struct smbconf_group *g;
+	int ret, is_global;
+
+	g = g_hash_table_lookup(parser.groups, name);
+	if (!g) {
+		pr_err("Share `%s' does not exist\n", name);
+		ret = -EINVAL;
+		goto out;
 	}
 
 	is_global = g == parser.global;
@@ -232,12 +210,17 @@ int command_del_share(char *smbconf, char *name, char **options)
 		return command_update_share(smbconf, name, options);
 	}
 
-	if (__open_smbconf(smbconf))
-		return -EINVAL;
+	g_hash_table_remove(parser.groups, name);
 
-	g_hash_table_foreach(parser.groups,
-			     write_remove_share_cb,
-			     name);
-	close(conf_fd);
-	return 0;
+	contents = get_conf_contents();
+	ret = set_conf_contents(smbconf, contents);
+	if (ret)
+		goto out;
+
+	pr_info("Deleted share `%s'\n", name);
+out:
+	g_free(smbconf);
+	g_free(name);
+	g_strfreev(options);
+	return ret;
 }

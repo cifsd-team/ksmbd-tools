@@ -93,7 +93,8 @@ static int parse_configs(char *smbconf)
 int addshare_main(int argc, char **argv)
 {
 	int ret = -EINVAL;
-	char *smbconf = NULL, *name = NULL, **options = NULL;
+	g_autofree char *smbconf = NULL, *name = NULL;
+	g_auto(GStrv) options = NULL;
 	g_autoptr(GPtrArray) __options =
 		g_ptr_array_new_with_free_func(g_free);
 	command_fn *command = NULL;
@@ -174,6 +175,7 @@ int addshare_main(int argc, char **argv)
 
 	if (command) {
 		ret = command(smbconf, name, options);
+		smbconf = name = (char *)(options = NULL);
 		if (!ret && send_signal_to_ksmbd_mountd(SIGHUP))
 			pr_debug("Unable to notify ksmbd.mountd of changes\n");
 	}
