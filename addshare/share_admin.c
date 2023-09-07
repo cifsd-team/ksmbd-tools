@@ -357,7 +357,7 @@ static GList *new_conf_ml(GList *ml,
 	}
 
 	if (ml) {
-		snprintf(p, LINE_MAX - (p - buf), "%s", ml->data);
+		snprintf(p, LINE_MAX - (p - buf), "%s", (char *)ml->data);
 		*buflen = p - buf + strlen(p);
 	}
 	return ml;
