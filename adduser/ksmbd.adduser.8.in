@@ -3,14 +3,14 @@
 ksmbd.adduser \- configure users for ksmbdpwd.db of ksmbd.mountd
 .SH SYNOPSIS
 .B ksmbd.adduser
-[-v] [-P \fI\,PWDDB\/\fR] [-C \fI\,CONF\/\fR] [-a | -u | -d] [-p \fI\,PWD\/\fR] \fI\,USER\/\fR
+[\-v] [\-P \fI\,PWDDB\/\fR] [\-C \fI\,CONF\/\fR] [\-a | \-u | \-d] [\-p \fI\,PWD\/\fR] \fI\,USER\/\fR
 .SH DESCRIPTION
 \fBksmbd.adduser\fR configures users for \fBksmbdpwd.db\fP(5) user database of \fBksmbd.mountd\fP(8) user mode daemon.
 \fBksmbd.adduser\fR can parse \fBksmbd.conf\fP(5) configuration file so as to guard against deletion of users that are depended on.
 \fBksmbd.adduser\fR notifies \fBksmbd.mountd\fR of changes if it had made any.
 .SH OPTIONS
 .PP
-If neither \fB-a\fR, \fB-u\fR, nor \fB-d\fR is given, either add or update \fI\,USER\/\fR.
+If neither \fB\-a\fR, \fB\-u\fR, nor \fB\-d\fR is given, either add or update \fI\,USER\/\fR.
 \fI\,USER\/\fR must be UTF-8 and [1, 48) bytes. \" KSMBD_REQ_MAX_ACCOUNT_NAME_SZ
 \fI\,USER\/\fR cannot contain colon (\fB:\fR).
 .TP

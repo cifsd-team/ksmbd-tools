@@ -3,16 +3,16 @@
 ksmbd.control \- control ksmbd.mountd and ksmbd daemons
 .SH SYNOPSIS
 .B ksmbd.control
-[-v] -s
+[\-v] \-s
 .br
 .B ksmbd.control
-[-v] -r
+[\-v] \-r
 .br
 .B ksmbd.control
-[-v] -d \fI\,COMPONENT\/\fR
+[\-v] \-d \fI\,COMPONENT\/\fR
 .br
 .B ksmbd.control
-[-v] -c
+[\-v] \-c
 .SH DESCRIPTION
 \fBksmbd.control\fR controls \fBksmbd.mountd\fP(8) user mode and \fBksmbd\fR kernel mode daemons.
 .SH OPTIONS

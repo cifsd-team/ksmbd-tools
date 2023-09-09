@@ -3,7 +3,7 @@
 ksmbd.addshare \- configure shares for ksmbd.conf of ksmbd.mountd
 .SH SYNOPSIS
 .B ksmbd.addshare
-[-v] [-C \fI\,CONF\/\fR] [-P \fI\,PWDDB\/\fR] [-a | -u | -d] [-o \fI\,OPT\/\fR]... \fI\,SHARE\/\fR
+[\-v] [\-C \fI\,CONF\/\fR] [\-P \fI\,PWDDB\/\fR] [\-a | \-u | \-d] [\-o \fI\,OPT\/\fR]... \fI\,SHARE\/\fR
 .SH DESCRIPTION
 \fBksmbd.addshare\fR configures shares for \fBksmbd.conf\fP(5) configuration file of \fBksmbd.mountd\fP(8) user mode daemon.
 \fBksmbd.addshare\fR modifies \fBksmbd.conf\fR such that its existing formatting is not retained.
@@ -12,7 +12,7 @@ ksmbd.addshare \- configure shares for ksmbd.conf of ksmbd.mountd
 \fBksmbd.addshare\fR will only make changes that do not require restarting \fBksmbd.mountd\fR and \fBksmbd\fR to take effect.
 .SH OPTIONS
 .PP
-If neither \fB-a\fR, \fB-u\fR, nor \fB-d\fR is given, either add or update \fI\,SHARE\/\fR.
+If neither \fB\-a\fR, \fB\-u\fR, nor \fB\-d\fR is given, either add or update \fI\,SHARE\/\fR.
 \fI\,SHARE\/\fR must be UTF-8 and [1, 64) bytes. \" KSMBD_REQ_MAX_SHARE_NAME
 \fI\,SHARE\/\fR is case-insensitive.
 .TP

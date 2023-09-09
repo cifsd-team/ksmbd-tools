@@ -3,7 +3,7 @@
 ksmbd.mountd \- start ksmbd.mountd and ksmbd daemons
 .SH SYNOPSIS
 .B ksmbd.mountd
-[-v] [-p \fI\,PORT\/\fR] [-n[\fI\,WAY\/\fR]] [-C \fI\,CONF\/\fR] [-P \fI\,PWDDB\/\fR]
+[\-v] [\-p \fI\,PORT\/\fR] [\-n[\fI\,WAY\/\fR]] [\-C \fI\,CONF\/\fR] [\-P \fI\,PWDDB\/\fR]
 .SH DESCRIPTION
 \fBksmbd.mountd\fR starts \fBksmbd.mountd\fR user mode and \fBksmbd\fR kernel mode daemons.
 \fBksmbd.mountd\fR has to parse \fBksmbd.conf\fP(5) configuration file in order to start.
