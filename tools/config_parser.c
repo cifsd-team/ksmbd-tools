@@ -82,9 +82,9 @@ static int is_a_group(char *entry)
 	entry = cp_ltrim(delim + 1);
 	is_group = cp_smbconf_eol(entry);
 	if (!is_group) {
-		pr_err("Group contains `%c' [0x%2X]\n",
+		pr_err("Group contains `%c' [0x%.2X]\n",
 		       *entry,
-		       *entry);
+		       (unsigned char)*entry);
 		goto out;
 	}
 	*entry = 0x00;
@@ -104,9 +104,9 @@ static int is_a_key_value(char *entry)
 	for (; entry < delim; entry++) {
 		is_key_value = cp_printable(entry) && !cp_smbconf_eol(entry);
 		if (!is_key_value) {
-			pr_err("Key contains `%c' [0x%2X]\n",
+			pr_err("Key contains `%c' [0x%.2X]\n",
 			       *entry,
-			       *entry);
+			       (unsigned char)*entry);
 			goto out;
 		}
 	}
@@ -114,9 +114,9 @@ static int is_a_key_value(char *entry)
 	for (; !cp_smbconf_eol(entry); entry++) {
 		is_key_value = cp_printable(entry) || *entry == '\t';
 		if (!is_key_value) {
-			pr_err("Value contains `%c' [0x%2X]\n",
+			pr_err("Value contains `%c' [0x%.2X]\n",
 			       *entry,
-			       *entry);
+			       (unsigned char)*entry);
 			goto out;
 		}
 	}
@@ -655,9 +655,9 @@ static int is_a_user_password(char *entry)
 			*entry == '+' ||
 			*entry == '/';
 		if (!is_user_password) {
-			pr_err("Password contains `%c' [0x%2X]\n",
+			pr_err("Password contains `%c' [0x%.2X]\n",
 			       *entry,
-			       *entry);
+			       (unsigned char)*entry);
 			goto out;
 		}
 	}
@@ -714,9 +714,9 @@ static int is_a_subauth(char *entry)
 		for (; entry < delim; entry++) {
 			is_subauth = *entry >= '0' && *entry <= '9';
 			if (!is_subauth) {
-				pr_err("Subauth contains `%c' [0x%2X]\n",
+				pr_err("Subauth contains `%c' [0x%.2X]\n",
 				       *entry,
-				       *entry);
+				       (unsigned char)*entry);
 				goto out;
 			}
 		}
