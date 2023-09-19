@@ -230,7 +230,8 @@ static int __mmap_parse_file(const char *path, process_entry_fn *process_entry)
 		delim = memchr(contents, '\n', len) ?: contents + len;
 		entry = g_strndup(contents, delim - contents);
 		ret = process_entry(entry);
-		if (ret)
+		if (ret ||
+		    process_entry == process_subauth_entry)
 			goto out_unref;
 	}
 
