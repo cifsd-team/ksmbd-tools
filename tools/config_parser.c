@@ -216,7 +216,9 @@ static int __mmap_parse_file(const char *path, process_entry_fn *process_entry)
 
 	contents = g_mapped_file_get_contents(file);
 	if (!contents) {
-		ret = 0;
+		g_autofree char *entry = g_strdup("");
+
+		ret = process_entry(entry);
 		goto out_unref;
 	}
 
@@ -638,7 +640,9 @@ static int is_a_user_password(char *entry)
 	if (!is_user_password)
 		goto out;
 	entry = delim + 1;
-	delim = strchr(entry, 0x00);
+	for (; !cp_pwddb_eol(delim); delim++)
+		;
+	*delim = 0x00;
 	for (; delim > entry; delim--)
 		if (delim[-1] != '=')
 			break;
@@ -684,6 +688,9 @@ static void add_user_password(const char *entry)
 
 static int process_pwddb_entry(char *entry)
 {
+	if (cp_pwddb_eol(entry))
+		return 0;
+
 	if (is_a_user_password(entry)) {
 		add_user_password(entry);
 		return 0;
