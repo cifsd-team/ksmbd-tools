@@ -110,6 +110,11 @@ static int is_a_key_value(char *entry)
 			goto out;
 		}
 	}
+	is_key_value = !!parser.current;
+	if (!is_key_value) {
+		pr_debug("Key has no group\n");
+		goto out;
+	}
 	entry = cp_ltrim(entry + 1);
 	for (; !cp_smbconf_eol(entry); entry++) {
 		is_key_value = cp_printable(entry) || *entry == '\t';
@@ -157,11 +162,6 @@ static void add_group_key_value(const char *entry)
 		g_strndup(entry, cp_rtrim(entry, delim - 1) + 1 - entry);
 	g_autofree char *v =
 		g_strdup(cp_ltrim(delim + 1));
-
-	if (!parser.current) {
-		pr_info("No group for key `%s'\n", k);
-		return;
-	}
 
 	if (cp_smbconf_eol(v) || g_hash_table_lookup(parser.current->kv, k))
 		return;
