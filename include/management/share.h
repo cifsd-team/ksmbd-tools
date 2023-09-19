@@ -10,7 +10,6 @@
 
 #include <glib.h>
 
-#include "linux/ksmbd_server.h"
 
 enum share_users {
 	/* Admin users */
@@ -137,10 +136,7 @@ int shm_share_config(const char *k, enum KSMBD_SHARE_CONF c);
 
 static inline void set_share_flag(struct ksmbd_share *share, int flag)
 {
-	if (flag == KSMBD_SHARE_FLAG_INVALID)
-		share->flags = flag;
-	else
-		share->flags |= flag;
+	share->flags |= flag;
 }
 
 static inline void clear_share_flag(struct ksmbd_share *share, int flag)
@@ -150,8 +146,6 @@ static inline void clear_share_flag(struct ksmbd_share *share, int flag)
 
 static inline int test_share_flag(struct ksmbd_share *share, int flag)
 {
-	if (flag == KSMBD_SHARE_FLAG_INVALID)
-		return share->flags == flag;
 	return share->flags & flag;
 }
 
