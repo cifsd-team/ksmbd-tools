@@ -109,26 +109,26 @@ int shm_share_name(char *name, char *p)
 
 	is_name = p > name;
 	if (!is_name) {
-		pr_err("Share name is missing\n");
+		pr_debug("Share name is missing\n");
 		goto out;
 	}
 	is_name = p - name < KSMBD_REQ_MAX_SHARE_NAME;
 	if (!is_name) {
-		pr_err("Share name exceeds %d bytes\n",
-		       KSMBD_REQ_MAX_SHARE_NAME - 1);
+		pr_debug("Share name exceeds %d bytes\n",
+			 KSMBD_REQ_MAX_SHARE_NAME - 1);
 		goto out;
 	}
 	is_name = g_utf8_validate(name, p - name, NULL);
 	if (!is_name) {
-		pr_err("Share name is not UTF-8\n");
+		pr_debug("Share name is not UTF-8\n");
 		goto out;
 	}
 	for (; name < p; name++) {
 		is_name = cp_printable(name) && *name != '[' && *name != ']';
 		if (!is_name) {
-			pr_err("Share name contains `%c' [0x%2X]\n",
-			       *name,
-			       *name);
+			pr_debug("Share name contains `%c' [0x%.2X]\n",
+				 *name,
+				 (unsigned char)*name);
 			goto out;
 		}
 	}

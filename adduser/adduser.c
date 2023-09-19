@@ -155,8 +155,10 @@ int adduser_main(int argc, char **argv)
 		goto out;
 	}
 
-	if (!usm_user_name(name, strchr(name, 0x00)))
+	if (!usm_user_name(name, strchr(name, 0x00))) {
+		pr_err("Invalid user name `%s'\n", name);
 		goto out;
+	}
 
 	if (!pwddb)
 		pwddb = g_strdup(PATH_PWDDB);

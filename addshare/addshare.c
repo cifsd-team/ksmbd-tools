@@ -162,8 +162,10 @@ int addshare_main(int argc, char **argv)
 		goto out;
 	}
 
-	if (!shm_share_name(name, strchr(name, 0x00)))
+	if (!shm_share_name(name, strchr(name, 0x00))) {
+		pr_err("Invalid share name `%s'\n", name);
 		goto out;
+	}
 
 	if (!smbconf)
 		smbconf = g_strdup(PATH_SMBCONF);
