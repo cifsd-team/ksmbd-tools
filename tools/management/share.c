@@ -142,16 +142,9 @@ int shm_share_config(const char *k, enum KSMBD_SHARE_CONF c)
 	       !cp_key_cmp(k, KSMBD_SHARE_CONF[c]);
 }
 
-static void list_hosts_callback(gpointer k, gpointer v, gpointer user_data)
-{
-	g_free(k);
-	g_free(v);
-}
-
 static void free_hosts_map(GHashTable *map)
 {
 	if (map) {
-		g_hash_table_foreach(map, list_hosts_callback, NULL);
 		g_hash_table_destroy(map);
 	}
 }
