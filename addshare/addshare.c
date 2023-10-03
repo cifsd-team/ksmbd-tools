@@ -113,8 +113,6 @@ int addshare_main(int argc, char **argv)
 	command_fn *command = NULL;
 	int c;
 
-	set_logger_app_name("ksmbd.addshare");
-
 	while ((c = getopt_long(argc, argv, "audo:C:P:vVh", opts, NULL)) != EOF)
 		switch (c) {
 		case 'a':

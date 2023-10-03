@@ -763,9 +763,11 @@ static int process_subauth_entry(char *entry)
 
 int cp_parse_subauth(void)
 {
-	int ret;
+	int ret = __mmap_parse_file(PATH_SUBAUTH, process_subauth_entry);
 
-	ret = __mmap_parse_file(PATH_SUBAUTH, process_subauth_entry);
+	if (!TOOL_IS_MOUNTD)
+		return ret;
+
 	if (ret) {
 		g_autofree char *contents = NULL;
 		g_autoptr(GRand) rand = g_rand_new();

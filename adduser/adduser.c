@@ -108,8 +108,6 @@ int adduser_main(int argc, char **argv)
 	command_fn *command = NULL;
 	int c;
 
-	set_logger_app_name("ksmbd.adduser");
-
 	while ((c = getopt_long(argc, argv, "audp:P:C:vVh", opts, NULL)) != EOF)
 		switch (c) {
 		case 'a':

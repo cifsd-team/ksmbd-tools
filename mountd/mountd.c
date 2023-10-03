@@ -286,7 +286,6 @@ static int worker_process_init(void)
 	int ret;
 
 	setup_signals(worker_sig_handler);
-	set_logger_app_name("ksmbd-worker");
 
 	ret = usm_init();
 	if (ret) {
@@ -437,8 +436,6 @@ int mountd_main(int argc, char **argv)
 {
 	int ret = -EINVAL;
 	int c;
-
-	set_logger_app_name("ksmbd.mountd");
 
 	memset(&global_conf, 0x00, sizeof(struct smbconf_global));
 	while ((c = getopt_long(argc, argv, "p:n::C:P:vVh", opts, NULL)) != EOF)

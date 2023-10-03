@@ -112,17 +112,17 @@ extern int log_level;
 
 G_GNUC_PRINTF(2, 3)
 extern void __pr_log(int level, const char *fmt, ...);
-extern void set_logger_app_name(const char *an);
-extern const char *get_logger_app_name(void);
 extern void pr_logger_init(int flags);
 extern int set_log_level(int level);
 
-#define pr_log(l, f, ...)						\
-	do {								\
-		if ((l) <= log_level)					\
-			__pr_log((l), (f), get_logger_app_name(),	\
-					getpid(),			\
-					##__VA_ARGS__);			\
+#define pr_log(l, f, ...)				\
+	do {						\
+		if ((l) <= log_level)			\
+			__pr_log((l),			\
+				 (f),			\
+				 get_tool_name(),	\
+				 getpid(),		\
+				 ##__VA_ARGS__);	\
 	} while (0)
 
 #define pr_debug(f, ...)	\
@@ -167,10 +167,21 @@ int set_conf_contents(const char *conf, char *contents);
 int send_signal_to_ksmbd_mountd(int signo);
 int test_file_access(char *conf);
 
-int addshare_main(int argc, char **argv);
-int adduser_main(int argc, char **argv);
-int control_main(int argc, char **argv);
-int mountd_main(int argc, char **argv);
+extern int set_tool_main(char *name);
+extern const char *get_tool_name(void);
+
+typedef int tool_main_fn(int argc, char **argv);
+tool_main_fn addshare_main, adduser_main, control_main, mountd_main;
+extern tool_main_fn *tool_main;
+
+#define TOOL_IS_ADDSHARE \
+	(tool_main == addshare_main)
+#define TOOL_IS_ADDUSER \
+	(tool_main == adduser_main)
+#define TOOL_IS_CONTROL \
+	(tool_main == control_main)
+#define TOOL_IS_MOUNTD \
+	(tool_main == mountd_main)
 
 #define SELECT_NAME(_1, _2, _3, _4, NAME, ...) NAME
 

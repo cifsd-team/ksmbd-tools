@@ -16,8 +16,8 @@
 
 int log_level = PR_INFO;
 int ksmbd_health_status;
+tool_main_fn *tool_main;
 
-static const char *app_name = "unknown";
 static int log_open;
 
 typedef void (*logger)(int level, const char *fmt, va_list list);
@@ -59,16 +59,6 @@ static void __pr_log_syslog(int level, const char *fmt, va_list list)
 }
 
 static logger __logger = __pr_log_stdio;
-
-void set_logger_app_name(const char *an)
-{
-	app_name = an;
-}
-
-const char *get_logger_app_name(void)
-{
-	return app_name;
-}
 
 void __pr_log(int level, const char *fmt, ...)
 {
@@ -322,27 +312,48 @@ int test_file_access(char *conf)
 	return 0;
 }
 
+int set_tool_main(char *name)
+{
+	if (!strcmp(name, "ksmbd.addshare"))
+		tool_main = addshare_main;
+	else if (!strcmp(name, "ksmbd.adduser"))
+		tool_main = adduser_main;
+	else if (!strcmp(name, "ksmbd.control"))
+		tool_main = control_main;
+	else if (!strcmp(name, "ksmbd.mountd"))
+		tool_main = mountd_main;
+	else
+		tool_main = NULL;
+
+	return !tool_main ? -EINVAL : 0;
+}
+
+const char *get_tool_name(void)
+{
+	if (TOOL_IS_ADDSHARE)
+		return "ksmbd.addshare";
+	if (TOOL_IS_ADDUSER)
+		return "ksmbd.adduser";
+	if (TOOL_IS_CONTROL)
+		return "ksmbd.control";
+	if (TOOL_IS_MOUNTD)
+		return "ksmbd.mountd";
+	return "ksmbd.tools";
+}
+
 int main(int argc, char **argv)
 {
 	char *base_name;
-
-	set_logger_app_name("ksmbd.tools");
 
 	if (!*argv)
 		return EXIT_FAILURE;
 
 	base_name = strrchr(*argv, '/');
 	base_name = base_name ? base_name + 1 : *argv;
+	if (set_tool_main(base_name)) {
+		pr_err("Invalid base name `%s'\n", base_name);
+		return EXIT_FAILURE;
+	}
 
-	if (!strcmp(base_name, "ksmbd.addshare"))
-		return addshare_main(argc, argv);
-	if (!strcmp(base_name, "ksmbd.adduser"))
-		return adduser_main(argc, argv);
-	if (!strcmp(base_name, "ksmbd.control"))
-		return control_main(argc, argv);
-	if (!strcmp(base_name, "ksmbd.mountd"))
-		return mountd_main(argc, argv);
-
-	pr_err("Unknown base name: %s\n", base_name);
-	return EXIT_FAILURE;
+	return tool_main(argc, argv);
 }

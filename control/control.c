@@ -153,8 +153,6 @@ int control_main(int argc, char **argv)
 	int ret = -EINVAL;
 	int c;
 
-	set_logger_app_name("ksmbd.control");
-
 	while ((c = getopt_long(argc, argv, "srd:cvVh", opts, NULL)) != EOF)
 		switch (c) {
 		case 's':
