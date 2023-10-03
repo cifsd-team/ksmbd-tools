@@ -308,14 +308,14 @@ static char *shm_casefold_share_name(const char *name, size_t len)
 	return g_utf8_casefold(nfdi_name, -1);
 }
 
-guint shm_share_name_hash(gconstpointer name)
+unsigned int shm_share_name_hash(const char *name)
 {
 	g_autofree char *cf_name = shm_casefold_share_name(name, -1);
 
 	return g_str_hash(cf_name);
 }
 
-gboolean shm_share_name_equal(gconstpointer lname, gconstpointer rname)
+int shm_share_name_equal(const char *lname, const char *rname)
 {
 	g_autofree char *cf_lname = shm_casefold_share_name(lname, -1);
 	g_autofree char *cf_rname = shm_casefold_share_name(rname, -1);
@@ -325,8 +325,8 @@ gboolean shm_share_name_equal(gconstpointer lname, gconstpointer rname)
 
 int shm_init(void)
 {
-	shares_table = g_hash_table_new(shm_share_name_hash,
-					shm_share_name_equal);
+	shares_table = g_hash_table_new((GHashFunc)shm_share_name_hash,
+					(GEqualFunc)shm_share_name_equal);
 	g_rw_lock_init(&shares_table_lock);
 	return 0;
 }

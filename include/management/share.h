@@ -159,8 +159,8 @@ int shm_add_new_share(struct smbconf_group *group);
 void shm_remove_all_shares(void);
 
 void shm_destroy(void);
-guint shm_share_name_hash(gconstpointer name);
-gboolean shm_share_name_equal(gconstpointer lname, gconstpointer rname);
+unsigned int shm_share_name_hash(const char *name);
+int shm_share_name_equal(const char *lname, const char *rname);
 int shm_init(void);
 
 int shm_lookup_users_map(struct ksmbd_share *share,

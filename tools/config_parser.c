@@ -599,8 +599,8 @@ void cp_init_smbconf_parser(void)
 		return;
 
 	parser.groups = g_hash_table_new_full(
-		shm_share_name_hash,
-		shm_share_name_equal,
+		(GHashFunc)shm_share_name_hash,
+		(GEqualFunc)shm_share_name_equal,
 		NULL,
 		(GDestroyNotify)release_smbconf_group);
 	parser.current = parser.global = parser.ipc = NULL;
