@@ -767,12 +767,21 @@ int cp_parse_subauth(void)
 
 	ret = __mmap_parse_file(PATH_SUBAUTH, process_subauth_entry);
 	if (ret) {
+		g_autofree char *contents = NULL;
 		g_autoptr(GRand) rand = g_rand_new();
-		g_autofree char *contents =
-			g_strdup_printf("%u:%u:%u\n",
-					g_rand_int(rand),
-					g_rand_int(rand),
-					g_rand_int(rand));
+		int num_subauth = ARRAY_SIZE(global_conf.gen_subauth);
+		int i;
+
+		for (i = 0; i < num_subauth; i++) {
+			char *new_contents = g_strdup_printf(
+				"%s%u%c",
+				contents ?: "",
+				g_rand_int(rand),
+				i + 1 < num_subauth ? ':' : '\n');
+
+			g_free(contents);
+			contents = new_contents;
+		}
 
 		if (ret == -ENOENT)
 			ret = set_conf_contents(PATH_SUBAUTH, contents);
