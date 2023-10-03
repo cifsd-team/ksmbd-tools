@@ -695,15 +695,14 @@ int rpc_lsarpc_write_request(struct ksmbd_rpc_pipe *pipe)
 	return lsarpc_invoke(pipe);
 }
 
-static void free_ph_entry(gpointer k, gpointer s, gpointer user_data)
-{
-	g_free(s);
-}
-
 static void lsarpc_ph_clear_table(void)
 {
+	struct policy_handle *ph;
+	GHashTableIter iter;
+
 	g_rw_lock_writer_lock(&ph_table_lock);
-	g_hash_table_foreach(ph_table, free_ph_entry, NULL);
+	ghash_for_each(ph, ph_table, iter)
+		g_free(ph);
 	g_rw_lock_writer_unlock(&ph_table_lock);
 }
 

@@ -149,11 +149,9 @@ static int __share_entry_processed(struct ksmbd_rpc_pipe *pipe, int i)
 	return 0;
 }
 
-static void __enum_all_shares(gpointer key, gpointer value, gpointer user_data)
+static void __enum_all_shares(struct ksmbd_share *share,
+			      struct ksmbd_rpc_pipe *pipe)
 {
-	struct ksmbd_rpc_pipe *pipe = (struct ksmbd_rpc_pipe *)user_data;
-	struct ksmbd_share *share = (struct ksmbd_share *)value;
-
 	if (!get_ksmbd_share(share))
 		return;
 
@@ -173,7 +171,7 @@ static void __enum_all_shares(gpointer key, gpointer value, gpointer user_data)
 
 static int srvsvc_share_enum_all_invoke(struct ksmbd_rpc_pipe *pipe)
 {
-	for_each_ksmbd_share(__enum_all_shares, pipe);
+	shm_iter_shares((share_cb)__enum_all_shares, pipe);
 	pipe->entry_processed = __share_entry_processed;
 	return 0;
 }

@@ -50,14 +50,13 @@ static struct ksmbd_session *new_ksmbd_session(unsigned long long id,
 	return sess;
 }
 
-static void free_hash_entry(gpointer k, gpointer s, gpointer user_data)
-{
-	kill_ksmbd_session(s);
-}
-
 static void sm_clear_sessions(void)
 {
-	g_hash_table_foreach(sessions_table, free_hash_entry, NULL);
+	struct ksmbd_session *sess;
+	GHashTableIter iter;
+
+	ghash_for_each(sess, sessions_table, iter)
+		kill_ksmbd_session(sess);
 }
 
 static int __sm_remove_session(struct ksmbd_session *sess)

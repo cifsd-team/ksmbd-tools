@@ -208,15 +208,14 @@ static struct ksmbd_rpc_pipe *rpc_pipe_alloc_bind(unsigned int id)
 	return pipe;
 }
 
-static void free_hash_entry(gpointer k, gpointer s, gpointer user_data)
-{
-	__rpc_pipe_free(s);
-}
-
 static void __clear_pipes_table(void)
 {
+	struct ksmbd_rpc_pipe *pipe;
+	GHashTableIter iter;
+
 	g_rw_lock_writer_lock(&pipes_table_lock);
-	g_hash_table_foreach(pipes_table, free_hash_entry, NULL);
+	ghash_for_each(pipe, pipes_table, iter)
+		__rpc_pipe_free(pipe);
 	g_rw_lock_writer_unlock(&pipes_table_lock);
 }
 

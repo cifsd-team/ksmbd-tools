@@ -186,17 +186,19 @@ static int process_password(char **password)
 	return 0;
 }
 
-static void __new_user_nl_cb(char *name, struct ksmbd_user *user, GList **nl)
+static void __new_user_nl_cb(struct ksmbd_user *user, GList **nl)
 {
 	if (!test_user_flag(user, KSMBD_USER_FLAG_GUEST_ACCOUNT))
-		*nl = g_list_insert_sorted(*nl, name, (GCompareFunc)strcmp);
+		*nl = g_list_insert_sorted(*nl,
+					   user->name,
+					   (GCompareFunc)strcmp);
 }
 
 static GList *new_user_nl(void)
 {
 	GList *nl = NULL;
 
-	for_each_ksmbd_user((walk_users)__new_user_nl_cb, &nl);
+	usm_iter_users((user_cb)__new_user_nl_cb, &nl);
 	return nl;
 }
 
@@ -285,8 +287,7 @@ out:
 	return ret;
 }
 
-static void __share_transient_user_cb(char *name,
-				      struct ksmbd_share *share,
+static void __share_transient_user_cb(struct ksmbd_share *share,
 				      char **user_name)
 {
 	if (!*user_name)
@@ -312,7 +313,7 @@ static void __share_transient_user_cb(char *name,
 
 	return;
 require:
-	pr_err("Share `%s' requires user `%s'\n", name, *user_name);
+	pr_err("Share `%s' requires user `%s'\n", share->name, *user_name);
 	*user_name = NULL;
 }
 
@@ -325,7 +326,7 @@ static int __is_transient_user(char *name)
 		pr_err("Server requires user `%s'\n", name);
 		goto out;
 	}
-	for_each_ksmbd_share((walk_shares)__share_transient_user_cb, &name);
+	shm_iter_shares((share_cb)__share_transient_user_cb, &name);
 	is_transient = !!name;
 out:
 	return is_transient;

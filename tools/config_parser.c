@@ -313,10 +313,8 @@ void cp_group_kv_list_free(char **list)
 	g_strfreev(list);
 }
 
-static void process_global_conf_kv(char *k, char *v, void *unused)
+static void process_global_conf_kv(char *k, char *v)
 {
-	(void)unused;
-
 	if (!cp_key_cmp(k, "server string")) {
 		global_conf.server_string = cp_get_group_kv_string(v);
 		return;
@@ -522,6 +520,9 @@ static void process_global_conf_kv(char *k, char *v, void *unused)
 
 static void add_group_global_conf(void)
 {
+	char *k, *v;
+	GHashTableIter iter;
+
 	if (ksmbd_health_status & KSMBD_SHOULD_RELOAD_CONFIG)
 		return;
 
@@ -535,9 +536,8 @@ static void add_group_global_conf(void)
 	add_group_key_value("tcp port = 445");
 	add_group_key_value("workgroup = WORKGROUP");
 
-	g_hash_table_foreach(parser.current->kv,
-			     (GHFunc)process_global_conf_kv,
-			     NULL);
+	ghash_for_each(k, v, parser.current->kv, iter)
+		process_global_conf_kv(k, v);
 }
 
 static void add_group_global_share_conf(void)
@@ -580,9 +580,7 @@ static int process_groups(void)
 	add_group("[ipc$]");
 	add_group_ipc_share_conf();
 
-	for (g_hash_table_iter_init(&iter, parser.groups);
-	     g_hash_table_iter_next(&iter, NULL, (gpointer *)&parser.current);
-	     g_hash_table_iter_steal(&iter)) {
+	ghash_for_each_steal(parser.current, parser.groups, iter) {
 		if (parser.current == parser.global)
 			continue;
 

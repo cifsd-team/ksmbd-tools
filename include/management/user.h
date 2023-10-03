@@ -56,10 +56,8 @@ void usm_remove_all_users(void);
 void usm_destroy(void);
 int usm_init(void);
 
-typedef void (*walk_users)(gpointer key,
-			   gpointer value,
-			   gpointer user_data);
-void for_each_ksmbd_user(walk_users cb, gpointer user_data);
+typedef void (*user_cb)(struct ksmbd_user *user, void *data);
+void usm_iter_users(user_cb cb, void *data);
 
 struct ksmbd_login_request;
 struct ksmbd_login_response;

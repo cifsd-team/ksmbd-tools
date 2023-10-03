@@ -1032,15 +1032,14 @@ int rpc_samr_init(void)
 	return 0;
 }
 
-static void free_ch_entry(gpointer k, gpointer s, gpointer user_data)
-{
-	g_free(s);
-}
-
 static void samr_ch_clear_table(void)
 {
+	struct connect_handle *ch;
+	GHashTableIter iter;
+
 	g_rw_lock_writer_lock(&ch_table_lock);
-	g_hash_table_foreach(ch_table, free_ch_entry, NULL);
+	ghash_for_each(ch, ch_table, iter)
+		g_free(ch);
 	g_rw_lock_writer_unlock(&ch_table_lock);
 }
 

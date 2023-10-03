@@ -174,13 +174,11 @@ static GList *init_ml(GList *ml)
 	return g_list_delete_link(ml, ml);
 }
 
-static void __new_user_ml_cb(char *name, struct ksmbd_user *user, GList **ml)
+static void __new_user_ml_cb(struct ksmbd_user *user, GList **ml)
 {
-	(void)user;
-
-	if (!strncmp(name, (*ml)->data, strlen((*ml)->data)))
+	if (!strncmp(user->name, (*ml)->data, strlen((*ml)->data)))
 		*ml = g_list_insert_sorted(*ml,
-					   g_strdup(name),
+					   g_strdup(user->name),
 					   (GCompareFunc)strcmp);
 }
 
@@ -190,7 +188,7 @@ static GList *new_user_ml(GList *ml, char *p)
 		return next_ml(ml);
 
 	ml = g_list_append(ml, g_strdup(p));
-	for_each_ksmbd_user((walk_users)__new_user_ml_cb, &ml);
+	usm_iter_users((user_cb)__new_user_ml_cb, &ml);
 	return init_ml(ml);
 }
 

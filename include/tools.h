@@ -172,4 +172,51 @@ int adduser_main(int argc, char **argv);
 int control_main(int argc, char **argv);
 int mountd_main(int argc, char **argv);
 
+#define SELECT_NAME(_1, _2, _3, _4, NAME, ...) NAME
+
+#define ghash_for_each_3(v, tbl, iter) \
+	for (g_hash_table_iter_init(&iter, tbl); \
+	     g_hash_table_iter_next(&iter, NULL, (gpointer *)&v); \
+	     )
+
+#define ghash_for_each_4(k, v, tbl, iter) \
+	for (g_hash_table_iter_init(&iter, tbl); \
+	     g_hash_table_iter_next(&iter, (gpointer *)&k, (gpointer *)&v); \
+	     )
+
+#define ghash_for_each(...) \
+	SELECT_NAME(__VA_ARGS__, \
+		    ghash_for_each_4, \
+		    ghash_for_each_3)(__VA_ARGS__)
+
+#define ghash_for_each_remove_3(v, tbl, iter) \
+	for (g_hash_table_iter_init(&iter, tbl); \
+	     g_hash_table_iter_next(&iter, NULL, (gpointer *)&v); \
+	     g_hash_table_iter_remove(&iter))
+
+#define ghash_for_each_remove_4(k, v, tbl, iter) \
+	for (g_hash_table_iter_init(&iter, tbl); \
+	     g_hash_table_iter_next(&iter, (gpointer *)&k, (gpointer *)&v); \
+	     g_hash_table_iter_remove(&iter))
+
+#define ghash_for_each_remove(...) \
+	SELECT_NAME(__VA_ARGS__, \
+		    ghash_for_each_remove_4, \
+		    ghash_for_each_remove_3)(__VA_ARGS__)
+
+#define ghash_for_each_steal_3(v, tbl, iter) \
+	for (g_hash_table_iter_init(&iter, tbl); \
+	     g_hash_table_iter_next(&iter, NULL, (gpointer *)&v); \
+	     g_hash_table_iter_steal(&iter))
+
+#define ghash_for_each_steal_4(k, v, tbl, iter) \
+	for (g_hash_table_iter_init(&iter, tbl); \
+	     g_hash_table_iter_next(&iter, (gpointer *)&k, (gpointer *)&v); \
+	     g_hash_table_iter_steal(&iter))
+
+#define ghash_for_each_steal(...) \
+	SELECT_NAME(__VA_ARGS__, \
+		    ghash_for_each_steal_4, \
+		    ghash_for_each_steal_3)(__VA_ARGS__)
+
 #endif /* __TOOLS_H__ */

@@ -149,15 +149,15 @@ static void free_hosts_map(GHashTable *map)
 	}
 }
 
-static void list_user_callback(gpointer k, gpointer u, gpointer user_data)
-{
-	put_ksmbd_user((struct ksmbd_user *)u);
-}
-
 static void free_user_map(GHashTable *map)
 {
 	if (map) {
-		g_hash_table_foreach(map, list_user_callback, NULL);
+		struct ksmbd_user *user;
+		GHashTableIter iter;
+
+		ghash_for_each(user, map, iter)
+			put_ksmbd_user(user);
+
 		g_hash_table_destroy(map);
 	}
 }
@@ -232,19 +232,16 @@ void put_ksmbd_share(struct ksmbd_share *share)
 	__shm_remove_share(share);
 }
 
-static gboolean put_share_callback(gpointer _k, gpointer _v, gpointer data)
-{
-	struct ksmbd_share *share = (struct ksmbd_share *)_v;
-
-	share->state = KSMBD_SHARE_STATE_FREEING;
-	put_ksmbd_share(share);
-	return TRUE;
-}
-
 void shm_remove_all_shares(void)
 {
+	struct ksmbd_share *share;
+	GHashTableIter iter;
+
 	g_rw_lock_writer_lock(&shares_table_lock);
-	g_hash_table_foreach_remove(shares_table, put_share_callback, NULL);
+	ghash_for_each_remove(share, shares_table, iter) {
+		share->state = KSMBD_SHARE_STATE_FREEING;
+		put_ksmbd_share(share);
+	}
 	g_rw_lock_writer_unlock(&shares_table_lock);
 }
 
@@ -282,14 +279,13 @@ static struct ksmbd_share *new_ksmbd_share(void)
 	return share;
 }
 
-static void free_hash_entry(gpointer k, gpointer s, gpointer user_data)
-{
-	kill_ksmbd_share(s);
-}
-
 static void shm_clear_shares(void)
 {
-	g_hash_table_foreach(shares_table, free_hash_entry, NULL);
+	struct ksmbd_share *share;
+	GHashTableIter iter;
+
+	ghash_for_each(share, shares_table, iter)
+		kill_ksmbd_share(share);
 }
 
 void shm_destroy(void)
@@ -490,7 +486,7 @@ static int force_user(struct ksmbd_share *share, char *name)
 	return 0;
 }
 
-static void process_share_conf_kv(char *k, char *v, struct ksmbd_share *share)
+static void process_share_conf_kv(struct ksmbd_share *share, char *k, char *v)
 {
 	if (shm_share_config(k, KSMBD_SHARE_CONF_COMMENT)) {
 		share->comment = cp_get_group_kv_string(v);
@@ -727,12 +723,16 @@ static void process_share_conf_kv(char *k, char *v, struct ksmbd_share *share)
 static void init_share_from_group(struct ksmbd_share *share,
 				  struct smbconf_group *group)
 {
+	char *k, *v;
+	GHashTableIter iter;
+
 	share->name = g_strdup(group->name);
 
 	if (group == parser.ipc)
 		set_share_flag(share, KSMBD_SHARE_FLAG_PIPE);
 
-	g_hash_table_foreach(group->kv, (GHFunc)process_share_conf_kv, share);
+	ghash_for_each(k, v, group->kv, iter)
+		process_share_conf_kv(share, k, v);
 }
 
 int shm_add_new_share(struct smbconf_group *group)
@@ -846,10 +846,14 @@ int shm_close_connection(struct ksmbd_share *share)
 	return 0;
 }
 
-void for_each_ksmbd_share(walk_shares cb, gpointer user_data)
+void shm_iter_shares(share_cb cb, void *data)
 {
+	struct ksmbd_share *share;
+	GHashTableIter iter;
+
 	g_rw_lock_reader_lock(&shares_table_lock);
-	g_hash_table_foreach(shares_table, cb, user_data);
+	ghash_for_each(share, shares_table, iter)
+		cb(share, data);
 	g_rw_lock_reader_unlock(&shares_table_lock);
 }
 

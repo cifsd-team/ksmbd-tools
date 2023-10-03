@@ -174,10 +174,8 @@ int shm_lookup_hosts_map(struct ksmbd_share *share,
 int shm_open_connection(struct ksmbd_share *share);
 int shm_close_connection(struct ksmbd_share *share);
 
-typedef void (*walk_shares)(gpointer key,
-			    gpointer value,
-			    gpointer user_data);
-void for_each_ksmbd_share(walk_shares cb, gpointer user_data);
+typedef void (*share_cb)(struct ksmbd_share *share, void *data);
+void shm_iter_shares(share_cb cb, void *data);
 
 struct ksmbd_share_config_response;
 

@@ -77,19 +77,16 @@ void put_ksmbd_user(struct ksmbd_user *user)
 	usm_remove_user(user);
 }
 
-static gboolean put_user_callback(gpointer _k, gpointer _v, gpointer data)
-{
-	struct ksmbd_user *user = (struct ksmbd_user *)_v;
-
-	user->state = KSMBD_USER_STATE_FREEING;
-	put_ksmbd_user(user);
-	return TRUE;
-}
-
 void usm_remove_all_users(void)
 {
+	struct ksmbd_user *user;
+	GHashTableIter iter;
+
 	g_rw_lock_writer_lock(&users_table_lock);
-	g_hash_table_foreach_remove(users_table, put_user_callback, NULL);
+	ghash_for_each_remove(user, users_table, iter) {
+		user->state = KSMBD_USER_STATE_FREEING;
+		put_ksmbd_user(user);
+	}
 	g_rw_lock_writer_unlock(&users_table_lock);
 }
 
@@ -122,14 +119,13 @@ static struct ksmbd_user *new_ksmbd_user(char *name, char *pwd)
 	return user;
 }
 
-static void free_hash_entry(gpointer k, gpointer u, gpointer user_data)
-{
-	kill_ksmbd_user(u);
-}
-
 static void usm_clear_users(void)
 {
-	g_hash_table_foreach(users_table, free_hash_entry, NULL);
+	struct ksmbd_user *user;
+	GHashTableIter iter;
+
+	ghash_for_each(user, users_table, iter)
+		kill_ksmbd_user(user);
 }
 
 void usm_destroy(void)
@@ -252,10 +248,14 @@ int usm_add_guest_account(char *name)
 	return ret;
 }
 
-void for_each_ksmbd_user(walk_users cb, gpointer user_data)
+void usm_iter_users(user_cb cb, void *data)
 {
+	struct ksmbd_user *user;
+	GHashTableIter iter;
+
 	g_rw_lock_reader_lock(&users_table_lock);
-	g_hash_table_foreach(users_table, cb, user_data);
+	ghash_for_each(user, users_table, iter)
+		cb(user, data);
 	g_rw_lock_reader_unlock(&users_table_lock);
 }
 
