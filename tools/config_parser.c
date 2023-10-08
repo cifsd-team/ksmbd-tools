@@ -565,7 +565,7 @@ static void add_group_ipc_share_conf(void)
 	add_group_key_value("read only = yes");
 }
 
-static int process_groups(void)
+static int finalize_smbconf_parser(void)
 {
 	int ret;
 	GHashTableIter iter;
@@ -575,7 +575,7 @@ static int process_groups(void)
 
 	ret = usm_add_guest_account(global_conf.guest_account);
 	if (ret)
-		return ret;
+		goto out;
 
 	add_group("[ipc$]");
 	add_group_ipc_share_conf();
@@ -590,6 +590,8 @@ static int process_groups(void)
 	}
 
 	free_group(parser.global);
+out:
+	cp_smbconf_parser_destroy();
 	return ret;
 }
 
@@ -615,16 +617,36 @@ void cp_smbconf_parser_destroy(void)
 
 int cp_parse_smbconf(char *smbconf)
 {
-	int is_init = !!parser.groups, ret;
+	int is_owner = !parser.groups, ret;
 
 	cp_smbconf_parser_init();
 	ret = __mmap_parse_file(smbconf, process_smbconf_entry);
-	if (ret || is_init)
+	if (ret) {
+		if (ret == -ENOENT) {
+			if (TOOL_IS_ADDSHARE) {
+				ret = set_conf_contents(smbconf, "");
+			} else if (TOOL_IS_MOUNTD) {
+				pr_err("No configuration file\n");
+			} else {
+				ret = 0;
+				pr_info("No configuration file\n");
+			}
+		}
+		if (is_owner)
+			cp_smbconf_parser_destroy();
 		return ret;
+	}
 
-	ret = process_groups();
-	cp_smbconf_parser_destroy();
-	return ret;
+	if (!is_owner) {
+		struct smbconf_parser backup = parser;
+
+		parser = (struct smbconf_parser){0};
+		ret = cp_parse_smbconf(smbconf);
+		parser = backup;
+		return ret;
+	}
+
+	return finalize_smbconf_parser();
 }
 
 static int is_a_user_password(char *entry)
@@ -699,7 +721,17 @@ static int process_pwddb_entry(char *entry)
 
 int cp_parse_pwddb(char *pwddb)
 {
-	return __mmap_parse_file(pwddb, process_pwddb_entry);
+	int ret = __mmap_parse_file(pwddb, process_pwddb_entry);
+
+	if (ret == -ENOENT) {
+		if (TOOL_IS_ADDUSER) {
+			ret = set_conf_contents(pwddb, "");
+		} else {
+			ret = 0;
+			pr_info("No user database\n");
+		}
+	}
+	return ret;
 }
 
 static int is_a_subauth(char *entry)

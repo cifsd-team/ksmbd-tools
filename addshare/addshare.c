@@ -74,35 +74,6 @@ static int show_version(void)
 	return 0;
 }
 
-static int parse_configs(char *smbconf, char *pwddb)
-{
-	int ret;
-
-	ret = test_file_access(smbconf);
-	if (ret) {
-		pr_err("Failed to access configuration file\n");
-		return ret;
-	}
-
-	ret = cp_parse_pwddb(pwddb);
-	if (ret == -ENOENT) {
-		pr_info("User database does not exist, "
-			"cannot provide user completions\n");
-	} else if (ret) {
-		pr_err("Failed to parse user database\n");
-		return ret;
-	}
-
-	ret = cp_parse_smbconf(smbconf);
-	if (!ret) {
-		cp_smbconf_parser_init();
-		ret = cp_parse_smbconf(smbconf);
-	}
-	if (ret)
-		pr_err("Failed to parse configuration file\n");
-	return ret;
-}
-
 int addshare_main(int argc, char **argv)
 {
 	int ret = -EINVAL;
@@ -165,16 +136,12 @@ int addshare_main(int argc, char **argv)
 		goto out;
 	}
 
-	usm_init();
-	shm_init();
-
+	if (!pwddb)
+		pwddb = g_strdup(PATH_PWDDB);
 	if (!smbconf)
 		smbconf = g_strdup(PATH_SMBCONF);
 
-	if (!pwddb)
-		pwddb = g_strdup(PATH_PWDDB);
-
-	ret = parse_configs(smbconf, pwddb);
+	ret = load_config(pwddb, smbconf);
 	if (ret)
 		goto out;
 
@@ -194,8 +161,6 @@ int addshare_main(int argc, char **argv)
 			pr_info("Unable to notify mountd\n");
 	}
 out:
-	cp_smbconf_parser_destroy();
-	shm_destroy();
-	usm_destroy();
+	remove_config();
 	return ret ? EXIT_FAILURE : EXIT_SUCCESS;
 }

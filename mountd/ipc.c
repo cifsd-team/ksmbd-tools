@@ -65,36 +65,13 @@ static int generic_event(int type, void *payload, size_t sz)
 	return 0;
 }
 
-static int parse_reload_configs(void)
-{
-	int ret;
-
-	pr_debug("Reload config\n");
-
-	usm_remove_all_users();
-	ret = cp_parse_pwddb(global_conf.pwddb);
-	if (ret == -ENOENT) {
-		pr_info("User database does not exist, "
-			"only guest sessions may work\n");
-	} else if (ret) {
-		pr_err("Failed to parse user database\n");
-		return ret;
-	}
-
-	shm_remove_all_shares();
-	ret = cp_parse_smbconf(global_conf.smbconf);
-	if (ret)
-		pr_err("Failed to parse configuration file\n");
-	return ret;
-}
-
 static int handle_generic_event(struct nl_cache_ops *unused,
 				struct genl_cmd *cmd,
 				struct genl_info *info,
 				void *arg)
 {
 	if (ksmbd_health_status & KSMBD_SHOULD_RELOAD_CONFIG) {
-		parse_reload_configs();
+		load_config(global_conf.pwddb, global_conf.smbconf);
 		ksmbd_health_status &= ~KSMBD_SHOULD_RELOAD_CONFIG;
 	}
 

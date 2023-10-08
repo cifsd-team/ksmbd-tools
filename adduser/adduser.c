@@ -74,32 +74,6 @@ static int show_version(void)
 	return 0;
 }
 
-static int parse_configs(char *pwddb, char *smbconf)
-{
-	int ret;
-
-	ret = test_file_access(pwddb);
-	if (ret) {
-		pr_err("Failed to access user database\n");
-		return ret;
-	}
-
-	ret = cp_parse_pwddb(pwddb);
-	if (ret) {
-		pr_err("Failed to parse user database\n");
-		return ret;
-	}
-
-	ret = cp_parse_smbconf(smbconf);
-	if (ret == -ENOENT) {
-		pr_info("Configuration file does not exist, "
-			"cannot guard against user deletion\n");
-		ret = 0;
-	} else if (ret)
-		pr_err("Failed to parse configuration file\n");
-	return ret;
-}
-
 int adduser_main(int argc, char **argv)
 {
 	int ret = -EINVAL;
@@ -158,16 +132,12 @@ int adduser_main(int argc, char **argv)
 		goto out;
 	}
 
-	usm_init();
-	shm_init();
-
 	if (!pwddb)
 		pwddb = g_strdup(PATH_PWDDB);
-
 	if (!smbconf)
 		smbconf = g_strdup(PATH_SMBCONF);
 
-	ret = parse_configs(pwddb, smbconf);
+	ret = load_config(pwddb, smbconf);
 	if (ret)
 		goto out;
 
@@ -191,7 +161,6 @@ int adduser_main(int argc, char **argv)
 			pr_info("Unable to notify mountd\n");
 	}
 out:
-	shm_destroy();
-	usm_destroy();
+	remove_config();
 	return ret ? EXIT_FAILURE : EXIT_SUCCESS;
 }

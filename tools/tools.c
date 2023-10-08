@@ -12,7 +12,17 @@
 #include <fcntl.h>
 
 #include <stdio.h>
-#include <tools.h>
+
+#include "tools.h"
+#include "ipc.h"
+#include "rpc.h"
+#include "worker.h"
+#include "config_parser.h"
+#include "management/user.h"
+#include "management/share.h"
+#include "management/session.h"
+#include "management/tree_conn.h"
+#include "management/spnego.h"
 
 int log_level = PR_INFO;
 int ksmbd_health_status;
@@ -247,10 +257,10 @@ void gptrarray_printf(GPtrArray *gptrarray, const char *fmt, ...)
 	va_end(args);
 }
 
-int set_conf_contents(const char *conf, char *contents)
+int set_conf_contents(const char *conf, const char *contents)
 {
 	GError *error = NULL;
-	mode_t mask = umask(~(S_IRWXU | S_IRGRP));
+	mode_t mask = umask(~(S_IRUSR | S_IWUSR | S_IRGRP));
 
 	g_file_set_contents(conf, contents, -1, &error);
 	umask(mask);
@@ -261,6 +271,58 @@ int set_conf_contents(const char *conf, char *contents)
 	}
 	pr_info("Wrote `%s'\n", conf);
 	return 0;
+}
+
+int load_config(char *pwddb, char *smbconf)
+{
+	int ret;
+
+	usm_init();
+
+	if (TOOL_IS_MOUNTD)
+		usm_remove_all_users();
+
+	ret = cp_parse_pwddb(pwddb);
+	if (ret)
+		return ret;
+
+	if (TOOL_IS_ADDSHARE)
+		cp_smbconf_parser_init();
+
+	shm_init();
+
+	if (TOOL_IS_MOUNTD)
+		shm_remove_all_shares();
+
+	ret = cp_parse_smbconf(smbconf);
+	if (ret)
+		return ret;
+
+	if (TOOL_IS_MOUNTD) {
+		sm_init();
+		wp_init();
+		rpc_init();
+		ipc_init();
+		spnego_init();
+	}
+
+	return ret;
+}
+
+void remove_config(void)
+{
+	if (TOOL_IS_MOUNTD) {
+		spnego_destroy();
+		ipc_destroy();
+		rpc_destroy();
+		wp_destroy();
+		sm_destroy();
+	} else if (TOOL_IS_ADDSHARE) {
+		cp_smbconf_parser_destroy();
+	}
+
+	shm_destroy();
+	usm_destroy();
 }
 
 int send_signal_to_ksmbd_mountd(int signo)
@@ -296,20 +358,6 @@ int send_signal_to_ksmbd_mountd(int signo)
 out:
 	close(fd);
 	return ret;
-}
-
-int test_file_access(char *conf)
-{
-	int fd;
-
-	fd = open(conf, O_RDWR | O_CREAT, S_IRWXU | S_IRGRP);
-	if (fd < 0) {
-		pr_debug("Can't access `%s': %m\n", conf);
-		return -EINVAL;
-	}
-
-	close(fd);
-	return 0;
 }
 
 int set_tool_main(char *name)

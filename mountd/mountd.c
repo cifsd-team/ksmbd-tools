@@ -22,14 +22,7 @@
 #include <signal.h>
 
 #include "ipc.h"
-#include "rpc.h"
-#include "worker.h"
 #include "config_parser.h"
-#include "management/user.h"
-#include "management/share.h"
-#include "management/session.h"
-#include "management/tree_conn.h"
-#include "management/spnego.h"
 #include "version.h"
 
 static int no_detach;
@@ -199,38 +192,13 @@ static int setup_signals(sighandler_t handler)
 	return 0;
 }
 
-static int parse_configs(void)
-{
-	int ret;
-
-	ret = cp_parse_pwddb(global_conf.pwddb);
-	if (ret == -ENOENT) {
-		pr_info("User database does not exist, "
-			"only guest sessions may work\n");
-	} else if (ret) {
-		pr_err("Failed to parse user database\n");
-		return ret;
-	}
-
-	ret = cp_parse_smbconf(global_conf.smbconf);
-	if (ret)
-		pr_err("Failed to parse configuration file\n");
-	return ret;
-}
-
 static void worker_process_free(void)
 {
 	/*
 	 * NOTE, this is the final release, we don't look at ref_count
 	 * values. User management should be destroyed last.
 	 */
-	spnego_destroy();
-	ipc_destroy();
-	rpc_destroy();
-	wp_destroy();
-	sm_destroy();
-	shm_destroy();
-	usm_destroy();
+	remove_config();
 }
 
 static void worker_sig_handler(int signo)
@@ -287,18 +255,9 @@ static int worker_process_init(void)
 
 	setup_signals(worker_sig_handler);
 
-	usm_init();
-	shm_init();
-
-	ret = parse_configs();
+	ret = load_config(global_conf.pwddb, global_conf.smbconf);
 	if (ret)
 		goto out;
-
-	sm_init();
-	wp_init();
-	rpc_init();
-	ipc_init();
-	spnego_init();
 
 	while (ksmbd_health_status & KSMBD_HEALTH_RUNNING) {
 		ret = ipc_process_event();
