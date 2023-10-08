@@ -294,7 +294,6 @@ void shm_destroy(void)
 		shm_clear_shares();
 		g_hash_table_destroy(shares_table);
 	}
-	g_rw_lock_clear(&shares_table_lock);
 }
 
 static char *shm_casefold_share_name(const char *name, size_t len)
@@ -327,7 +326,6 @@ int shm_init(void)
 {
 	shares_table = g_hash_table_new((GHashFunc)shm_share_name_hash,
 					(GEqualFunc)shm_share_name_equal);
-	g_rw_lock_init(&shares_table_lock);
 	return 0;
 }
 

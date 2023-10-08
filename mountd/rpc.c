@@ -735,7 +735,6 @@ int ndr_write_array_of_structs(struct ksmbd_rpc_pipe *pipe)
 int rpc_init(void)
 {
 	pipes_table = g_hash_table_new(g_int_hash, g_int_equal);
-	g_rw_lock_init(&pipes_table_lock);
 	if (rpc_samr_init())
 		return -EINVAL;
 	if (rpc_lsarpc_init())
@@ -750,7 +749,6 @@ void rpc_destroy(void)
 		g_hash_table_destroy(pipes_table);
 		pipes_table = NULL;
 	}
-	g_rw_lock_clear(&pipes_table_lock);
 	rpc_samr_destroy();
 	rpc_lsarpc_destroy();
 }

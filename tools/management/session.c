@@ -209,12 +209,10 @@ void sm_destroy(void)
 		g_hash_table_destroy(sessions_table);
 		sessions_table = NULL;
 	}
-	g_rw_lock_clear(&sessions_table_lock);
 }
 
 int sm_init(void)
 {
 	sessions_table = g_hash_table_new(g_int64_hash, g_int64_equal);
-	g_rw_lock_init(&sessions_table_lock);
 	return 0;
 }

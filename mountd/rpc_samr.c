@@ -1028,7 +1028,6 @@ int rpc_samr_init(void)
 	domain_name = g_ascii_strup(hostname, -1);
 	rpc_samr_add_domain_entry(domain_name);
 	rpc_samr_add_domain_entry("Builtin");
-	g_rw_lock_init(&ch_table_lock);
 	return 0;
 }
 
@@ -1050,7 +1049,6 @@ void rpc_samr_destroy(void)
 		g_hash_table_destroy(ch_table);
 		ch_table = NULL;
 	}
-	g_rw_lock_clear(&ch_table_lock);
 	num_domain_entries = 0;
 	g_free(domain_name);
 	if (domain_entries) {

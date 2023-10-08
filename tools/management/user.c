@@ -135,13 +135,11 @@ void usm_destroy(void)
 		g_hash_table_destroy(users_table);
 		users_table = NULL;
 	}
-	g_rw_lock_clear(&users_table_lock);
 }
 
 int usm_init(void)
 {
 	users_table = g_hash_table_new(g_str_hash, g_str_equal);
-	g_rw_lock_init(&users_table_lock);
 	return 0;
 }
 
