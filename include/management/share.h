@@ -161,7 +161,7 @@ void shm_remove_all_shares(void);
 void shm_destroy(void);
 unsigned int shm_share_name_hash(const char *name);
 int shm_share_name_equal(const char *lname, const char *rname);
-int shm_init(void);
+void shm_init(void);
 
 int shm_lookup_users_map(struct ksmbd_share *share,
 			  enum share_users map,

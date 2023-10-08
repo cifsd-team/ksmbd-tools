@@ -39,8 +39,8 @@ static inline int cp_pwddb_eol(char *p)
 }
 
 void cp_parse_external_smbconf_group(char *name, char **options);
-void cp_init_smbconf_parser(void);
-void cp_release_smbconf_parser(void);
+void cp_smbconf_parser_init(void);
+void cp_smbconf_parser_destroy(void);
 
 int cp_parse_smbconf(char *smbconf);
 int cp_parse_pwddb(char *pwddb);

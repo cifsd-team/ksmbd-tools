@@ -211,8 +211,8 @@ void sm_destroy(void)
 	}
 }
 
-int sm_init(void)
+void sm_init(void)
 {
-	sessions_table = g_hash_table_new(g_int64_hash, g_int64_equal);
-	return 0;
+	if (!sessions_table)
+		sessions_table = g_hash_table_new(g_int64_hash, g_int64_equal);
 }

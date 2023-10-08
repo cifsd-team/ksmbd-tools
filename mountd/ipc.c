@@ -229,11 +229,6 @@ static int ipc_ksmbd_starting_up(void)
 	return ret;
 }
 
-static int ipc_ksmbd_shutting_down(void)
-{
-	return 0;
-}
-
 int ipc_process_event(void)
 {
 	int ret = 0;
@@ -464,8 +459,9 @@ out_error:
 
 void ipc_destroy(void)
 {
-	if (ksmbd_health_status & KSMBD_HEALTH_RUNNING) {
-		ipc_ksmbd_shutting_down();
+	switch (genl_register_family(&ksmbd_family_ops)) {
+	case -NLE_EXIST:
+	case 0:
 		genl_unregister_family(&ksmbd_family_ops);
 	}
 
@@ -473,59 +469,49 @@ void ipc_destroy(void)
 	sk = NULL;
 }
 
-int ipc_init(void)
+void ipc_init(void)
 {
 	int ret;
 
+	if (sk)
+		return;
+
 	sk = nl_socket_alloc();
 	if (!sk) {
-		pr_err("Cannot allocate netlink socket\n");
-		goto out_error;
+		pr_err("Can't allocate netlink socket\n");
+		abort();
 	}
 
 	nl_socket_disable_seq_check(sk);
-	if (nl_socket_modify_cb(sk, NL_CB_VALID, NL_CB_CUSTOM,
-				nlink_msg_cb, NULL))
-		goto out_error;
+	nl_socket_modify_cb(sk, NL_CB_VALID, NL_CB_CUSTOM, nlink_msg_cb, NULL);
 
 	if (nl_connect(sk, NETLINK_GENERIC)) {
-		pr_err("Cannot connect to generic netlink\n");
-		goto out_error;
+		pr_err("Can't connect to generic netlink\n");
+		abort();
 	}
 
 	ret = nl_socket_set_buffer_size(sk, KSMBD_IPC_SO_RCVBUF_SIZE, 0);
 	if (ret) {
-		pr_err("Cannot set netlink socket buffer size: %s [%d]\n", nl_geterror(ret), ret);
-		goto out_error;
+		pr_err("Can't set netlink socket buffer size: %s\n",
+		       nl_geterror(ret));
+		abort();
 	}
 
 	if (genl_register_family(&ksmbd_family_ops)) {
-		pr_err("Cannot register netlink family\n");
-		goto out_error;
+		pr_err("Can't register netlink family\n");
+		abort();
 	}
 
-	do {
-		/*
-		 * Chances are we can start before ksmbd kernel module is up
-		 * and running. So just wait for the kksmbd to register the
-		 * netlink family and accept our connection.
-		 */
-		ret = genl_ops_resolve(sk, &ksmbd_family_ops);
-		if (ret) {
-			pr_err("Cannot resolve netlink family\n");
-			sleep(5);
-		}
-	} while (ret);
+	ret = genl_ops_resolve(sk, &ksmbd_family_ops);
+	if (ret) {
+		pr_err("Can't resolve netlink family\n");
+		abort();
+	}
 
 	if (ipc_ksmbd_starting_up()) {
-		pr_err("Unable to send startup event\n");
-		return -EINVAL;
+		pr_err("Can't send startup event\n");
+		abort();
 	}
 
 	ksmbd_health_status = KSMBD_HEALTH_RUNNING;
-	return 0;
-
-out_error:
-	ipc_destroy();
-	return -EINVAL;
 }

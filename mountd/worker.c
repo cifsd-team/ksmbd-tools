@@ -318,16 +318,19 @@ int wp_ipc_msg_push(struct ksmbd_ipc_msg *msg)
 
 void wp_destroy(void)
 {
-	if (pool)
+	if (pool) {
 		g_thread_pool_free(pool, 1, 1);
+		pool = NULL;
+	}
 }
 
-int wp_init(void)
+void wp_init(void)
 {
-	pool = g_thread_pool_new(worker_pool_fn,
-				 NULL,
-				 MAX_WORKER_THREADS,
-				 0,
-				 NULL);
-	return 0;
+	if (!pool)
+		pool = g_thread_pool_new(
+			worker_pool_fn,
+			NULL,
+			MAX_WORKER_THREADS,
+			0,
+			NULL);
 }

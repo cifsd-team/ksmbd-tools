@@ -38,6 +38,6 @@ int ipc_msg_send(struct ksmbd_ipc_msg *msg);
 
 int ipc_process_event(void);
 void ipc_destroy(void);
-int ipc_init(void);
+void ipc_init(void);
 
 #endif /* __KSMBD_IPC_H__ */

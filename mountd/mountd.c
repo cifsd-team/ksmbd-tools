@@ -287,52 +287,18 @@ static int worker_process_init(void)
 
 	setup_signals(worker_sig_handler);
 
-	ret = usm_init();
-	if (ret) {
-		pr_err("Failed to init user management\n");
-		goto out;
-	}
-
-	ret = shm_init();
-	if (ret) {
-		pr_err("Failed to init net share management\n");
-		goto out;
-	}
+	usm_init();
+	shm_init();
 
 	ret = parse_configs();
 	if (ret)
 		goto out;
 
-	ret = sm_init();
-	if (ret) {
-		pr_err("Failed to init user session management\n");
-		goto out;
-	}
-
-	ret = wp_init();
-	if (ret) {
-		pr_err("Failed to init worker threads pool\n");
-		goto out;
-	}
-
-	ret = rpc_init();
-	if (ret) {
-		pr_err("Failed to init RPC subsystem\n");
-		goto out;
-	}
-
-	ret = ipc_init();
-	if (ret) {
-		pr_err("Failed to init IPC subsystem\n");
-		goto out;
-	}
-
-	ret = spnego_init();
-	if (ret) {
-		pr_err("Failed to init SPNEGO subsystem\n");
-		ret = KSMBD_STATUS_IPC_FATAL_ERROR;
-		goto out;
-	}
+	sm_init();
+	wp_init();
+	rpc_init();
+	ipc_init();
+	spnego_init();
 
 	while (ksmbd_health_status & KSMBD_HEALTH_RUNNING) {
 		ret = ipc_process_event();

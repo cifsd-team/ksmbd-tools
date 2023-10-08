@@ -54,7 +54,7 @@ int usm_add_guest_account(char *name);
 void usm_remove_all_users(void);
 
 void usm_destroy(void);
-int usm_init(void);
+void usm_init(void);
 
 typedef void (*user_cb)(struct ksmbd_user *user, void *data);
 void usm_iter_users(user_cb cb, void *data);

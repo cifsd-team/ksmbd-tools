@@ -33,6 +33,6 @@ int sm_handle_tree_disconnect(unsigned long long sess_id,
 			      unsigned long long tree_conn_id);
 
 void sm_destroy(void);
-int sm_init(void);
+void sm_init(void);
 
 #endif /* __MANAGEMENT_TCONNECTION_H__ */

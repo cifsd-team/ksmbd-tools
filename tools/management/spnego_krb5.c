@@ -330,6 +330,9 @@ static int setup_krb5_ctx(struct spnego_mech_ctx *mech_ctx)
 	struct spnego_krb5_ctx *krb5_ctx;
 	krb5_error_code krb_retval;
 
+	if (mech_ctx->private)
+		return 0;
+
 	krb5_ctx = g_try_malloc0(sizeof(*krb5_ctx));
 	if (!krb5_ctx)
 		return -ENOMEM;
@@ -381,8 +384,12 @@ static void cleanup_krb5(struct spnego_mech_ctx *mech_ctx)
 		g_free(krb5_ctx);
 		mech_ctx->private = NULL;
 	}
+
 	g_free(mech_ctx->params.krb5.service_name);
+	mech_ctx->params.krb5.service_name = NULL;
+
 	g_free(mech_ctx->params.krb5.keytab_name);
+	mech_ctx->params.krb5.keytab_name = NULL;
 }
 
 struct spnego_mech_operations spnego_krb5_operations = {

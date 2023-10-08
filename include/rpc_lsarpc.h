@@ -34,7 +34,7 @@ int rpc_lsarpc_read_request(struct ksmbd_rpc_pipe *pipe,
 			  int max_resp_sz);
 
 int rpc_lsarpc_write_request(struct ksmbd_rpc_pipe *pipe);
-int rpc_lsarpc_init(void);
+void rpc_lsarpc_init(void);
 void rpc_lsarpc_destroy(void);
 
 #endif /* __KSMBD_RPC_LSARPC_H__ */

@@ -27,6 +27,6 @@ int rpc_samr_read_request(struct ksmbd_rpc_pipe *pipe,
 
 int rpc_samr_write_request(struct ksmbd_rpc_pipe *pipe);
 
-int rpc_samr_init(void);
+void rpc_samr_init(void);
 void rpc_samr_destroy(void);
 #endif /* __KSMBD_RPC_SAMR_H__ */

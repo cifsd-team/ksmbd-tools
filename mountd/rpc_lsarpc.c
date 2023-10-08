@@ -706,28 +706,33 @@ static void lsarpc_ph_clear_table(void)
 	g_rw_lock_writer_unlock(&ph_table_lock);
 }
 
-int rpc_lsarpc_init(void)
+void rpc_lsarpc_init(void)
 {
-	char domain_string[NAME_MAX];
+	if (!domain_name) {
+		char hostname[NAME_MAX];
 
-	/*
-	 * ksmbd supports the standalone server and
-	 * uses the hostname as the domain name.
-	 */
-	if (gethostname(domain_string, NAME_MAX))
-		return -EINVAL;
+		/*
+		 * ksmbd supports the standalone server and
+		 * uses the hostname as the domain name.
+		 */
+		if (gethostname(hostname, NAME_MAX))
+			abort();
 
-	domain_name = g_ascii_strup(domain_string, -1);
-	ph_table = g_hash_table_new(g_str_hash, g_str_equal);
-	return 0;
+		domain_name = g_ascii_strup(hostname, -1);
+	}
+
+	if (!ph_table)
+		ph_table = g_hash_table_new(g_str_hash, g_str_equal);
 }
 
 void rpc_lsarpc_destroy(void)
 {
-	g_free(domain_name);
 	if (ph_table) {
 		lsarpc_ph_clear_table();
 		g_hash_table_destroy(ph_table);
 		ph_table = NULL;
 	}
+
+	g_free(domain_name);
+	domain_name = NULL;
 }

@@ -95,7 +95,7 @@ static int parse_configs(char *smbconf, char *pwddb)
 
 	ret = cp_parse_smbconf(smbconf);
 	if (!ret) {
-		cp_init_smbconf_parser();
+		cp_smbconf_parser_init();
 		ret = cp_parse_smbconf(smbconf);
 	}
 	if (ret)
@@ -165,23 +165,14 @@ int addshare_main(int argc, char **argv)
 		goto out;
 	}
 
+	usm_init();
+	shm_init();
+
 	if (!smbconf)
 		smbconf = g_strdup(PATH_SMBCONF);
 
 	if (!pwddb)
 		pwddb = g_strdup(PATH_PWDDB);
-
-	ret = usm_init();
-	if (ret) {
-		pr_err("Failed to init user management\n");
-		goto out;
-	}
-
-	ret = shm_init();
-	if (ret) {
-		pr_err("Failed to init share management\n");
-		goto out;
-	}
 
 	ret = parse_configs(smbconf, pwddb);
 	if (ret)
@@ -203,7 +194,7 @@ int addshare_main(int argc, char **argv)
 			pr_info("Unable to notify mountd\n");
 	}
 out:
-	cp_release_smbconf_parser();
+	cp_smbconf_parser_destroy();
 	shm_destroy();
 	usm_destroy();
 	return ret ? EXIT_FAILURE : EXIT_SUCCESS;

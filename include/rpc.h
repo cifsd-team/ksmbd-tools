@@ -335,7 +335,7 @@ void dcerpc_set_ext_payload(struct ksmbd_dcerpc *dce,
 			    size_t sz);
 void rpc_pipe_reset(struct ksmbd_rpc_pipe *pipe);
 
-int rpc_init(void);
+void rpc_init(void);
 void rpc_destroy(void);
 
 int rpc_restricted_context(struct ksmbd_rpc_command *req);

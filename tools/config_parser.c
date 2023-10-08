@@ -243,7 +243,7 @@ out:
 	return ret;
 }
 
-static void release_smbconf_group(struct smbconf_group *g)
+static void free_group(struct smbconf_group *g)
 {
 	g_hash_table_destroy(g->kv);
 	g_free(g->name);
@@ -586,46 +586,44 @@ static int process_groups(void)
 
 		add_group_global_share_conf();
 		shm_add_new_share(parser.current);
-		release_smbconf_group(parser.current);
+		free_group(parser.current);
 	}
 
-	release_smbconf_group(parser.global);
+	free_group(parser.global);
 	return ret;
 }
 
-void cp_init_smbconf_parser(void)
-{
-	if (parser.groups)
-		return;
-
-	parser.groups = g_hash_table_new_full(
-		(GHashFunc)shm_share_name_hash,
-		(GEqualFunc)shm_share_name_equal,
-		NULL,
-		(GDestroyNotify)release_smbconf_group);
-	parser.current = parser.global = parser.ipc = NULL;
-}
-
-void cp_release_smbconf_parser(void)
+void cp_smbconf_parser_init(void)
 {
 	if (!parser.groups)
-		return;
+		parser.groups = g_hash_table_new_full(
+			(GHashFunc)shm_share_name_hash,
+			(GEqualFunc)shm_share_name_equal,
+			NULL,
+			(GDestroyNotify)free_group);
+}
 
-	g_hash_table_destroy(parser.groups);
-	parser.groups = NULL;
+void cp_smbconf_parser_destroy(void)
+{
+	if (parser.groups) {
+		g_hash_table_destroy(parser.groups);
+		parser.groups = NULL;
+	}
+
+	parser.current = parser.global = parser.ipc = NULL;
 }
 
 int cp_parse_smbconf(char *smbconf)
 {
 	int is_init = !!parser.groups, ret;
 
-	cp_init_smbconf_parser();
+	cp_smbconf_parser_init();
 	ret = __mmap_parse_file(smbconf, process_smbconf_entry);
 	if (ret || is_init)
 		return ret;
 
 	ret = process_groups();
-	cp_release_smbconf_parser();
+	cp_smbconf_parser_destroy();
 	return ret;
 }
 

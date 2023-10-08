@@ -732,25 +732,25 @@ int ndr_write_array_of_structs(struct ksmbd_rpc_pipe *pipe)
 	return __ndr_write_array_of_structs(pipe, max_entry_nr);
 }
 
-int rpc_init(void)
+void rpc_init(void)
 {
-	pipes_table = g_hash_table_new(g_int_hash, g_int_equal);
-	if (rpc_samr_init())
-		return -EINVAL;
-	if (rpc_lsarpc_init())
-		return -EINVAL;
-	return 0;
+	if (!pipes_table)
+		pipes_table = g_hash_table_new(g_int_hash, g_int_equal);
+
+	rpc_samr_init();
+	rpc_lsarpc_init();
 }
 
 void rpc_destroy(void)
 {
+	rpc_lsarpc_destroy();
+	rpc_samr_destroy();
+
 	if (pipes_table) {
 		__clear_pipes_table();
 		g_hash_table_destroy(pipes_table);
 		pipes_table = NULL;
 	}
-	rpc_samr_destroy();
-	rpc_lsarpc_destroy();
 }
 
 static int dcerpc_hdr_write(struct ksmbd_dcerpc *dce,

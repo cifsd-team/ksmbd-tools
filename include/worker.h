@@ -12,6 +12,6 @@ struct ksmbd_ipc_msg;
 
 int wp_ipc_msg_push(struct ksmbd_ipc_msg *msg);
 void wp_destroy(void);
-int wp_init(void);
+void wp_init(void);
 
 #endif /* __KSMBD_WORKER_H__ */

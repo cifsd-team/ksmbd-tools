@@ -293,6 +293,7 @@ void shm_destroy(void)
 	if (shares_table) {
 		shm_clear_shares();
 		g_hash_table_destroy(shares_table);
+		shares_table = NULL;
 	}
 }
 
@@ -322,11 +323,12 @@ int shm_share_name_equal(const char *lname, const char *rname)
 	return g_str_equal(cf_lname, cf_rname);
 }
 
-int shm_init(void)
+void shm_init(void)
 {
-	shares_table = g_hash_table_new((GHashFunc)shm_share_name_hash,
-					(GEqualFunc)shm_share_name_equal);
-	return 0;
+	if (!shares_table)
+		shares_table = g_hash_table_new(
+			(GHashFunc)shm_share_name_hash,
+			(GEqualFunc)shm_share_name_equal);
 }
 
 static struct ksmbd_share *__shm_lookup_share(char *name)

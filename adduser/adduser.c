@@ -158,23 +158,14 @@ int adduser_main(int argc, char **argv)
 		goto out;
 	}
 
+	usm_init();
+	shm_init();
+
 	if (!pwddb)
 		pwddb = g_strdup(PATH_PWDDB);
 
 	if (!smbconf)
 		smbconf = g_strdup(PATH_SMBCONF);
-
-	ret = usm_init();
-	if (ret) {
-		pr_err("Failed to init user management\n");
-		goto out;
-	}
-
-	ret = shm_init();
-	if (ret) {
-		pr_err("Failed to init net share management\n");
-		goto out;
-	}
 
 	ret = parse_configs(pwddb, smbconf);
 	if (ret)

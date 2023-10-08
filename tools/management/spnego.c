@@ -33,44 +33,35 @@ static struct spnego_mech_ctx *get_mech(int mech_type)
 	return &mech_ctxs[mech_type];
 }
 
-int spnego_init(void)
+void spnego_init(void)
 {
 	struct spnego_mech_ctx *mech_ctx;
 	int i;
 
 	mech_ctx = &mech_ctxs[SPNEGO_MECH_MSKRB5];
-	mech_ctx->ops = &spnego_mskrb5_operations;
-	if (global_conf.krb5_service_name)
+	if (!mech_ctx->ops)
+		mech_ctx->ops = &spnego_mskrb5_operations;
+	if (!mech_ctx->params.krb5.service_name)
 		mech_ctx->params.krb5.service_name =
 			g_strdup(global_conf.krb5_service_name);
-	if (global_conf.krb5_keytab_file)
+	if (!mech_ctx->params.krb5.keytab_name)
 		mech_ctx->params.krb5.keytab_name =
 			g_strdup(global_conf.krb5_keytab_file);
 
 	mech_ctx = &mech_ctxs[SPNEGO_MECH_KRB5];
-	mech_ctx->ops = &spnego_krb5_operations;
-	if (global_conf.krb5_service_name)
+	if (!mech_ctx->ops)
+		mech_ctx->ops = &spnego_krb5_operations;
+	if (!mech_ctx->params.krb5.service_name)
 		mech_ctx->params.krb5.service_name =
 			g_strdup(global_conf.krb5_service_name);
-	if (global_conf.krb5_keytab_file)
+	if (!mech_ctx->params.krb5.keytab_name)
 		mech_ctx->params.krb5.keytab_name =
 			g_strdup(global_conf.krb5_keytab_file);
 
-	for (i = 0; i < SPNEGO_MAX_MECHS; i++) {
+	for (i = 0; i < SPNEGO_MAX_MECHS; i++)
 		if (mech_ctxs[i].ops->setup &&
-				mech_ctxs[i].ops->setup(&mech_ctxs[i])) {
-			pr_err("Failed to init Kerberos 5\n");
-			goto out_err;
-		}
-	}
-
-	return 0;
-out_err:
-	for (; i >= 0; i--) {
-		if (mech_ctxs[i].ops->cleanup)
-			mech_ctxs[i].ops->cleanup(&mech_ctxs[i]);
-	}
-	return -ENOTSUP;
+		    mech_ctxs[i].ops->setup(&mech_ctxs[i]))
+			abort();
 }
 
 void spnego_destroy(void)

@@ -1011,24 +1011,29 @@ static void rpc_samr_add_domain_entry(char *name)
 	num_domain_entries++;
 }
 
-int rpc_samr_init(void)
+void rpc_samr_init(void)
 {
-	char hostname[NAME_MAX];
+	if (!domain_name) {
+		char hostname[NAME_MAX];
 
-	ch_table = g_hash_table_new(g_str_hash, g_str_equal);
-	domain_entries = g_ptr_array_new_with_free_func(g_free);
+		/*
+		 * ksmbd supports the standalone server and
+		 * uses the hostname as the domain name.
+		 */
+		if (gethostname(hostname, NAME_MAX))
+			abort();
 
-	/*
-	 * ksmbd supports the standalone server and
-	 * uses the hostname as the domain name.
-	 */
-	if (gethostname(hostname, NAME_MAX))
-		return -EINVAL;
+		domain_name = g_ascii_strup(hostname, -1);
+	}
 
-	domain_name = g_ascii_strup(hostname, -1);
-	rpc_samr_add_domain_entry(domain_name);
-	rpc_samr_add_domain_entry("Builtin");
-	return 0;
+	if (!domain_entries) {
+		domain_entries = g_ptr_array_new_with_free_func(g_free);
+		rpc_samr_add_domain_entry(domain_name);
+		rpc_samr_add_domain_entry("Builtin");
+	}
+
+	if (!ch_table)
+		ch_table = g_hash_table_new(g_str_hash, g_str_equal);
 }
 
 static void samr_ch_clear_table(void)
@@ -1049,10 +1054,14 @@ void rpc_samr_destroy(void)
 		g_hash_table_destroy(ch_table);
 		ch_table = NULL;
 	}
-	num_domain_entries = 0;
-	g_free(domain_name);
+
 	if (domain_entries) {
 		g_ptr_array_free(domain_entries, 1);
 		domain_entries = NULL;
 	}
+
+	num_domain_entries = 0;
+
+	g_free(domain_name);
+	domain_name = NULL;
 }
