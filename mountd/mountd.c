@@ -7,10 +7,6 @@
 
 #include <tools.h>
 
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -24,11 +20,6 @@
 #include "ipc.h"
 #include "config_parser.h"
 #include "version.h"
-
-static int no_detach;
-static pid_t worker_pid;
-
-typedef int (*worker_fn)(void);
 
 static void usage(int status)
 {
@@ -72,245 +63,255 @@ static int show_version(void)
 	return 0;
 }
 
-static int wait_group_kill(int signo)
+static void worker_sa_sigaction(int signo, siginfo_t *siginfo, void *ucontext)
 {
-	pid_t child;
-	int status;
+	switch (signo) {
+	case SIGCHLD:
+		return;
+	case SIGHUP:
+		ksmbd_health_status |= KSMBD_SHOULD_RELOAD_CONFIG;
+		return;
+	case SIGINT:
+	case SIGQUIT:
+	case SIGTERM:
+		ksmbd_health_status &= ~KSMBD_HEALTH_RUNNING;
+		return;
+	}
 
-	if (kill(worker_pid, signo) == -1)
-		pr_err("Unable to send signal %d (%s) to PID %d: %m\n",
-				signo, strsignal(signo), worker_pid);
+	_Exit(128 + signo);
+}
 
-	while (1) {
-		child = waitpid(-1, &status, 0);
-		if (child == -1) {
-			pr_debug("waitpid() returned an error: %m\n");
-			break;
-		} else if (child != 0) {
-			pr_debug("Detected state change of PID %d\n", child);
-			break;
+static int worker_init_sa_handler(sigset_t sigset)
+{
+	int signo;
+
+	for (signo = 1; signo < _NSIG; signo++)
+		if (sigismember(&sigset, signo)) {
+			struct sigaction act = {
+				.sa_sigaction = worker_sa_sigaction,
+				.sa_flags = SA_SIGINFO,
+			};
+
+			sigfillset(&act.sa_mask);
+			sigaction(signo, &act, NULL);
 		}
-		sleep(1);
+}
+
+static int worker_init_wait(pid_t pid, sigset_t sigset)
+{
+	int ret = -ECHILD;
+
+	pr_info("Started worker\n");
+
+	for (;;) {
+		siginfo_t siginfo;
+
+		if (sigwaitinfo(&sigset, &siginfo) < 0)
+			continue;
+
+		if (siginfo.si_signo == SIGCHLD) {
+			if (siginfo.si_code == CLD_KILLED)
+				siginfo.si_status += 128;
+			else if (siginfo.si_code != CLD_EXITED &&
+				 siginfo.si_code != CLD_DUMPED)
+				continue;
+			if (siginfo.si_status > 128) {
+				int signo = siginfo.si_status - 128;
+
+				if (!sigismember(&sigset, signo))
+					ret = -EIO;
+				pr_err("Worker " "%s" "killed: %s\n",
+				       ret == -EIO ? "fatally " : "",
+				       strsignal(signo));
+			} else if (siginfo.si_status != EXIT_SUCCESS) {
+				ret = -EIO;
+			}
+			return ret;
+		}
+
+		if (siginfo.si_signo == SIGINT ||
+		    siginfo.si_signo == SIGQUIT ||
+		    siginfo.si_signo == SIGTERM)
+			ret = 0;
+
+		kill(pid, siginfo.si_signo);
 	}
-	return 0;
 }
 
-static int setup_signal_handler(int signo, sighandler_t handler)
+static int worker_init(void)
 {
-	int status;
-	sigset_t full_set;
-	struct sigaction act = {};
-
-	sigfillset(&full_set);
-
-	act.sa_handler = handler;
-	act.sa_mask = full_set;
-
-	status = sigaction(signo, &act, NULL);
-	if (status != 0)
-		pr_err("Unable to register handler for signal %d (%s): %m",
-				signo, strsignal(signo));
-	return status;
-}
-
-static int setup_signals(sighandler_t handler)
-{
-	if (setup_signal_handler(SIGINT, handler) != 0)
-		return -EINVAL;
-
-	if (setup_signal_handler(SIGTERM, handler) != 0)
-		return -EINVAL;
-
-	if (setup_signal_handler(SIGABRT, handler) != 0)
-		return -EINVAL;
-
-	if (setup_signal_handler(SIGQUIT, handler) != 0)
-		return -EINVAL;
-
-	if (setup_signal_handler(SIGHUP, handler) != 0)
-		return -EINVAL;
-
-	return 0;
-}
-
-static void worker_process_free(void)
-{
-	/*
-	 * NOTE, this is the final release, we don't look at ref_count
-	 * values. User management should be destroyed last.
-	 */
-	remove_config();
-}
-
-static void worker_sig_handler(int signo)
-{
-	static volatile int fatal_delivered = 0;
-
-	if (signo == SIGHUP) {
-		/*
-		 * This is a signal handler, we can't take any locks, set
-		 * a flag and wait for normal execution context to re-read
-		 * the configs.
-		 */
-		ksmbd_health_status |= KSMBD_SHOULD_RELOAD_CONFIG;
-		pr_debug("Scheduled a config reload action\n");
-		return;
-	}
-
-	pr_info("Worker received signal %d (%s)\n", signo, strsignal(signo));
-
-	if (!g_atomic_int_compare_and_exchange(&fatal_delivered, 0, 1))
-		return;
-
-	ksmbd_health_status &= ~KSMBD_HEALTH_RUNNING;
-	worker_process_free();
-	exit(EXIT_SUCCESS);
-}
-
-static void manager_sig_handler(int signo)
-{
-	/*
-	 * Pass SIGHUP to worker, so it will reload configs
-	 */
-	if (signo == SIGHUP) {
-		if (!worker_pid)
-			return;
-
-		ksmbd_health_status |= KSMBD_SHOULD_RELOAD_CONFIG;
-		if (kill(worker_pid, signo) == -1)
-			pr_err("Unable to send signal %d (%s) to PID %d: %m\n",
-					signo, strsignal(signo), worker_pid);
-		return;
-	}
-
-	setup_signals(SIG_DFL);
-	wait_group_kill(signo);
-	pr_info("Exiting, bye!\n");
-	kill(0, SIGINT);
-}
-
-static int worker_process_init(void)
-{
+	sigset_t sigset;
+	pid_t pid;
 	int ret;
 
-	setup_signals(worker_sig_handler);
+	sigemptyset(&sigset);
+	sigaddset(&sigset, SIGCHLD);
+	sigaddset(&sigset, SIGHUP);
+	sigaddset(&sigset, SIGINT);
+	sigaddset(&sigset, SIGQUIT);
+	sigaddset(&sigset, SIGTERM);
+	sigaddset(&sigset, SIGABRT);
+	pthread_sigmask(SIG_BLOCK, &sigset, NULL);
+
+	pid = fork();
+	if (pid < 0) {
+		ret = -errno;
+		pr_err("Can't fork worker: %m\n");
+		return ret;
+	}
+	if (pid > 0)
+		return worker_init_wait(pid, sigset);
+
+	worker_init_sa_handler(sigset);
 
 	ret = load_config(global_conf.pwddb, global_conf.smbconf);
 	if (ret)
 		goto out;
 
-	while (ksmbd_health_status & KSMBD_HEALTH_RUNNING) {
+	for (;;) {
+		pthread_sigmask(SIG_UNBLOCK, &sigset, NULL);
+
 		ret = ipc_process_event();
-		if (ret == -KSMBD_STATUS_IPC_FATAL_ERROR) {
-			ret = KSMBD_STATUS_IPC_FATAL_ERROR;
-			break;
+
+		pthread_sigmask(SIG_BLOCK, &sigset, NULL);
+
+		if (ret || !(ksmbd_health_status & KSMBD_HEALTH_RUNNING))
+			goto out;
+
+		if (ksmbd_health_status & KSMBD_SHOULD_RELOAD_CONFIG) {
+			ret = load_config(global_conf.pwddb,
+					  global_conf.smbconf);
+			if (!ret) {
+				pr_info("Reloaded config\n");
+				ksmbd_health_status &=
+					~KSMBD_SHOULD_RELOAD_CONFIG;
+			}
 		}
 	}
+
 out:
-	worker_process_free();
+	remove_config();
 	return ret;
 }
 
-static pid_t start_worker_process(worker_fn fn)
+static int manager_init_wait(sigset_t sigset)
 {
-	int status = 0;
-	pid_t __pid;
+	pr_info("Started manager\n");
 
-	__pid = fork();
-	if (__pid < 0) {
-		pr_err("Can't fork worker process: %m\n");
-		return -EINVAL;
+	for (;;) {
+		siginfo_t siginfo;
+
+		if (sigwaitinfo(&sigset, &siginfo) < 0)
+			continue;
+
+		if (siginfo.si_signo == SIGCHLD) {
+			if (siginfo.si_code != CLD_KILLED &&
+			    siginfo.si_code != CLD_EXITED &&
+			    siginfo.si_code != CLD_DUMPED)
+				continue;
+			pr_err("Can't init manager, check syslog\n");
+			return -ECHILD;
+		}
+
+		if (siginfo.si_signo == SIGUSR1) {
+			if (siginfo.si_pid != global_conf.pid)
+				continue;
+			return 0;
+		}
 	}
-	if (__pid == 0) {
-		status = fn() ? EXIT_FAILURE : EXIT_SUCCESS;
-		exit(status);
-	}
-	return __pid;
 }
 
-static int manager_process_init(void)
+static int manager_init(int nodetach)
 {
-	/*
-	 * Do not chdir() daemon()'d process to '/'.
-	 */
-	int nochdir = 1;
+	int signo;
+	sigset_t sigset;
+	int ret;
 
-	setup_signals(manager_sig_handler);
-	if (no_detach == 0) {
-		pr_logger_init(PR_LOGGER_SYSLOG);
-		if (daemon(nochdir, 0) != 0) {
-			pr_err("Daemonization failed\n");
-			goto out;
+	for (signo = 1; signo < _NSIG; signo++) {
+		struct sigaction act = {
+			.sa_handler = SIG_DFL,
+			.sa_flags = signo == SIGCHLD ? SA_NOCLDWAIT : 0,
+		};
+
+		sigfillset(&act.sa_mask);
+		sigaction(signo, &act, NULL);
+	}
+
+	sigemptyset(&sigset);
+	pthread_sigmask(SIG_SETMASK, &sigset, NULL);
+
+	switch (nodetach) {
+	case 0:
+		sigaddset(&sigset, SIGCHLD);
+		sigaddset(&sigset, SIGUSR1);
+		pthread_sigmask(SIG_BLOCK, &sigset, NULL);
+
+		global_conf.pid = fork();
+		if (global_conf.pid < 0) {
+			ret = -errno;
+			pr_err("Can't fork manager: %m\n");
+			return ret;
 		}
-	} else if (no_detach == 1)
-		setpgid(0, 0);
+		if (global_conf.pid > 0)
+			return manager_init_wait(sigset);
 
-	if (cp_parse_lock())
-		goto out;
+		setsid();
+		freopen("/dev/null", "r", stdin);
+		freopen("/dev/null", "w", stdout);
+		freopen("/dev/null", "w", stderr);
+		pr_logger_init(PR_LOGGER_SYSLOG);
+
+		pthread_sigmask(SIG_UNBLOCK, &sigset, NULL);
+		break;
+	case 1:
+		setpgid(0, 0);
+	}
+
+	ret = cp_parse_lock();
+	if (ret)
+		return ret;
 
 	if (cp_parse_subauth())
-		pr_info("Unable to parse subauth file\n");
+		pr_info("Ignored subauth file\n");
 
-	worker_pid = start_worker_process(worker_process_init);
-	if (worker_pid < 0)
-		goto out;
+	if (!nodetach) {
+		pid_t ppid = getppid();
 
-	while (1) {
-		int status;
-		pid_t child;
-
-		child = waitpid(-1, &status, 0);
-		if (child == -1)
-			switch (errno) {
-			case EINTR:
-				if (ksmbd_health_status &
-						KSMBD_SHOULD_RELOAD_CONFIG) {
-					ksmbd_health_status &=
-						~KSMBD_SHOULD_RELOAD_CONFIG;
-					continue;
-				}
-				/* Fall through */
-			default:
-				pr_err("waitpid() returned an error: %m\n");
-				goto out;
-			}
-		else if (child != 0)
-			pr_info("Worker PID %d changed state\n", child);
-
-		if (WIFEXITED(status) &&
-			WEXITSTATUS(status) == KSMBD_STATUS_IPC_FATAL_ERROR) {
-			pr_err("Fatal IPC error, terminating, check dmesg!\n");
-			goto out;
+		if (ppid == 1)
+			return -ESRCH;
+		if (kill(ppid, SIGUSR1) < 0) {
+			ret = -errno;
+			pr_err("Can't send SIGUSR1 to PID %d: %m\n", ppid);
+			return ret;
 		}
-
-		/* Ratelimit automatic restarts */
-		sleep(1);
-		worker_pid = start_worker_process(worker_process_init);
-		if (worker_pid < 0)
-			goto out;
 	}
-out:
-	kill(0, SIGTERM);
-	return 0;
+
+	for (;;) {
+		ret = worker_init();
+		switch (ret) {
+		case -ECHILD:
+			sleep(1);
+			continue;
+		default:
+			pr_info("Terminated\n");
+			return ret;
+		}
+	}
 }
 
 int mountd_main(int argc, char **argv)
 {
 	int ret = -EINVAL;
+	int nodetach = 0;
 	int c;
 
-	memset(&global_conf, 0x00, sizeof(struct smbconf_global));
 	while ((c = getopt_long(argc, argv, "p:n::C:P:vVh", opts, NULL)) != EOF)
 		switch (c) {
 		case 'p':
-			pr_debug("TCP port option override\n");
 			global_conf.tcp_port = cp_get_group_kv_long(optarg);
 			break;
 		case 'n':
-			if (!optarg)
-				no_detach = 1;
-			else
-				no_detach = cp_get_group_kv_long(optarg);
+			nodetach = !optarg ?: cp_get_group_kv_long(optarg);
 			break;
 		case 'C':
 			g_free(global_conf.smbconf);
@@ -346,8 +347,7 @@ int mountd_main(int argc, char **argv)
 	if (!global_conf.pwddb)
 		global_conf.pwddb = g_strdup(PATH_PWDDB);
 
-	setup_signals(manager_sig_handler);
-	ret = manager_process_init();
+	ret = manager_init(nodetach);
 out:
 	return ret ? EXIT_FAILURE : EXIT_SUCCESS;
 }

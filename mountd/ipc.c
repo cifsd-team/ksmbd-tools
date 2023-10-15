@@ -70,11 +70,6 @@ static int handle_generic_event(struct nl_cache_ops *unused,
 				struct genl_info *info,
 				void *arg)
 {
-	if (ksmbd_health_status & KSMBD_SHOULD_RELOAD_CONFIG) {
-		load_config(global_conf.pwddb, global_conf.smbconf);
-		ksmbd_health_status &= ~KSMBD_SHOULD_RELOAD_CONFIG;
-	}
-
 	if (!info->attrs[cmd->c_id])
 		return NL_SKIP;
 
@@ -208,14 +203,28 @@ static int ipc_ksmbd_starting_up(void)
 
 int ipc_process_event(void)
 {
-	int ret = 0;
+	fd_set rfds;
+	int sk_fd, ret;
+
+	FD_ZERO(&rfds);
+
+	sk_fd = nl_socket_get_fd(sk);
+	FD_SET(sk_fd, &rfds);
+
+	if (select(sk_fd + 1, &rfds, NULL, NULL, NULL) < 0) {
+		if (errno != EINTR) {
+			ret = -errno;
+			pr_err("Can't wait on netlink socket: %m\n");
+			return ret;
+		}
+		ret = 0;
+		return ret;
+	}
 
 	ret = nl_recvmsgs_default(sk);
-	if (ret < 0) {
-		pr_err("nl_recv() returned error code %d: %s\n",
-		       ret, nl_geterror(ret));
-		return -KSMBD_STATUS_IPC_FATAL_ERROR;
-	}
+	if (ret < 0)
+		pr_err("nl_recv() failed, check dmesg, error: %s\n",
+		       nl_geterror(ret));
 	return ret;
 }
 

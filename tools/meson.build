@@ -27,6 +27,7 @@ executable(
     glib_dep,
     krb5_dep,
     asn1_lib,
+    pthread_lib,
   ],
   link_with: [
     addshare_lib,

@@ -29,8 +29,6 @@ struct ksmbd_ipc_msg {
 #define KSMBD_IPC_MSG_PAYLOAD(m)				\
 	(void *)(((struct ksmbd_ipc_msg *)(m))->____payload)
 
-#define KSMBD_STATUS_IPC_FATAL_ERROR	11
-
 struct ksmbd_ipc_msg *ipc_msg_alloc(size_t sz);
 void ipc_msg_free(struct ksmbd_ipc_msg *msg);
 

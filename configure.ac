@@ -89,6 +89,16 @@ AS_IF([test "x$with_systemdsystemunitdir" != xno], [
 
 AC_SUBST([systemdsystemunitdir])
 
+save_LIBS=$LIBS
+LIBS=
+AC_SEARCH_LIBS([pthread_sigmask], [pthread], [], [
+	AC_MSG_ERROR([pthread was not found.])
+])
+PTHREAD_LIBS=$LIBS
+LIBS=$save_LIBS
+
+AC_SUBST([PTHREAD_LIBS])
+
 PKG_CHECK_MODULES([GLIB], [glib-2.0 >= 2.44], [have_glib=yes], [have_glib=no])
 AS_IF([test "x$have_glib" != xyes], [
 	AC_MSG_ERROR([glib (libglib2.0-dev or glib2-devel) was not found.])

@@ -348,8 +348,13 @@ const char *get_tool_name(void)
 		return "ksmbd.adduser";
 	if (TOOL_IS_CONTROL)
 		return "ksmbd.control";
-	if (TOOL_IS_MOUNTD)
+	if (TOOL_IS_MOUNTD) {
+		if (getppid() == global_conf.pid)
+			return "ksmbd.mountd(worker)";
+		if (getpid() == global_conf.pid)
+			return "ksmbd.mountd(manager)";
 		return "ksmbd.mountd";
+	}
 	return "ksmbd.tools";
 }
 
