@@ -8,9 +8,14 @@
 #include <getopt.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <glib.h>
 
 #include "tools.h"
 #include "version.h"
+
+#define PATH_CLASS_ATTR_KILL_SERVER	"/sys/class/ksmbd-control/kill_server"
+#define PATH_CLASS_ATTR_DEBUG		"/sys/class/ksmbd-control/debug"
+#define PATH_MODULE_VERSION		"/sys/module/ksmbd/version"
 
 static void usage(int status)
 {
@@ -56,95 +61,135 @@ static int show_version(void)
 	return 0;
 }
 
-static int ksmbd_control_shutdown(void)
+static int control_shutdown(void)
 {
-	int fd, ret;
-	const char *path = "/sys/class/ksmbd-control/kill_server";
+	int ret, fd;
 
 	ret = send_signal_to_ksmbd_mountd(SIGTERM);
 	if (ret)
-		pr_err("Failed to terminate mountd\n");
+		pr_err("Can't terminate mountd\n");
 	else
 		pr_info("Terminated mountd\n");
 
-	fd = open(path, O_WRONLY);
+	fd = open(PATH_CLASS_ATTR_KILL_SERVER, O_WRONLY);
 	if (fd < 0) {
-		ret = -EINVAL;
-		pr_debug("Can't open `%s': %m\n", path);
-		goto kill_err;
+		ret = -errno;
+		pr_debug("Can't open `%s': %m\n",
+			 PATH_CLASS_ATTR_KILL_SERVER);
+		goto err_kill;
 	}
 
-	if (write(fd, "hard", 4) == -1) {
-		ret = -EINVAL;
+	if (write(fd, "hard", sizeof("hard") - 1) < 0) {
+		ret = -errno;
+		pr_debug("Can't write `%s': %m\n",
+			 PATH_CLASS_ATTR_KILL_SERVER);
 		close(fd);
-		goto kill_err;
+		goto err_kill;
 	}
 
 	close(fd);
 	pr_info("Killed ksmbd\n");
 	return ret;
-kill_err:
-	pr_err("Failed to kill ksmbd\n");
+
+err_kill:
+	pr_err("Can't kill ksmbd\n");
 	return ret;
 }
 
-static int ksmbd_control_reload(void)
+static int control_reload(void)
 {
 	int ret;
 
 	ret = send_signal_to_ksmbd_mountd(SIGHUP);
 	if (ret)
-		pr_err("Failed to notify mountd\n");
+		pr_err("Can't notify mountd\n");
 	else
 		pr_info("Notified mountd\n");
 	return ret;
 }
 
-static int ksmbd_control_show_version(void)
+static int control_show_version(void)
 {
-	int fd, ret = -EINVAL;
-	const char *path = "/sys/module/ksmbd/version";
-	char ver[255] = {0};
+	g_autofree char *version = NULL;
+	int fd, ret;
+	off_t len;
 
-	fd = open(path, O_RDONLY);
+	fd = open(PATH_MODULE_VERSION, O_RDONLY);
 	if (fd < 0) {
-		pr_err("Can't open `%s': %m\n", path);
-		return ret;
+		ret = -errno;
+		pr_debug("Can't open `%s': %m\n", PATH_MODULE_VERSION);
+		goto err;
 	}
 
-	if (read(fd, ver, 255) == -1)
-		goto out;
+	len = lseek(fd, 0, SEEK_END);
+	if (len == (off_t)-1 || lseek(fd, 0, SEEK_SET) == (off_t)-1) {
+		ret = -errno;
+		pr_debug("Can't seek `%s': %m\n", PATH_MODULE_VERSION);
+		close(fd);
+		goto err;
+	}
 
-	pr_info("ksmbd version : %s\n", ver);
+	version = g_malloc0(len + 1);
+	if (read(fd, version, len) < 0) {
+		ret = -errno;
+		pr_debug("Can't read `%s': %m\n", PATH_MODULE_VERSION);
+		close(fd);
+		goto err;
+	}
+
 	ret = 0;
-out:
 	close(fd);
+	pr_info("ksmbd version : " "%s", version);
+	return ret;
+
+err:
+	pr_err("Can't output ksmbd version\n");
 	return ret;
 }
 
-static int ksmbd_control_debug(char *comp)
+static int control_debug(char *comp)
 {
-	int fd, ret = -EINVAL;
-	const char *path = "/sys/class/ksmbd-control/debug";
-	char buf[255] = {0};
+	g_autofree char *debug = NULL;
+	int fd, ret;
+	off_t len;
 
-	fd = open(path, O_RDWR);
+	fd = open(PATH_CLASS_ATTR_DEBUG, O_RDWR);
 	if (fd < 0) {
-		pr_err("Can't open `%s': %m\n", path);
-		return ret;
+		ret = -errno;
+		pr_debug("Can't open `%s': %m\n", PATH_CLASS_ATTR_DEBUG);
+		goto err;
 	}
 
-	if (write(fd, comp, strlen(comp)) == -1)
-		goto out;
-	if (lseek(fd, 0, SEEK_SET) == -1)
-		goto out;
-	if (read(fd, buf, 255) == -1)
-		goto out;
+	if (write(fd, comp, strlen(comp)) < 0) {
+		ret = -errno;
+		pr_debug("Can't write `%s': %m\n", PATH_CLASS_ATTR_DEBUG);
+		close(fd);
+		goto err;
+	}
 
-	pr_info("%s\n", buf);
+	len = lseek(fd, 0, SEEK_END);
+	if (len == (off_t)-1 || lseek(fd, 0, SEEK_SET) == (off_t)-1) {
+		ret = -errno;
+		pr_debug("Can't seek `%s': %m\n", PATH_CLASS_ATTR_DEBUG);
+		close(fd);
+		goto err;
+	}
+
+	debug = g_malloc0(len + 1);
+	if (read(fd, debug, len) < 0) {
+		ret = -errno;
+		pr_debug("Can't read `%s': %m\n", PATH_CLASS_ATTR_DEBUG);
+		close(fd);
+		goto err;
+	}
+
 	ret = 0;
-out:
 	close(fd);
+	pr_info("%s", debug);
+	return ret;
+
+err:
+	pr_err("Can't toggle ksmbd debug component\n");
 	return ret;
 }
 
@@ -156,16 +201,16 @@ int control_main(int argc, char **argv)
 	while ((c = getopt_long(argc, argv, "srd:cvVh", opts, NULL)) != EOF)
 		switch (c) {
 		case 's':
-			ret = ksmbd_control_shutdown();
+			ret = control_shutdown();
 			goto out;
 		case 'r':
-			ret = ksmbd_control_reload();
+			ret = control_reload();
 			goto out;
 		case 'd':
-			ret = ksmbd_control_debug(optarg);
+			ret = control_debug(optarg);
 			goto out;
 		case 'c':
-			ret = ksmbd_control_show_version();
+			ret = control_show_version();
 			goto out;
 		case 'v':
 			set_log_level(PR_DEBUG);
@@ -182,8 +227,7 @@ int control_main(int argc, char **argv)
 			goto out;
 		}
 
-	if (argc < 2 || argc > optind)
-		usage(ret ? EXIT_FAILURE : EXIT_SUCCESS);
+	usage(ret ? EXIT_FAILURE : EXIT_SUCCESS);
 out:
 	return ret ? EXIT_FAILURE : EXIT_SUCCESS;
 }
