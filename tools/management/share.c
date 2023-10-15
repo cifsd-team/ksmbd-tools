@@ -441,6 +441,15 @@ static void make_veto_list(struct ksmbd_share *share)
 	}
 }
 
+static int validate_comment(struct ksmbd_share *share)
+{
+	if (!g_utf8_validate(share->comment, -1, NULL)) {
+		pr_err("Comment is not UTF-8\n");
+		return -EINVAL;
+	}
+	return 0;
+}
+
 static int force_group(struct ksmbd_share *share, char *name)
 {
 	struct group *e = getgrnam(name);
@@ -490,6 +499,8 @@ static void process_share_conf_kv(struct ksmbd_share *share, char *k, char *v)
 {
 	if (shm_share_config(k, KSMBD_SHARE_CONF_COMMENT)) {
 		share->comment = cp_get_group_kv_string(v);
+		if (validate_comment(share))
+			set_share_flag(share, KSMBD_SHARE_FLAG_INVALID);
 		return;
 	}
 
@@ -657,7 +668,7 @@ static void process_share_conf_kv(struct ksmbd_share *share, char *k, char *v)
 
 	if (shm_share_config(k, KSMBD_SHARE_CONF_MAX_CONNECTIONS)) {
 		share->max_connections = cp_memparse(v);
-		if (!share->max_connections ||
+		if (share->max_connections <= 0 ||
 		    share->max_connections > KSMBD_CONF_MAX_CONNECTIONS)
 			share->max_connections = KSMBD_CONF_MAX_CONNECTIONS;
 		return;
