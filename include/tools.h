@@ -60,9 +60,8 @@ struct smbconf_global {
 	char			*krb5_service_name;
 	char			*pwddb;
 	char			*smbconf;
+	pid_t			pid;
 };
-
-#define KSMBD_LOCK_FILE		RUNSTATEDIR "/ksmbd.lock"
 
 #define KSMBD_RESTRICT_ANON_TYPE_1	1
 #define KSMBD_RESTRICT_ANON_TYPE_2	2
@@ -81,6 +80,7 @@ extern struct smbconf_global global_conf;
 #define PATH_PWDDB		SYSCONFDIR "/ksmbd/ksmbdpwd.db"
 #define PATH_SMBCONF		SYSCONFDIR "/ksmbd/ksmbd.conf"
 #define PATH_SUBAUTH		SYSCONFDIR "/ksmbd/ksmbd.subauth"
+#define PATH_LOCK		RUNSTATEDIR "/ksmbd.lock"
 
 #define KSMBD_HEALTH_START		(0)
 #define KSMBD_HEALTH_RUNNING		(1 << 0)
@@ -166,8 +166,6 @@ int set_conf_contents(const char *conf, const char *contents);
 
 int load_config(char *pwddb, char *smbconf);
 void remove_config(void);
-
-int send_signal_to_ksmbd_mountd(int signo);
 
 extern int set_tool_main(char *name);
 extern const char *get_tool_name(void);

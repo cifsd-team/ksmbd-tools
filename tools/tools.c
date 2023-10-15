@@ -9,7 +9,6 @@
 
 #include <unistd.h>
 #include <sys/stat.h>
-#include <fcntl.h>
 
 #include <stdio.h>
 
@@ -323,41 +322,6 @@ void remove_config(void)
 
 	shm_destroy();
 	usm_destroy();
-}
-
-int send_signal_to_ksmbd_mountd(int signo)
-{
-	int fd, ret = -EINVAL;
-	char pid_buf[10] = {0};
-	int pid;
-
-	fd = open(KSMBD_LOCK_FILE, O_RDONLY);
-	if (fd < 0) {
-		pr_debug("Can't open `%s': %m\n", KSMBD_LOCK_FILE);
-		return ret;
-	}
-
-	if (read(fd, &pid_buf, sizeof(pid_buf)) == -1) {
-		pr_err("Can't read manager PID: %m\n");
-		goto out;
-	}
-
-	pid = strtol(pid_buf, NULL, 10);
-	if (signo)
-		pr_debug("Send signal %d (%s) to PID %d\n",
-			 signo, strsignal(signo), pid);
-	if (kill(pid, signo) == -1) {
-		ret = -errno;
-		if (signo)
-			pr_err("Unable to send signal %d (%s) to PID %d: %m\n",
-					signo, strsignal(signo), pid);
-		goto out;
-	}
-
-	ret = 0;
-out:
-	close(fd);
-	return ret;
 }
 
 int set_tool_main(char *name)

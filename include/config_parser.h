@@ -45,6 +45,7 @@ void cp_smbconf_parser_destroy(void);
 int cp_parse_smbconf(char *smbconf);
 int cp_parse_pwddb(char *pwddb);
 int cp_parse_subauth(void);
+int cp_parse_lock(void);
 
 unsigned long long cp_memparse(char *v);
 char *cp_ltrim(const char *v);

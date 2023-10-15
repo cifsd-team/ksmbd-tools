@@ -12,6 +12,7 @@
 
 #include "tools.h"
 #include "version.h"
+#include "config_parser.h"
 
 #define PATH_CLASS_ATTR_KILL_SERVER	"/sys/class/ksmbd-control/kill_server"
 #define PATH_CLASS_ATTR_DEBUG		"/sys/class/ksmbd-control/debug"
@@ -65,7 +66,12 @@ static int control_shutdown(void)
 {
 	int ret, fd;
 
-	ret = send_signal_to_ksmbd_mountd(SIGTERM);
+	ret = cp_parse_lock();
+	if (!ret && kill(global_conf.pid, SIGTERM) < 0) {
+		ret = -errno;
+		pr_debug("Can't send SIGTERM to PID %d: %m\n",
+			 global_conf.pid);
+	}
 	if (ret)
 		pr_err("Can't terminate mountd\n");
 	else
@@ -100,7 +106,12 @@ static int control_reload(void)
 {
 	int ret;
 
-	ret = send_signal_to_ksmbd_mountd(SIGHUP);
+	ret = cp_parse_lock();
+	if (!ret && kill(global_conf.pid, SIGHUP) < 0) {
+		ret = -errno;
+		pr_debug("Can't send SIGHUP to PID %d: %m\n",
+			 global_conf.pid);
+	}
 	if (ret)
 		pr_err("Can't notify mountd\n");
 	else

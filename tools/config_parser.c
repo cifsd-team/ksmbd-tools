@@ -25,7 +25,8 @@ struct smbconf_parser parser;
 typedef int process_entry_fn(char *entry);
 static process_entry_fn process_smbconf_entry,
 			process_pwddb_entry,
-			process_subauth_entry;
+			process_subauth_entry,
+			process_lock_entry;
 
 unsigned long long cp_memparse(char *v)
 {
@@ -231,7 +232,8 @@ static int __mmap_parse_file(const char *path, process_entry_fn *process_entry)
 		entry = g_strndup(contents, delim - contents);
 		ret = process_entry(entry);
 		if (ret ||
-		    process_entry == process_subauth_entry)
+		    process_entry == process_subauth_entry ||
+		    process_entry == process_lock_entry)
 			goto out_unref;
 	}
 
@@ -820,6 +822,86 @@ int cp_parse_subauth(void)
 
 		*strchr(contents, '\n') = 0x00;
 		add_subauth(contents);
+	}
+	return ret;
+}
+
+static int is_a_lock(char *entry)
+{
+	char *delim = strchr(entry, 0x00);
+	int is_lock;
+	pid_t pid;
+
+	is_lock = delim > entry;
+	if (!is_lock) {
+		pr_debug("Lock is missing\n");
+		goto out;
+	}
+	pid = 0;
+	for (; entry < delim; entry++) {
+		is_lock = *entry >= '0' && *entry <= '9';
+		if (!is_lock) {
+			pr_debug("Lock contains `%c' [0x%.2X]\n",
+				 *entry,
+				 (unsigned char)*entry);
+			goto out;
+		}
+		pid *= 10;
+		pid += *entry - '0';
+	}
+	is_lock = pid > 1;
+	if (!is_lock) {
+		pr_debug("Lock has invalid PID\n");
+		goto out;
+	}
+	is_lock = !kill(pid, 0);
+	if (!is_lock)
+		pr_debug("Lock has orphaned PID\n");
+out:
+	return is_lock;
+}
+
+static void add_lock(const char *entry)
+{
+	global_conf.pid = 0;
+	for (; *entry; entry++) {
+		global_conf.pid *= 10;
+		global_conf.pid += *entry - '0';
+	}
+}
+
+static int process_lock_entry(char *entry)
+{
+	if (is_a_lock(entry)) {
+		if (!TOOL_IS_MOUNTD) {
+			add_lock(entry);
+			return 0;
+		}
+
+		pr_err("Reserved lock entry `%s'\n", entry);
+		return -EAGAIN;
+	}
+
+	pr_err("Invalid lock entry `%s'\n", entry);
+	return -EINVAL;
+}
+
+int cp_parse_lock(void)
+{
+	int ret = __mmap_parse_file(PATH_LOCK, process_lock_entry);
+
+	if (!TOOL_IS_MOUNTD)
+		return ret;
+
+	if (ret) {
+		g_autofree char *contents =
+			g_strdup_printf("%d\n", getpid());
+
+		if (ret == -ENOENT || ret == -EINVAL)
+			ret = set_conf_contents(PATH_LOCK, contents);
+
+		*strchr(contents, '\n') = 0x00;
+		add_lock(contents);
 	}
 	return ret;
 }

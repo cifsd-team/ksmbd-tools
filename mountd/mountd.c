@@ -27,7 +27,6 @@
 
 static int no_detach;
 static pid_t worker_pid;
-static int lock_fd = -1;
 
 typedef int (*worker_fn)(void);
 
@@ -71,64 +70,6 @@ static int show_version(void)
 {
 	printf("ksmbd-tools version : %s\n", KSMBD_TOOLS_VERSION);
 	return 0;
-}
-
-static int create_lock_file(void)
-{
-	int ret = -EINVAL;
-	char *open_m = NULL;
-	char pid_buf[10];
-	size_t sz;
-
-retry:
-	lock_fd = open(KSMBD_LOCK_FILE, O_CREAT | O_EXCL | O_WRONLY,
-			S_IWUSR | S_IRUSR | S_IRGRP | S_IROTH);
-	if (lock_fd < 0) {
-		open_m = g_strdup_printf("%m");
-
-		if (send_signal_to_ksmbd_mountd(0) == -ESRCH) {
-			pr_info("Unlinking orphaned lock file\n");
-			if (unlink(KSMBD_LOCK_FILE) == -1) {
-				pr_err("Can't unlink `%s': %m\n", KSMBD_LOCK_FILE);
-				goto out;
-			}
-		} else {
-			pr_debug("Can't create `%s': %s\n", KSMBD_LOCK_FILE,
-				 open_m);
-			goto out;
-		}
-
-		g_free(open_m);
-		open_m = NULL;
-		goto retry;
-	}
-
-	if (flock(lock_fd, LOCK_EX | LOCK_NB) == -1) {
-		pr_err("Can't apply exclusive lock: %m\n");
-		goto out;
-	}
-
-	sz = snprintf(pid_buf, sizeof(pid_buf), "%d", getpid());
-	if (write(lock_fd, pid_buf, sz) == -1) {
-		pr_err("Can't write manager PID: %m\n");
-		goto out;
-	}
-
-	ret = 0;
-out:
-	g_free(open_m);
-	return ret;
-}
-
-static void delete_lock_file(void)
-{
-	if (lock_fd == -1)
-		return;
-
-	flock(lock_fd, LOCK_UN);
-	close(lock_fd);
-	lock_fd = -1;
-	remove(KSMBD_LOCK_FILE);
 }
 
 static int wait_group_kill(int signo)
@@ -245,7 +186,6 @@ static void manager_sig_handler(int signo)
 	setup_signals(SIG_DFL);
 	wait_group_kill(signo);
 	pr_info("Exiting, bye!\n");
-	delete_lock_file();
 	kill(0, SIGINT);
 }
 
@@ -305,10 +245,8 @@ static int manager_process_init(void)
 	} else if (no_detach == 1)
 		setpgid(0, 0);
 
-	if (create_lock_file()) {
-		pr_err("Failed to create lock file\n");
+	if (cp_parse_lock())
 		goto out;
-	}
 
 	if (cp_parse_subauth())
 		pr_info("Unable to parse subauth file\n");
@@ -352,7 +290,6 @@ static int manager_process_init(void)
 			goto out;
 	}
 out:
-	delete_lock_file();
 	kill(0, SIGTERM);
 	return 0;
 }

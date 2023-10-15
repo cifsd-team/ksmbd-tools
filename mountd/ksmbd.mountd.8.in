@@ -37,7 +37,7 @@ The exit status is 0 on success and 1 on failure.
 When detaching process from foreground, exit status is 0 if daemonization succeeded.
 .SH SIGNALS
 \fBksmbd.mountd\fR can be notified of changes to \fBksmbd.conf\fR or \fBksmbdpwd.db\fR by sending it the \fBSIGHUP\fR signal.
-The manager process of \fBksmbd.mountd\fR has its PID stored in \fB@runstatedir@/ksmbd.lock\fR. \" KSMBD_LOCK_FILE
+The manager process of \fBksmbd.mountd\fR has its PID stored in \fB@runstatedir@/ksmbd.lock\fR. \" PATH_LOCK
 .SH COPYRIGHT
 Copyright \(co 2015-2022 ksmbd-tools contributors.
 License GPLv2: GNU GPL version 2 <https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html>.

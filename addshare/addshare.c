@@ -154,12 +154,21 @@ int addshare_main(int argc, char **argv)
 
 	ret = command(smbconf, name, options);
 	smbconf = name = (char *)(options = NULL);
-	if (!ret) {
-		if (!send_signal_to_ksmbd_mountd(SIGHUP))
-			pr_info("Notified mountd\n");
-		else
-			pr_info("Unable to notify mountd\n");
+	if (ret)
+		goto out;
+
+	if (cp_parse_lock()) {
+		pr_info("Ignored lock file\n");
+		goto out;
 	}
+
+	if (kill(global_conf.pid, SIGHUP) < 0) {
+		pr_debug("Can't send SIGHUP to PID %d: %m\n",
+			 global_conf.pid);
+		goto out;
+	}
+
+	pr_info("Notified mountd\n");
 out:
 	remove_config();
 	return ret ? EXIT_FAILURE : EXIT_SUCCESS;
