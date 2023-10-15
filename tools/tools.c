@@ -22,6 +22,7 @@
 #include "management/session.h"
 #include "management/tree_conn.h"
 #include "management/spnego.h"
+#include "version.h"
 
 int log_level = PR_INFO;
 int ksmbd_health_status;
@@ -356,6 +357,12 @@ const char *get_tool_name(void)
 		return "ksmbd.mountd";
 	}
 	return "ksmbd.tools";
+}
+
+int show_version(void)
+{
+	pr_info("ksmbd-tools version : %s\n", KSMBD_TOOLS_VERSION);
+	return 0;
 }
 
 int main(int argc, char **argv)

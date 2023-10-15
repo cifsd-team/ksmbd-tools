@@ -15,7 +15,6 @@
 #include <glib.h>
 
 #include "tools.h"
-#include "version.h"
 #include "config_parser.h"
 
 #define PATH_CLASS_ATTR_KILL_SERVER	"/sys/class/ksmbd-control/kill_server"
@@ -62,12 +61,6 @@ static const struct option opts[] = {
 	{"help",		no_argument,		NULL,	'h' },
 	{NULL,			0,			NULL,	 0  }
 };
-
-static int show_version(void)
-{
-	printf("ksmbd-tools version : %s\n", KSMBD_TOOLS_VERSION);
-	return 0;
-}
 
 static int control_shutdown(void)
 {

@@ -23,7 +23,6 @@
 #include "management/user.h"
 #include "linux/ksmbd_server.h"
 #include "share_admin.h"
-#include "version.h"
 
 static void usage(int status)
 {
@@ -67,12 +66,6 @@ static const struct option opts[] = {
 	{"help",		no_argument,		NULL,	'h' },
 	{NULL,			0,			NULL,	 0  }
 };
-
-static int show_version(void)
-{
-	printf("ksmbd-tools version : %s\n", KSMBD_TOOLS_VERSION);
-	return 0;
-}
 
 int addshare_main(int argc, char **argv)
 {

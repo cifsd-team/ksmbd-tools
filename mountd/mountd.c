@@ -22,7 +22,6 @@
 #include "ipc.h"
 #include "management/share.h"
 #include "config_parser.h"
-#include "version.h"
 
 static void usage(int status)
 {
@@ -59,12 +58,6 @@ static struct option opts[] = {
 	{"help",	no_argument,		NULL,	'h' },
 	{NULL,		0,			NULL,	 0  }
 };
-
-static int show_version(void)
-{
-	printf("ksmbd-tools version : %s\n", KSMBD_TOOLS_VERSION);
-	return 0;
-}
 
 #define LIST_FMT_SS "%28s    %s"
 

@@ -172,6 +172,8 @@ void remove_config(void);
 extern int set_tool_main(char *name);
 extern const char *get_tool_name(void);
 
+int show_version(void);
+
 typedef int tool_main_fn(int argc, char **argv);
 tool_main_fn addshare_main, adduser_main, control_main, mountd_main;
 extern tool_main_fn *tool_main;
