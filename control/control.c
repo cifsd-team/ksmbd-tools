@@ -5,9 +5,13 @@
  *   linux-cifsd-devel@lists.sourceforge.net
  */
 
-#include <getopt.h>
+#define _GNU_SOURCE
 #include <fcntl.h>
+
+#include <getopt.h>
 #include <errno.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 #include <glib.h>
 
 #include "tools.h"
@@ -23,6 +27,7 @@ static void usage(int status)
 	printf(
 		"Usage: ksmbd.control [-v] -s\n"
 		"       ksmbd.control [-v] -r\n"
+		"       ksmbd.control [-v] -l\n"
 		"       ksmbd.control [-v] -d COMPONENT\n"
 		"       ksmbd.control [-v] -c\n");
 
@@ -33,6 +38,7 @@ static void usage(int status)
 			"\n"
 			"  -s, --shutdown           shutdown both ksmbd.mountd and ksmbd and exit\n"
 			"  -r, --reload             notify ksmbd.mountd of changes and exit\n"
+			"  -l, --list               list ksmbd.mountd shares and exit\n"
 			"  -d, --debug=COMPONENT    toggle ksmbd debug printing for COMPONENT and exit;\n"
 			"                           COMPONENT is `all', `smb', `auth', `vfs', `oplock',\n"
 			"                           `ipc', `conn', or `rdma';\n"
@@ -48,6 +54,7 @@ static void usage(int status)
 static const struct option opts[] = {
 	{"shutdown",		no_argument,		NULL,	's' },
 	{"reload",		no_argument,		NULL,	'r' },
+	{"list",		no_argument,		NULL,	'l' },
 	{"debug",		required_argument,	NULL,	'd' },
 	{"ksmbd-version",	no_argument,		NULL,	'c' },
 	{"verbose",		no_argument,		NULL,	'v' },
@@ -116,6 +123,93 @@ static int control_reload(void)
 		pr_err("Can't notify mountd\n");
 	else
 		pr_info("Notified mountd\n");
+	return ret;
+}
+
+static int control_list(void)
+{
+	g_autofree char *fifo_path =
+		g_strdup_printf("%s.%d", PATH_FIFO, getpid());
+	int ret, fd;
+	sigset_t sigset;
+
+	if (mkfifo(fifo_path, S_IRUSR | S_IWUSR) < 0) {
+		ret = -errno;
+		pr_debug("Can't create `%s': %m\n", fifo_path);
+		goto out;
+	}
+
+	fd = open(fifo_path, O_RDONLY | O_NONBLOCK);
+	if (fd < 0) {
+		ret = -errno;
+		pr_debug("Can't open `%s': %m\n", fifo_path);
+		goto out_unlink;
+	}
+
+	if (fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_ASYNC) < 0 ||
+	    fcntl(fd, F_SETOWN, getpid()) < 0) {
+		ret = -errno;
+		pr_debug("Can't control `%s': %m\n", fifo_path);
+		goto out_close;
+	}
+
+	ret = cp_parse_lock();
+	if (ret)
+		goto out_close;
+
+	sigemptyset(&sigset);
+	sigaddset(&sigset, SIGIO);
+	sigaddset(&sigset, SIGINT);
+	sigaddset(&sigset, SIGQUIT);
+	sigaddset(&sigset, SIGTERM);
+	pthread_sigmask(SIG_BLOCK, &sigset, NULL);
+
+	if (kill(global_conf.pid, SIGUSR1) < 0) {
+		ret = -errno;
+		pr_debug("Can't send SIGUSR1 to PID %d: %m\n",
+			 global_conf.pid);
+		goto out_close;
+	}
+
+	for (;;) {
+		siginfo_t siginfo;
+
+		if (sigwaitinfo(&sigset, &siginfo) < 0)
+			continue;
+
+		if (siginfo.si_signo != SIGIO)
+			goto out_close;
+
+		for (;;) {
+			int bytes_read = splice(fd,
+						NULL,
+						STDOUT_FILENO,
+						NULL,
+						PIPE_BUF,
+						0);
+
+			if (bytes_read < 0) {
+				if (errno == EAGAIN)
+					break;
+				ret = -errno;
+				pr_debug("Can't splice pipe: %m\n");
+				goto out_close;
+			}
+
+			if (!bytes_read)
+				goto out_close;
+		}
+	}
+
+out_close:
+	close(fd);
+out_unlink:
+	unlink(fifo_path);
+out:
+	if (ret)
+		pr_err("Can't list mountd shares\n");
+	else
+		pr_info("Listed mountd shares\n");
 	return ret;
 }
 
@@ -209,13 +303,16 @@ int control_main(int argc, char **argv)
 	int ret = -EINVAL;
 	int c;
 
-	while ((c = getopt_long(argc, argv, "srd:cvVh", opts, NULL)) != EOF)
+	while ((c = getopt_long(argc, argv, "srld:cvVh", opts, NULL)) != EOF)
 		switch (c) {
 		case 's':
 			ret = control_shutdown();
 			goto out;
 		case 'r':
 			ret = control_reload();
+			goto out;
+		case 'l':
+			ret = control_list();
 			goto out;
 		case 'd':
 			ret = control_debug(optarg);

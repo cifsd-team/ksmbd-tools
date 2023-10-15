@@ -5,19 +5,22 @@
  *   linux-cifsd-devel@lists.sourceforge.net
  */
 
+#define _GNU_SOURCE
+#include <fcntl.h>
+
 #include <tools.h>
 
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <getopt.h>
-#include <fcntl.h>
 #include <sys/file.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <signal.h>
 
 #include "ipc.h"
+#include "management/share.h"
 #include "config_parser.h"
 #include "version.h"
 
@@ -63,13 +66,33 @@ static int show_version(void)
 	return 0;
 }
 
+#define LIST_FMT_SS "%28s    %s"
+
+static void __list_config_share_cb(struct ksmbd_share *share, int *wfd)
+{
+	dprintf(*wfd, LIST_FMT_SS "\n", share->name, share->comment ?: "");
+}
+
+static int list_config(int wfd)
+{
+	dprintf(wfd, "\e[1m" LIST_FMT_SS "\e[m" "\n", "Name", "Comment");
+	shm_iter_shares((share_cb)__list_config_share_cb, &wfd);
+
+	return kill(global_conf.pid, SIGUSR1) < 0 ? -errno : 0;
+}
+
 static void worker_sa_sigaction(int signo, siginfo_t *siginfo, void *ucontext)
 {
 	switch (signo) {
+	case SIGIO:
+	case SIGPIPE:
 	case SIGCHLD:
 		return;
 	case SIGHUP:
 		ksmbd_health_status |= KSMBD_SHOULD_RELOAD_CONFIG;
+		return;
+	case SIGUSR1:
+		ksmbd_health_status |= KSMBD_SHOULD_LIST_CONFIG;
 		return;
 	case SIGINT:
 	case SIGQUIT:
@@ -97,9 +120,29 @@ static int worker_init_sa_handler(sigset_t sigset)
 		}
 }
 
-static int worker_init_wait(pid_t pid, sigset_t sigset)
+static void __splice_pipe(int rfd, int wfd)
 {
-	int ret = -ECHILD;
+	if (wfd >= 0) {
+		while (splice(rfd, NULL, wfd, NULL, PIPE_BUF, 0) > 0)
+			;
+	} else {
+		char buf[PIPE_BUF];
+
+		while (read(rfd, buf, sizeof(buf)) > 0)
+			;
+	}
+}
+
+static int worker_init_wait(pid_t pid, sigset_t sigset, int rfd)
+{
+	int ret = -ECHILD, wfd = -1;
+
+	if (fcntl(rfd, F_SETFL, fcntl(rfd, F_GETFL) | O_ASYNC) < 0 ||
+	    fcntl(rfd, F_SETOWN, global_conf.pid) < 0) {
+		ret = -errno;
+		pr_err("Can't control pipe: %m\n");
+		return ret;
+	}
 
 	pr_info("Started worker\n");
 
@@ -108,6 +151,19 @@ static int worker_init_wait(pid_t pid, sigset_t sigset)
 
 		if (sigwaitinfo(&sigset, &siginfo) < 0)
 			continue;
+
+		if (siginfo.si_signo == SIGIO) {
+			__splice_pipe(rfd, wfd);
+			continue;
+		}
+
+		if (siginfo.si_signo == SIGPIPE) {
+			if (wfd >= 0) {
+				close(wfd);
+				wfd = -1;
+			}
+			continue;
+		}
 
 		if (siginfo.si_signo == SIGCHLD) {
 			if (siginfo.si_code == CLD_KILLED)
@@ -126,15 +182,42 @@ static int worker_init_wait(pid_t pid, sigset_t sigset)
 			} else if (siginfo.si_status != EXIT_SUCCESS) {
 				ret = -EIO;
 			}
+			__splice_pipe(rfd, wfd);
+			if (wfd >= 0)
+				close(wfd);
 			return ret;
 		}
 
 		if (siginfo.si_signo == SIGINT ||
 		    siginfo.si_signo == SIGQUIT ||
-		    siginfo.si_signo == SIGTERM)
+		    siginfo.si_signo == SIGTERM) {
 			ret = 0;
+		} else if (siginfo.si_signo == SIGUSR1 &&
+			   siginfo.si_pid == pid) {
+			__splice_pipe(rfd, wfd);
+			if (wfd >= 0) {
+				close(wfd);
+				wfd = -1;
+			}
+			continue;
+		}
 
-		kill(pid, siginfo.si_signo);
+		if (kill(pid, siginfo.si_signo) < 0)
+			continue;
+
+		if (siginfo.si_signo == SIGUSR1) {
+			g_autofree char *fifo_path =
+				g_strdup_printf("%s.%d",
+						PATH_FIFO,
+						siginfo.si_pid);
+
+			if (wfd >= 0)
+				continue;
+
+			wfd = open(fifo_path, O_WRONLY | O_NONBLOCK);
+			if (wfd < 0)
+				pr_err("Can't open `%s': %m\n", fifo_path);
+		}
 	}
 }
 
@@ -142,26 +225,42 @@ static int worker_init(void)
 {
 	sigset_t sigset;
 	pid_t pid;
-	int ret;
+	int fds[2], ret;
 
 	sigemptyset(&sigset);
+	sigaddset(&sigset, SIGIO);
+	sigaddset(&sigset, SIGPIPE);
 	sigaddset(&sigset, SIGCHLD);
 	sigaddset(&sigset, SIGHUP);
+	sigaddset(&sigset, SIGUSR1);
 	sigaddset(&sigset, SIGINT);
 	sigaddset(&sigset, SIGQUIT);
 	sigaddset(&sigset, SIGTERM);
 	sigaddset(&sigset, SIGABRT);
 	pthread_sigmask(SIG_BLOCK, &sigset, NULL);
 
+	if (pipe2(fds, O_NONBLOCK) < 0) {
+		ret = -errno;
+		pr_err("Can't create pipe: %m\n");
+		return ret;
+	}
+
 	pid = fork();
 	if (pid < 0) {
 		ret = -errno;
 		pr_err("Can't fork worker: %m\n");
+		close(fds[1]);
+		close(fds[0]);
 		return ret;
 	}
-	if (pid > 0)
-		return worker_init_wait(pid, sigset);
+	if (pid > 0) {
+		close(fds[1]);
+		ret = worker_init_wait(pid, sigset, fds[0]);
+		close(fds[0]);
+		return ret;
+	}
 
+	close(fds[0]);
 	worker_init_sa_handler(sigset);
 
 	ret = load_config(global_conf.pwddb, global_conf.smbconf);
@@ -187,9 +286,19 @@ static int worker_init(void)
 					~KSMBD_SHOULD_RELOAD_CONFIG;
 			}
 		}
+
+		if (ksmbd_health_status & KSMBD_SHOULD_LIST_CONFIG) {
+			ret = list_config(fds[1]);
+			if (!ret) {
+				pr_info("Listed config\n");
+				ksmbd_health_status &=
+					~KSMBD_SHOULD_LIST_CONFIG;
+			}
+		}
 	}
 
 out:
+	close(fds[1]);
 	remove_config();
 	return ret;
 }

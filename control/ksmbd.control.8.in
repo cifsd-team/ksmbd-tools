@@ -9,6 +9,9 @@ ksmbd.control \- control ksmbd.mountd and ksmbd daemons
 [\-v] \-r
 .br
 .B ksmbd.control
+[\-v] \-l
+.br
+.B ksmbd.control
 [\-v] \-d \fI\,COMPONENT\/\fR
 .br
 .B ksmbd.control
@@ -22,6 +25,9 @@ Shutdown both \fBksmbd.mountd\fR and \fBksmbd\fR and exit.
 .TP
 \fB\-r\fR, \fB\-\-reload\fR
 Notify \fBksmbd.mountd\fR of changes and exit.
+.TP
+\fB\-l\fR, \fB\-\-list\fR
+List \fBksmbd.mountd\fR shares and exit.
 .TP
 \fB\-d\fR, \fB\-\-debug\fR=\fI\,COMPONENT\/\fR
 Toggle \fBksmbd\fR debug printing for \fI\,COMPONENT\/\fR and exit.

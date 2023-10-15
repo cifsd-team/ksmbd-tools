@@ -81,10 +81,12 @@ extern struct smbconf_global global_conf;
 #define PATH_SMBCONF		SYSCONFDIR "/ksmbd/ksmbd.conf"
 #define PATH_SUBAUTH		SYSCONFDIR "/ksmbd/ksmbd.subauth"
 #define PATH_LOCK		RUNSTATEDIR "/ksmbd.lock"
+#define PATH_FIFO		RUNSTATEDIR "/ksmbd.fifo"
 
 #define KSMBD_HEALTH_START		(0)
 #define KSMBD_HEALTH_RUNNING		(1 << 0)
 #define KSMBD_SHOULD_RELOAD_CONFIG	(1 << 1)
+#define KSMBD_SHOULD_LIST_CONFIG	(1 << 2)
 
 extern int ksmbd_health_status;
 
