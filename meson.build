@@ -1,5 +1,5 @@
 project(
-  'ksmbsd-tools',
+  'ksmbd-tools',
   'c',
   version: run_command(
     '/bin/sh',
