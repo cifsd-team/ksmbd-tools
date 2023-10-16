@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <glib.h>
+#include <stdint.h>
+#include <inttypes.h>
 
 #include "linux/ksmbd_server.h"
 #include "management/share.h"
@@ -22,7 +24,9 @@ static GRWLock		users_table_lock;
 
 static void kill_ksmbd_user(struct ksmbd_user *user)
 {
-	pr_debug("Kill user `%s'\n", user->name);
+	pr_debug("Kill user `%s' [0x%" PRIXPTR "]\n",
+		 user->name,
+		 (uintptr_t)user);
 
 	g_free(user->name);
 	g_free(user->pass_b64);
@@ -213,12 +217,16 @@ int usm_add_new_user(char *name, char *pwd)
 	g_rw_lock_writer_lock(&users_table_lock);
 	if (__usm_lookup_user(name)) {
 		g_rw_lock_writer_unlock(&users_table_lock);
-		pr_debug("New user `%s' already exists\n", name);
+		pr_debug("Clashed new user `%s' [0x%" PRIXPTR "]\n",
+			 name,
+			 (uintptr_t)user);
 		kill_ksmbd_user(user);
 		return 0;
 	}
 
-	pr_debug("New user `%s'\n", user->name);
+	pr_debug("New user `%s' [0x%" PRIXPTR "]\n",
+		 user->name,
+		 (uintptr_t)user);
 	if (!g_hash_table_insert(users_table, user->name, user)) {
 		kill_ksmbd_user(user);
 		ret = -EINVAL;

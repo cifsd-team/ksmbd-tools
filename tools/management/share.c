@@ -11,6 +11,8 @@
 #include <sys/types.h>
 #include <pwd.h>
 #include <grp.h>
+#include <stdint.h>
+#include <inttypes.h>
 
 #include "config_parser.h"
 #include "linux/ksmbd_server.h"
@@ -166,7 +168,9 @@ static void kill_ksmbd_share(struct ksmbd_share *share)
 {
 	int i;
 
-	pr_debug("Kill share `%s'\n", share->name);
+	pr_debug("Kill share `%s' [0x%" PRIXPTR "]\n",
+		 share->name,
+		 (uintptr_t)share);
 
 	for (i = 0; i < KSMBD_SHARE_USERS_MAX; i++)
 		free_user_map(share->maps[i]);
@@ -756,7 +760,9 @@ int shm_add_new_share(struct smbconf_group *group)
 
 	init_share_from_group(share, group);
 	if (test_share_flag(share, KSMBD_SHARE_FLAG_INVALID)) {
-		pr_err("Share `%s' is invalid\n", share->name);
+		pr_err("Invalid new share `%s' [0x%" PRIXPTR "]\n",
+		       share->name,
+		       (uintptr_t)share);
 		kill_ksmbd_share(share);
 		return 0;
 	}
@@ -764,12 +770,16 @@ int shm_add_new_share(struct smbconf_group *group)
 	g_rw_lock_writer_lock(&shares_table_lock);
 	if (__shm_lookup_share(share->name)) {
 		g_rw_lock_writer_unlock(&shares_table_lock);
-		pr_info("Share `%s' already exists\n", share->name);
+		pr_debug("Clashed new share `%s' [0x%" PRIXPTR "]\n",
+			 share->name,
+			 (uintptr_t)share);
 		kill_ksmbd_share(share);
 		return 0;
 	}
 
-	pr_debug("New share `%s'\n", share->name);
+	pr_debug("New share `%s' [0x%" PRIXPTR "]\n",
+		 share->name,
+		 (uintptr_t)share);
 	if (!g_hash_table_insert(shares_table, share->name, share)) {
 		kill_ksmbd_share(share);
 		ret = -EINVAL;
