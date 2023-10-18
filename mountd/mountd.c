@@ -358,9 +358,13 @@ static int manager_init(int nodetach)
 			return manager_init_wait(sigset);
 
 		setsid();
-		freopen("/dev/null", "r", stdin);
-		freopen("/dev/null", "w", stdout);
-		freopen("/dev/null", "w", stderr);
+		if (!freopen("/dev/null", "r", stdin) ||
+		    !freopen("/dev/null", "w", stdout) ||
+		    !freopen("/dev/null", "w", stderr)) {
+			ret = -errno;
+			pr_err("Can't redirect stream: %m\n");
+			return ret;
+		}
 		pr_logger_init(PR_LOGGER_SYSLOG);
 
 		pthread_sigmask(SIG_UNBLOCK, &sigset, NULL);
