@@ -321,7 +321,8 @@ static int __is_transient_user(char *name)
 {
 	int is_transient;
 
-	is_transient = !!strcmp(global_conf.guest_account, name);
+	is_transient = !global_conf.guest_account ||
+		       strcmp(global_conf.guest_account, name);
 	if (!is_transient) {
 		pr_err("Server requires user `%s'\n", name);
 		goto out;

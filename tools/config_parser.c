@@ -623,17 +623,17 @@ int cp_parse_smbconf(char *smbconf)
 
 	cp_smbconf_parser_init();
 	ret = __mmap_parse_file(smbconf, process_smbconf_entry);
-	if (ret) {
-		if (ret == -ENOENT) {
-			if (TOOL_IS_ADDSHARE) {
-				ret = set_conf_contents(smbconf, "");
-			} else if (TOOL_IS_MOUNTD) {
-				pr_err("No configuration file\n");
-			} else {
-				ret = 0;
-				pr_info("No configuration file\n");
-			}
+	if (ret == -ENOENT) {
+		if (TOOL_IS_ADDSHARE) {
+			ret = set_conf_contents(smbconf, "");
+		} else if (TOOL_IS_MOUNTD) {
+			pr_err("No configuration file\n");
+		} else {
+			ret = 0;
+			pr_info("No configuration file\n");
 		}
+	}
+	if (ret) {
 		if (is_owner)
 			cp_smbconf_parser_destroy();
 		return ret;
