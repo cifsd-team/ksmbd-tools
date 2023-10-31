@@ -97,7 +97,7 @@ static void worker_sa_sigaction(int signo, siginfo_t *siginfo, void *ucontext)
 	_Exit(128 + signo);
 }
 
-static int worker_init_sa_handler(sigset_t sigset)
+static void worker_init_sa_handler(sigset_t sigset)
 {
 	int signo;
 
