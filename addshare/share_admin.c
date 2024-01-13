@@ -76,7 +76,7 @@ static char **__get_options(GHashTable *kv, int is_global)
 	for (c = 0; c < KSMBD_SHARE_CONF_MAX; c++) {
 		const char *k = KSMBD_SHARE_CONF[c], *v = NULL, *pre;
 
-		if (is_global && KSMBD_SHARE_CONF_IS_GLOBAL(c) ||
+		if ((is_global && KSMBD_SHARE_CONF_IS_GLOBAL(c)) ||
 		    KSMBD_SHARE_CONF_IS_BROKEN(c))
 			pre = "; ";
 		else
@@ -101,7 +101,7 @@ static void __load_conf(enum KSMBD_SHARE_CONF conf,
 {
 	char *option = options[conf];
 
-	if (step)
+	if (step) {
 		if (cp_smbconf_eol(cp_ltrim(buf))) {
 			char *p = cp_ltrim(strchr(option, '=') + 1);
 			const char *fmt, *s;
@@ -119,6 +119,7 @@ static void __load_conf(enum KSMBD_SHARE_CONF conf,
 		} else {
 			options[conf] = g_strdup_printf("%s%s", option, buf);
 		}
+	}
 
 	printf("\r" "\e[2K" "%s%s" "\e[6n", option, buf);
 
@@ -142,7 +143,7 @@ static enum KSMBD_SHARE_CONF __next_conf(enum KSMBD_SHARE_CONF conf,
 		return __next_conf(conf - 1, -1, is_global, is_ready);
 	}
 
-	if (is_global && KSMBD_SHARE_CONF_IS_GLOBAL(conf) ||
+	if ((is_global && KSMBD_SHARE_CONF_IS_GLOBAL(conf)) ||
 	    KSMBD_SHARE_CONF_IS_BROKEN(conf))
 		return __next_conf(conf + step, step, is_global, is_ready);
 
@@ -430,14 +431,14 @@ static int __prompt_options_stdin(char **options, int is_global)
 			break;
 
 		if (c == '\e' ||
-		    c == '[' && ccode == '\e' ||
-		    c == 'A' && ccode == '[' ||
-		    c == 'B' && ccode == '[' ||
-		    c >= '0' && c <= '9' && ccode == '[' ||
-		    c >= '0' && c <= '9' && ccode >= '0' && ccode <= '9' ||
-		    c == ';' && ccode >= '0' && ccode <= '9' ||
-		    c >= '0' && c <= '9' && ccode == ';' ||
-		    c == 'R' && ccode >= '0' && ccode <= '9') {
+		    (c == '[' && ccode == '\e') ||
+		    (c == 'A' && ccode == '[') ||
+		    (c == 'B' && ccode == '[') ||
+		    (c >= '0' && c <= '9' && ccode == '[') ||
+		    (c >= '0' && c <= '9' && ccode >= '0' && ccode <= '9') ||
+		    (c == ';' && ccode >= '0' && ccode <= '9') ||
+		    (c >= '0' && c <= '9' && ccode == ';') ||
+		    (c == 'R' && ccode >= '0' && ccode <= '9')) {
 			ccode = c;
 			continue;
 		}

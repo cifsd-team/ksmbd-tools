@@ -417,7 +417,8 @@ int mountd_main(int argc, char **argv)
 			global_conf.tcp_port = cp_get_group_kv_long(optarg);
 			break;
 		case 'n':
-			nodetach = !optarg ?: cp_get_group_kv_long(optarg);
+			if (optarg)
+				nodetach = cp_get_group_kv_long(optarg);
 			break;
 		case 'C':
 			g_free(global_conf.smbconf);

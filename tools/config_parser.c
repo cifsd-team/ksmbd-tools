@@ -673,11 +673,11 @@ static int is_a_user_password(char *entry)
 	}
 	for (; entry < delim; entry++) {
 		is_user_password =
-			*entry >= '0' && *entry <= '9' ||
-			*entry >= 'A' && *entry <= 'Z' ||
-			*entry >= 'a' && *entry <= 'z' ||
-			*entry == '+' ||
-			*entry == '/';
+			(*entry >= '0' && *entry <= '9') ||
+			(*entry >= 'A' && *entry <= 'Z') ||
+			(*entry >= 'a' && *entry <= 'z') ||
+			(*entry == '+') ||
+			(*entry == '/');
 		if (!is_user_password) {
 			pr_debug("Password contains `%c' [0x%.2X]\n",
 				 *entry,
