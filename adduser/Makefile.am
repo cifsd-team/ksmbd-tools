@@ -18,4 +18,4 @@ install-exec-hook: uninstall-hook
 	  $(LN_S) $(libexecdir)/ksmbd.tools ksmbd.adduser )
 
 uninstall-hook:
-	-rm $(DESTDIR)$(sbindir)/ksmbd.adduser
+	-rm -f "$(DESTDIR)$(sbindir)/ksmbd.adduser"
