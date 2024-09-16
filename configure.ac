@@ -27,6 +27,21 @@ AC_PROG_SED
 AC_PROG_MKDIR_P
 AC_PROG_LN_S
 
+# Check if PKG_CHECK_VAR exists for compatibility with older (pre-version 0.28) pkg-config
+m4_ifndef([PKG_CHECK_VAR], [
+	# PKG_CHECK_VAR(VARIABLE, MODULE, CONFIG-VARIABLE,
+	# [ACTION-IF-FOUND], [ACTION-IF-NOT-FOUND])
+	# -------------------------------------------
+	# Retrieves the value of the pkg-config variable for the given module.
+	AC_DEFUN([PKG_CHECK_VAR],
+		[AC_REQUIRE([PKG_PROG_PKG_CONFIG])dnl
+		AC_ARG_VAR([$1], [value of $3 for $2, overriding pkg-config])dnl
+		_PKG_CONFIG([$1], [variable="][$3]["], [$2])
+	AS_VAR_COPY([$1], [pkg_cv_][$1])
+	AS_VAR_IF([$1], [""], [$5], [$4])dnl
+	])# PKG_CHECK_VAR
+])
+
 AC_SUBST([in_script], [[\
 '$(SED) -e "s,[@]sbindir[@],$(sbindir),g" \
         -e "s,[@]sysconfdir[@],$(sysconfdir),g" \

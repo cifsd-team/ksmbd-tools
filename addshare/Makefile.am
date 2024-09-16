@@ -18,4 +18,4 @@ install-exec-hook: uninstall-hook
 	  $(LN_S) $(libexecdir)/ksmbd.tools ksmbd.addshare )
 
 uninstall-hook:
-	-rm $(DESTDIR)$(sbindir)/ksmbd.addshare
+	-rm -f "$(DESTDIR)$(sbindir)/ksmbd.addshare"
