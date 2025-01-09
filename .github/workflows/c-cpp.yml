@@ -19,7 +19,7 @@ jobs:
     - uses: actions/checkout@v4
     - name: Prerequisite for build test
       run: |
-        sudo apt-get install libnl-3-dev libnl-genl-3-dev krb5-multidev heimdal-multidev ninja-build
+        sudo apt-get install libnl-3-dev libnl-genl-3-dev krb5-multidev heimdal-multidev ninja-build libglib2.0-dev
         gcc --version
         g++ --version
         pip3 install --user meson
