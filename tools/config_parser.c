@@ -7,6 +7,7 @@
 
 #include <glib.h>
 #include <string.h>
+#include <stdint.h>
 #include <glib/gstdio.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -238,9 +239,13 @@ static int __mmap_parse_file(const char *path, process_entry_fn *process_entry)
 		goto out_unref;
 	}
 
-	for (len = g_mapped_file_get_length(file);
-	     len > 0 && len != (size_t)-1;
-	     len -= delim - contents + 1, contents = delim + 1) {
+	len = g_mapped_file_get_length(file);
+	if (len == 0 || len == SIZE_MAX) {
+		ret = -EINVAL;
+		goto out_close;
+	}
+
+	while (len > 0) {
 		g_autofree char *entry = NULL;
 
 		delim = memchr(contents, '\n', len) ?: contents + len;
@@ -250,6 +255,7 @@ static int __mmap_parse_file(const char *path, process_entry_fn *process_entry)
 		    process_entry == process_subauth_entry ||
 		    process_entry == process_lock_entry)
 			goto out_unref;
+		len -= delim - contents + 1, contents = delim + 1;
 	}
 
 out_unref:
