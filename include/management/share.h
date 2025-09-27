@@ -128,8 +128,7 @@ extern const char *KSMBD_SHARE_DEFCONF[KSMBD_SHARE_CONF_MAX];
 #define KSMBD_SHARE_CONF_IS_BROKEN(c) \
 	((c) == KSMBD_SHARE_CONF_ADMIN_USERS || \
 	 (c) == KSMBD_SHARE_CONF_HOSTS_ALLOW || \
-	 (c) == KSMBD_SHARE_CONF_HOSTS_DENY || \
-	 (c) == KSMBD_SHARE_CONF_FOLLOW_SYMLINKS)
+	 (c) == KSMBD_SHARE_CONF_HOSTS_DENY)
 
 int shm_share_name(char *name, char *p);
 int shm_share_config(const char *k, enum KSMBD_SHARE_CONF c);
