@@ -146,6 +146,7 @@ static int ipc_ksmbd_starting_up(void)
 	ev->smb2_max_trans = global_conf.smb2_max_trans;
 	ev->smbd_max_io_size = global_conf.smbd_max_io_size;
 	ev->max_connections = global_conf.max_connections;
+	ev->max_ip_connections = global_conf.max_ip_connections;
 	ev->share_fake_fscaps = global_conf.share_fake_fscaps;
 	memcpy(ev->sub_auth, global_conf.gen_subauth, sizeof(ev->sub_auth));
 	ev->smb2_max_credits = global_conf.smb2_max_credits;

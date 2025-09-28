@@ -552,6 +552,14 @@ static int process_global_conf_kv(GHashTable *kv)
 				~KSMBD_GLOBAL_FLAG_DURABLE_HANDLES;
 	}
 
+	if (group_kv_steal(kv, "max ip connections", &k, &v)) {
+		global_conf.max_ip_connections = cp_memparse(v);
+		if (!global_conf.max_ip_connections ||
+		    global_conf.max_ip_connections > KSMBD_CONF_MAX_CONNECTIONS)
+			global_conf.max_ip_connections =
+				KSMBD_CONF_MAX_CONNECTIONS;
+	}
+
 	return 0;
 }
 
@@ -563,6 +571,7 @@ static void add_group_global_conf(void)
 	add_group_key_value("guest account = nobody");
 	add_group_key_value("max active sessions = 1024");
 	add_group_key_value("max connections = 128");
+	add_group_key_value("max ip connections = 8");
 	add_group_key_value("max open files = 10000");
 	add_group_key_value("netbios name = KSMBD SERVER");
 	add_group_key_value("server string = SMB SERVER");

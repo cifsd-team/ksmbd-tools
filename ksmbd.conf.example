@@ -13,6 +13,7 @@
 	map to guest = never
 	max active sessions = 1024
 	max connections = 128
+	max ip connections = 8
 	max open files = 10000
 	netbios name = KSMBD SERVER
 	restrict anonymous = 0
