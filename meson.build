@@ -40,8 +40,8 @@ asn1_lib = []
 config_h_data = configuration_data()
 cc = meson.get_compiler('c')
 
-pthread_lib = cc.find_library(
-  'pthread',
+pthread_lib = dependency(
+  'threads',
 )
 
 if krb5_dep.found()
