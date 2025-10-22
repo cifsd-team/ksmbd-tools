@@ -4,6 +4,7 @@
 	; global parameters
 	bind interfaces only = no
 	deadtime = 0
+	durable handles = no
 	guest account = nobody
 	interfaces = 
 	ipc timeout = 0
@@ -33,7 +34,6 @@
 	smbd max io size = 8MB
 	tcp port = 445
 	workgroup = WORKGROUP
-	durable handles = no
 
 	; default share parameters
 	browseable = yes
@@ -41,6 +41,7 @@
 	create mask = 0744
 	crossmnt = yes
 	directory mask = 0755
+	follow symlinks = no
 	force create mode = 0000
 	force directory mode = 0000
 	force group = 

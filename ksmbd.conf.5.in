@@ -84,9 +84,9 @@ Can grant SMB2 durable file handles on a share.
 
 Default: \fBdurable handles = no\fR
 .TP
+\fBfollow symlinks\fR (S)
 Setting this parameter to allow any file or directory that is a symbolic link from being followed.
 But this option does not allow to follow a symbolic link to /etc/passwd in their home directory.
-\fBfollow symlinks\fR (S)
 
 Default: \fBfollow symlinks = no\fR
 .TP
@@ -209,6 +209,13 @@ Number suffixes are allowed.
 
 Default: \fBmax connections = 128\fR
 .TP
+\fBmax ip connections\fR (G)
+Maximum number of connections to the server per IP address.
+With \fBmax ip connections = 0\fR, the value will be set to the maximum allowed number of 65536. \" KSMBD_CONF_MAX_CONNECTIONS
+Number suffixes are allowed.
+
+Default: \fBmax ip connections = 8\fR
+.TP
 \fBmax open files\fR (G)
 Maximum number of simultaneous open files for a client.
 
@@ -275,7 +282,7 @@ Client is allowed or required to use SMB2 signing.
 With \fBserver signing = disabled\fR or \fBserver signing = auto\fR, SMB2 signing is allowed if it is requested by the client.
 With \fBserver signing = mandatory\fR, SMB2 signing is required.
 
-Default: \fBserver signing = disabled\fR
+Default: \fBserver signing = auto\fR
 .TP
 \fBserver string\fR (G)
 String that will appear in browse lists next to the machine name.
