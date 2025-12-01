@@ -117,7 +117,6 @@ int tcm_handle_tree_connect(struct ksmbd_tree_connect_request *req,
 	}
 
 	if ((req->account_flags & KSMBD_USER_FLAG_GUEST_ACCOUNT) &&
-	    !test_share_flag(share, KSMBD_SHARE_FLAG_PIPE) &&
 	    !test_share_flag(share, KSMBD_SHARE_FLAG_GUEST_OK)) {
 		pr_debug("treecon: Deny, guest not allowed\n");
 		resp->status = KSMBD_TREE_CONN_STATUS_ERROR;

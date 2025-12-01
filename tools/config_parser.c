@@ -611,7 +611,6 @@ static void steal_global_share_conf_kv(GHashTable *kv)
 static void add_group_ipc_share_conf(void)
 {
 	add_group_key_value("comment = IPC share");
-	add_group_key_value("guest ok = yes");
 }
 
 static void ignore_group_kv(struct smbconf_group *group)
