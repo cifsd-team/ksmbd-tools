@@ -570,8 +570,8 @@ static void add_group_global_conf(void)
 
 	add_group_key_value("guest account = nobody");
 	add_group_key_value("max active sessions = 1024");
-	add_group_key_value("max connections = 128");
-	add_group_key_value("max ip connections = 8");
+	add_group_key_value("max connections = 256");
+	add_group_key_value("max ip connections = 32");
 	add_group_key_value("max open files = 10000");
 	add_group_key_value("netbios name = KSMBD SERVER");
 	add_group_key_value("server string = SMB SERVER");
