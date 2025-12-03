@@ -5,6 +5,6 @@
 
 #ifndef _VERSION_H
 
-#define KSMBD_TOOLS_VERSION "3.5.5"
+#define KSMBD_TOOLS_VERSION "3.5.6"
 
 #endif /* !_VERSION_H */
