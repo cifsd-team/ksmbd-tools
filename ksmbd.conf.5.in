@@ -273,7 +273,6 @@ Default: \fBserver min protocol = SMB2_10\fR
 .TP
 \fBserver multi channel support\fR (G)
 Use of SMB3 multi-channel is supported.
-SMB3 multi-channel support is experimental and may corrupt data under race conditions.
 
 Default: \fBserver multi channel support = no\fR
 .TP
