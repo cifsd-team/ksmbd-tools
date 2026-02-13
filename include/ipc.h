@@ -23,7 +23,7 @@
 struct ksmbd_ipc_msg {
 	unsigned int	type;
 	unsigned int	sz;
-	unsigned char	____payload[0];
+	unsigned char	____payload[];
 };
 
 #define KSMBD_IPC_MSG_PAYLOAD(m)				\
