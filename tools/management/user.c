@@ -448,8 +448,9 @@ int usm_handle_login_request_ext(struct ksmbd_login_request *req,
 	return 0;
 }
 
-int usm_handle_logout_request(struct ksmbd_logout_request *req)
+int usm_handle_logout_request(void *data)
 {
+	struct ksmbd_logout_request *req = data;
 	struct ksmbd_user *user;
 
 	user = usm_lookup_user(req->account);
