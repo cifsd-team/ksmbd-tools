@@ -1,8 +1,7 @@
 [Unit]
 Description=ksmbd userspace daemon
 Requires=modprobe@ksmbd.service
-Wants=network-online.target
-After=modprobe@ksmbd.service network.target network-online.target
+After=modprobe@ksmbd.service network.target
 
 [Service]
 Type=forking
