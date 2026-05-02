@@ -294,7 +294,9 @@ int usm_add_guest_account(char *name)
 	if (!user) {
 		ret = -EINVAL;
 	} else {
+		g_rw_lock_writer_lock(&user->update_lock);
 		set_user_flag(user, KSMBD_USER_FLAG_GUEST_ACCOUNT);
+		g_rw_lock_writer_unlock(&user->update_lock);
 		put_ksmbd_user(user);
 	}
 	return ret;
