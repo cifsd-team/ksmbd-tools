@@ -456,6 +456,7 @@ int usm_handle_logout_request(struct ksmbd_logout_request *req)
 	if (!user)
 		return -ENOENT;
 
+	g_rw_lock_writer_lock(&user->update_lock);
 	if (req->account_flags & KSMBD_USER_FLAG_BAD_PASSWORD) {
 		if (user->failed_login_count < 10)
 			user->failed_login_count++;
@@ -465,6 +466,7 @@ int usm_handle_logout_request(struct ksmbd_logout_request *req)
 		user->failed_login_count = 0;
 		user->flags &= ~KSMBD_USER_FLAG_DELAY_SESSION;
 	}
+	g_rw_lock_writer_unlock(&user->update_lock);
 
 	put_ksmbd_user(user);
 	return 0;
