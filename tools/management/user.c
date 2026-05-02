@@ -373,13 +373,13 @@ static void __handle_login_request(struct ksmbd_login_response *resp,
 {
 	int hash_sz;
 
+	g_rw_lock_reader_lock(&user->update_lock);
 	resp->gid = user->gid;
 	resp->uid = user->uid;
-	resp->status = user->flags;
-	resp->status |= KSMBD_USER_FLAG_OK;
-
+	resp->status = user->flags | KSMBD_USER_FLAG_OK;
 	if (user->ngroups)
 		resp->status |= KSMBD_USER_FLAG_EXTENSION;
+	g_rw_lock_reader_unlock(&user->update_lock);
 
 	hash_sz = usm_copy_user_passhash(user,
 					 resp->hash,
