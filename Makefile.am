@@ -22,3 +22,19 @@ CLEANFILES = $(man_MANS) $(systemdsystemunit_DATA)
 
 AM_DISTCHECK_CONFIGURE_FLAGS = \
 	--with-systemdsystemunitdir=$${dc_install_base}/$(systemdsystemunitdir)
+
+# Create runtime and configuration directories, and install default config if missing.
+install-data-hook:
+	$(MKDIR_P) $(DESTDIR)$(runstatedir)
+	chmod 755 $(DESTDIR)$(runstatedir)
+	$(MKDIR_P) $(DESTDIR)$(sysconfdir)/ksmbd
+	@if test ! -f $(DESTDIR)$(sysconfdir)/ksmbd/ksmbd.conf; then \
+		echo "Installing default ksmbd.conf to $(sysconfdir)/ksmbd/"; \
+		$(INSTALL_DATA) $(srcdir)/ksmbd.conf.example $(DESTDIR)$(sysconfdir)/ksmbd/ksmbd.conf; \
+	fi
+
+# Remove installed configuration file during uninstall to pass distcheck.
+uninstall-hook:
+	@if test -f $(DESTDIR)$(sysconfdir)/ksmbd/ksmbd.conf; then \
+		rm -f $(DESTDIR)$(sysconfdir)/ksmbd/ksmbd.conf; \
+	fi
