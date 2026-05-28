@@ -164,9 +164,15 @@ static int aapl_handle_server_query(struct ksmbd_work *work,
 	u64 reply_bitmap = 0, vol_caps = 0;
 	struct aapl_server_query_rsp arsp = {};
 
-	if (req_bitmap & AAPL_BITMAP_SERVER_CAPS)
+	if (req_bitmap & AAPL_BITMAP_SERVER_CAPS) {
 		reply_bitmap |= AAPL_BITMAP_SERVER_CAPS;
-	/* server_caps stays 0 — reserved per spec */
+		/*
+		 * ServerCapabilities: "Reserved for future use; respond with
+		 * 0x0" per the Time Machine SMB spec.  When ReadDirAttr or
+		 * OSX metadata support is added to ksmbd, set the appropriate
+		 * AAPL_CAPS_* bits here based on what the kernel implements.
+		 */
+	}
 
 	if (req_bitmap & AAPL_BITMAP_VOL_CAPS) {
 		reply_bitmap |= AAPL_BITMAP_VOL_CAPS;
