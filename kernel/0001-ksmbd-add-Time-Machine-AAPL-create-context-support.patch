@@ -142,7 +142,7 @@
   * Find lease object(opinfo) for given lease key/fid from lease
   * break/file close path.
 --- a/fs/smb/server/smb2pdu.c	2026-05-28 10:33:26.991473925 +0000
-+++ b/fs/smb/server/smb2pdu.c	2026-05-28 10:46:19.622686283 +0000
++++ b/fs/smb/server/smb2pdu.c	2026-05-28 13:55:50.061488131 +0000
 @@ -3432,6 +3432,10 @@
  	}
  
@@ -154,7 +154,7 @@
  		contxt_cnt++;
  		create_posix_rsp_buf(rsp->Buffer +
  				le32_to_cpu(rsp->CreateContextsLength),
-@@ -3441,6 +3445,35 @@
+@@ -3441,6 +3445,44 @@
  		iov_len += conn->vals->create_posix_size;
  		if (next_ptr)
  			*next_ptr = cpu_to_le32(next_off);
@@ -163,16 +163,24 @@
 +	}
 +
 +	if (conn->is_aapl) {
++		struct create_context *aapl_req_ctx;
 +		__u64 vol_caps = 0;
 +
 +		/*
-+		 * Always respond to AAPL: macOS sends this context on every
-+		 * connection regardless of share type.  Gate FULL_SYNC on the
-+		 * time machine flag — advertising it causes macOS to issue
-+		 * SMB2 FLUSH with Reserved1=0xFFFF on every write, which is
-+		 * the correct behaviour for a backup destination but an
-+		 * unnecessary overhead on general-purpose shares.
++		 * Only respond with AAPL when the request itself contains an
++		 * AAPL context.  macOS sends it only on the first CREATE to a
++		 * share; injecting AAPL into every subsequent CREATE response
++		 * confuses smbfs.kext and causes a kernel hang on unmount.
++		 *
++		 * Gate FULL_SYNC on the time machine flag — advertising it
++		 * causes macOS to issue SMB2 FLUSH with Reserved1=0xFFFF on
++		 * every write, correct for backup destinations but unnecessary
++		 * overhead on general-purpose shares.
 +		 */
++		aapl_req_ctx = smb2_find_context_vals(req, SMB2_CREATE_AAPL, 4);
++		if (IS_ERR_OR_NULL(aapl_req_ctx))
++			goto aapl_done;
++
 +		if (test_share_config_flag(tcon->share_conf,
 +					   KSMBD_SHARE_FLAG_TIME_MACHINE))
 +			vol_caps = AAPL_VOLCAPS_FULL_SYNC;
@@ -187,6 +195,7 @@
 +		if (next_ptr)
 +			*next_ptr = cpu_to_le32(next_off);
 +		/* AAPL is last; next_ptr need not be updated */
++aapl_done:;
  	}
  
  	if (contxt_cnt > 0) {

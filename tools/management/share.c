@@ -762,13 +762,10 @@ static int process_share_conf_kv(struct ksmbd_share *share, GHashTable *kv)
 	}
 
 	if (group_kv_steal(kv, KSMBD_SHARE_CONF_TIME_MACHINE, &k, &v)) {
-		if (cp_get_group_kv_bool(v)) {
+		if (cp_get_group_kv_bool(v))
 			set_share_flag(share, KSMBD_SHARE_FLAG_TIME_MACHINE);
-			/* Named streams are required for Apple metadata */
-			set_share_flag(share, KSMBD_SHARE_FLAG_STREAMS);
-		} else {
+		else
 			clear_share_flag(share, KSMBD_SHARE_FLAG_TIME_MACHINE);
-		}
 	}
 
 	return 0;

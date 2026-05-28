@@ -350,6 +350,7 @@ Default: \fBtcp port = 445\fR
 \fBtime machine\fR (S)
 Advertise the share as an Apple Time Machine backup target via the SMB2 AAPL extension.
 Requires \fBdurable handles = yes\fR in the \fBglobal\fR section; Time Machine validates durable handle support during backup destination discovery.
+Apple metadata streams (\fBAFP_AfpInfo\fR etc.) can be enabled separately with \fBvfs objects = streams_xattr\fR.
 
 Default: \fBtime machine = no\fR
 .TP
