@@ -349,7 +349,7 @@ Default: \fBtcp port = 445\fR
 .TP
 \fBtime machine\fR (S)
 Advertise the share as an Apple Time Machine backup target via the SMB2 AAPL extension.
-Implicitly enables named streams so macOS can store Apple metadata such as \fBcom.apple.FinderInfo\fR and \fBcom.apple.ResourceFork\fR as named data streams.
+Requires \fBdurable handles = yes\fR in the \fBglobal\fR section; Time Machine validates durable handle support during backup destination discovery.
 
 Default: \fBtime machine = no\fR
 .TP

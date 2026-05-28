@@ -2,10 +2,10 @@
 /*
  *   SMB2 Apple AAPL create context — Time Machine support for KSMBD
  *
- *   Implements the proprietary Apple SMB2 AAPL extension needed for
- *   macOS Time Machine and Finder metadata interoperability.
+ *   Wire format source: "Time Machine Over SMB Spec"
+ *   https://developer.apple.com/library/archive/releasenotes/
+ *   NetworkingInternetWeb/Time_Machine_SMB_Spec/
  *
- *   Wire format source: Apple SMB2 Extensions specification (public).
  *   Implemented independently for KSMBD; no Samba code used.
  *
  *   Place this file at: fs/smb/server/aapl.h
@@ -16,37 +16,45 @@
 
 #include <linux/types.h>
 
-/* Create context name — 4 bytes, no NUL terminator in the wire format */
+/* Create context name — 4 bytes, no NUL terminator on the wire */
 #define SMB2_CREATE_AAPL		"AAPL"
 #define SMB2_CREATE_AAPL_LEN		4
 
-/* AAPL sub-commands (CommandCode field) */
+/* Sub-commands (CommandCode field) */
 #define AAPL_SERVER_QUERY		1
-#define AAPL_RESOLVE_ID			2
 
 /*
  * Request bitmap: which fields the client wants in the server response.
- * Re-used as reply bitmap: which fields the server is actually providing.
+ * Re-used as reply bitmap: which fields the server is providing.
+ *
+ * kAAPL_MODEL_INFO is intentionally omitted from the reply: the spec
+ * example shows ReplyBitmap = 0x03 even when the client requests 0x07.
  */
 #define AAPL_BITMAP_SERVER_CAPS		0x01ULL
 #define AAPL_BITMAP_VOL_CAPS		0x02ULL
-#define AAPL_BITMAP_MODEL_INFO		0x04ULL
+#define AAPL_BITMAP_MODEL_INFO		0x04ULL	/* client-only; server ignores */
 
 /*
- * Server capability flags (ServerCaps in the response).
- * AAPL_CAPS_OSX_METADATA is the critical one: it tells macOS the server
- * stores xattrs (FinderInfo, ResourceFork, etc.) as named data streams,
- * which is required for Time Machine metadata integrity.
+ * Server capability flags (ServerCapabilities in the response).
+ * Per spec: "Reserved for future use; respond with 0x0 if requested."
  */
-#define AAPL_CAPS_READDIR_ATTR		0x01ULL
-#define AAPL_CAPS_OSX_METADATA		0x02ULL
-#define AAPL_CAPS_UNIX_BASED		0x04ULL
-#define AAPL_CAPS_NFS_ACE		0x08ULL
+#define AAPL_SERVER_CAPS_RESERVED	0x0ULL
 
-/* Volume capability flags (VolCaps in the response) */
-#define AAPL_VOLCAPS_RESOLVE_ID		0x01ULL
-#define AAPL_VOLCAPS_CASE_SENSITIVE	0x02ULL
+/*
+ * Volume capability flags (VolumeCapabilities in the response).
+ * kAAPL_SUPPORTS_FULL_SYNC: server handles SMB2 FLUSH with Reserved1=0xFFFF
+ * by calling F_FULLFSYNC, flushing data to stable storage.  This is required
+ * for Time Machine backup consistency.
+ */
 #define AAPL_VOLCAPS_FULL_SYNC		0x04ULL
+
+/*
+ * F_FULLFSYNC extension to SMB2 FLUSH.
+ * When a client sets Reserved1 to this value in an SMB2 FLUSH request,
+ * the server must flush to stable storage (not just the page cache).
+ * Advertised via kAAPL_SUPPORTS_FULL_SYNC in the AAPL volume capabilities.
+ */
+#define SMB2_FLUSH_FULL_SYNC_MAGIC	0xFFFF
 
 /*
  * AAPL SERVER_QUERY request payload — follows the create context header.
@@ -60,20 +68,17 @@ struct aapl_server_query_req {
 } __packed;
 
 /*
- * AAPL SERVER_QUERY response payload — fixed header, optional fields follow.
- * server_caps / vol_caps / model string are present only when their
- * corresponding AAPL_BITMAP_* bit is set in reply_bitmap.
- * Total wire size (with all fields + "Linux" model): ~58 bytes.
+ * AAPL SERVER_QUERY response payload.
+ * server_caps and vol_caps are present only when the corresponding
+ * AAPL_BITMAP_* bit is set in reply_bitmap.  model string is never sent.
+ * Total wire size: 32 bytes (fixed; no trailing model string).
  */
 struct aapl_server_query_rsp {
-	__le32	cmd;			/* AAPL_SERVER_QUERY */
-	__le32	reserved;		/* 0 */
-	__le64	reply_bitmap;		/* which optional fields follow */
-	__le64	server_caps;		/* AAPL_CAPS_* flags */
-	__le64	vol_caps;		/* AAPL_VOLCAPS_* flags */
-	__le32	pad;			/* 0 */
-	__le32	model_string_bytes;	/* byte count of UTF-16LE model, 0 if absent */
-	/* UTF-16LE model string follows if AAPL_BITMAP_MODEL_INFO in reply_bitmap */
+	__le32	cmd;		/* AAPL_SERVER_QUERY */
+	__le32	reserved;	/* 0 */
+	__le64	reply_bitmap;	/* AAPL_BITMAP_SERVER_CAPS | AAPL_BITMAP_VOL_CAPS */
+	__le64	server_caps;	/* always AAPL_SERVER_CAPS_RESERVED (0x0) */
+	__le64	vol_caps;	/* AAPL_VOLCAPS_FULL_SYNC when supported */
 } __packed;
 
 struct ksmbd_work;

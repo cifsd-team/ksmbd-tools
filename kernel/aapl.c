@@ -2,11 +2,46 @@
 /*
  *   SMB2 Apple AAPL create context — Time Machine support for KSMBD
  *
- *   Wire format source: Apple SMB2 Extensions specification (public).
+ *   Wire format source: "Time Machine Over SMB Spec"
+ *   https://developer.apple.com/library/archive/releasenotes/
+ *   NetworkingInternetWeb/Time_Machine_SMB_Spec/
+ *
  *   Implemented independently for KSMBD; no Samba code used.
  *
  *   Place this file at: fs/smb/server/aapl.c
  *   Add to fs/smb/server/Makefile: ksmbd-y += aapl.o
+ *
+ *
+ *   INTEGRATION SUMMARY
+ *   ===================
+ *
+ *   1. AAPL create context (this file):
+ *      In smb2_create() in smb2pdu.c, after durable/lease context handling:
+ *
+ *        #include "aapl.h"
+ *        ...
+ *        err = smb2_aapl_create_ctx(work, req, rsp);
+ *        if (err)
+ *            pr_debug("ksmbd: AAPL context: %d\n", err);
+ *
+ *   2. F_FULLFSYNC (SMB2 FLUSH extension):
+ *      In smb2_flush() in smb2pdu.c, before calling vfs_fsync():
+ *
+ *        #include "aapl.h"
+ *        ...
+ *        struct smb2_flush_req *req = smb2_get_msg(work->request_buf);
+ *        bool full_sync = (le16_to_cpu(req->Reserved1) == SMB2_FLUSH_FULL_SYNC_MAGIC);
+ *        // pass full_sync to ksmbd_vfs_fsync(); if true, call vfs_fsync(fp, 1)
+ *        // (the '1' argument triggers F_FULLFSYNC / SYNC_FILE_RANGE_WAIT_BEFORE)
+ *
+ *   3. Durable handles:
+ *      Set 'durable handles = yes' in ksmbd.conf [global] — Time Machine
+ *      requires SMB2_CREATE_DURABLE_HANDLE_REQUEST_V2 with timeout negotiation.
+ *
+ *   4. Bonjour advertisement (outside kernel scope):
+ *      Register _adisk._tcp via avahi-daemon with TXT record:
+ *        dk0=adVN=<share_name>,adVF=0x82
+ *      This is how macOS discovers Time Machine targets over the network.
  */
 
 #include <linux/slab.h>
@@ -19,29 +54,17 @@
 #include "mgmt/share_config.h"	/* KSMBD_SHARE_FLAG_* */
 
 /*
- * UTF-16LE "Linux" — the model string macOS uses for the Finder icon.
- * "Xserve" triggers an Apple server icon; "Linux" shows a generic NAS.
- * Neither affects Time Machine functionality.
- */
-static const __le16 aapl_model[] = {
-	cpu_to_le16('L'), cpu_to_le16('i'), cpu_to_le16('n'),
-	cpu_to_le16('u'), cpu_to_le16('x'),
-};
-#define AAPL_MODEL_BYTES	sizeof(aapl_model)
-
-/*
- * Size of the full create context wrapper around an AAPL payload.
+ * Layout of the AAPL create context wrapper around a payload:
  *
- *   struct create_context header  : 16 bytes
- *   name "AAPL" (4 bytes)
+ *   struct create_context header  : 16 bytes  (Next/Name*/Data*/DataLength)
+ *   name "AAPL"                   :  4 bytes
  *   padding to 8-byte align       :  4 bytes
- *   ------------------------------------------
- *   data starts at offset          : 24 bytes
+ *   data starts at offset         : 24 bytes
  *
  * Total = ALIGN(24 + payload_len, 8).
  */
-#define AAPL_CTX_NAME_OFF	16	/* sizeof(struct create_context) */
-#define AAPL_CTX_DATA_OFF	24	/* ALIGN(16 + 4, 8) */
+#define AAPL_CTX_NAME_OFF	16	/* == sizeof(struct create_context) */
+#define AAPL_CTX_DATA_OFF	24	/* == ALIGN(16 + 4, 8) */
 
 static inline u32 aapl_ctx_total(u32 payload_len)
 {
@@ -50,8 +73,7 @@ static inline u32 aapl_ctx_total(u32 payload_len)
 
 /*
  * Walk the create context chain in the response and return a pointer to
- * the last entry (the one whose ->Next is 0).  Returns NULL when there
- * are no response contexts yet.
+ * the last entry (whose ->Next is 0).  Returns NULL when no contexts exist.
  */
 static struct create_context *aapl_last_rsp_ctx(struct smb2_create_rsp *rsp)
 {
@@ -71,9 +93,9 @@ static struct create_context *aapl_last_rsp_ctx(struct smb2_create_rsp *rsp)
 }
 
 /*
- * Build and append an AAPL server-query response context to the CREATE
- * response.  The caller must have verified that the response buffer has
- * room for aapl_ctx_total(payload_len) additional bytes.
+ * Append an AAPL create context to the CREATE response.
+ * The caller must have verified the response buffer has room for
+ * aapl_ctx_total(payload_len) additional bytes.
  */
 static int aapl_append_rsp_ctx(struct ksmbd_work *work,
 				struct smb2_create_rsp *rsp,
@@ -83,7 +105,6 @@ static int aapl_append_rsp_ctx(struct ksmbd_work *work,
 	u32 ctx_len = aapl_ctx_total(payload_len);
 	u8 *dst;
 
-	/* Destination: immediately after any existing response contexts */
 	if (le32_to_cpu(rsp->CreateContextsLength)) {
 		dst = (u8 *)rsp + le32_to_cpu(rsp->CreateContextsOffset)
 		      + le32_to_cpu(rsp->CreateContextsLength);
@@ -98,13 +119,13 @@ static int aapl_append_rsp_ctx(struct ksmbd_work *work,
 		dst = rsp->Buffer;
 	}
 
-	/* Link previous last context to this one */
+	/* Link the previous last context forward to this one */
 	prev = aapl_last_rsp_ctx(rsp);
 	if (prev) {
-		u32 prev_start = (u32)((u8 *)prev -
-				 ((u8 *)rsp + le32_to_cpu(rsp->CreateContextsOffset)));
+		u32 prev_off = (u32)((u8 *)prev -
+				     ((u8 *)rsp + le32_to_cpu(rsp->CreateContextsOffset)));
 		prev->Next = cpu_to_le32(
-			le32_to_cpu(rsp->CreateContextsLength) - prev_start);
+			le32_to_cpu(rsp->CreateContextsLength) - prev_off);
 	}
 
 	/* Build the create context header */
@@ -124,64 +145,43 @@ static int aapl_append_rsp_ctx(struct ksmbd_work *work,
 }
 
 /*
- * Handle AAPL_SERVER_QUERY: respond with server and volume capabilities.
+ * Handle kAAPL_SERVER_QUERY.
  *
- * We advertise AAPL_CAPS_OSX_METADATA so macOS stores Apple xattrs
- * (com.apple.FinderInfo, com.apple.ResourceFork, etc.) as SMB2 named
- * data streams — a prerequisite for Time Machine metadata integrity.
+ * Per spec:
+ *   - ServerCapabilities: "Reserved for future use; respond with 0x0"
+ *   - VolumeCapabilities: kAAPL_SUPPORTS_FULL_SYNC (0x04) when supported
+ *   - Model string: server does not include it (ReplyBitmap omits bit 2)
  *
- * AAPL_VOLCAPS_FULL_SYNC tells macOS it may rely on fsync for TM
- * backup consistency.
+ * The F_FULLFSYNC bit tells macOS it can rely on SMB2 FLUSH with
+ * Reserved1=0xFFFF to ensure backup data reaches stable storage — this
+ * is the consistency guarantee Time Machine requires.
  */
 static int aapl_handle_server_query(struct ksmbd_work *work,
 				     const struct aapl_server_query_req *req,
 				     struct smb2_create_rsp *rsp)
 {
-	struct ksmbd_share_config *share = work->tcon->share_conf;
 	u64 req_bitmap = le64_to_cpu(req->req_bitmap);
-	u64 reply_bitmap = 0, server_caps = 0, vol_caps = 0;
-	u32 model_bytes = 0;
+	u64 reply_bitmap = 0, vol_caps = 0;
+	struct aapl_server_query_rsp arsp = {};
 
-	/*
-	 * Build capability fields only for what the client asked for;
-	 * mirror the request bitmap into the reply bitmap for each item
-	 * we include.
-	 */
-	if (req_bitmap & AAPL_BITMAP_SERVER_CAPS) {
-		reply_bitmap  |= AAPL_BITMAP_SERVER_CAPS;
-		server_caps    = AAPL_CAPS_OSX_METADATA | AAPL_CAPS_UNIX_BASED;
-	}
+	if (req_bitmap & AAPL_BITMAP_SERVER_CAPS)
+		reply_bitmap |= AAPL_BITMAP_SERVER_CAPS;
+	/* server_caps stays 0 — reserved per spec */
 
 	if (req_bitmap & AAPL_BITMAP_VOL_CAPS) {
-		reply_bitmap  |= AAPL_BITMAP_VOL_CAPS;
-		vol_caps       = AAPL_VOLCAPS_FULL_SYNC;
-		if (share->flags & KSMBD_SHARE_FLAG_TIME_MACHINE)
-			vol_caps |= AAPL_VOLCAPS_RESOLVE_ID;
+		reply_bitmap |= AAPL_BITMAP_VOL_CAPS;
+		vol_caps = AAPL_VOLCAPS_FULL_SYNC;
 	}
 
-	if (req_bitmap & AAPL_BITMAP_MODEL_INFO) {
-		reply_bitmap  |= AAPL_BITMAP_MODEL_INFO;
-		model_bytes    = AAPL_MODEL_BYTES;
-	}
+	/* kAAPL_MODEL_INFO: server never sets this bit in ReplyBitmap */
 
-	/* Build the response payload into a stack buffer — it's small */
-	u32 payload_len = sizeof(struct aapl_server_query_rsp) + model_bytes;
-	u8 payload[sizeof(struct aapl_server_query_rsp) + AAPL_MODEL_BYTES];
-	struct aapl_server_query_rsp *arsp = (struct aapl_server_query_rsp *)payload;
+	arsp.cmd		= cpu_to_le32(AAPL_SERVER_QUERY);
+	arsp.reserved		= 0;
+	arsp.reply_bitmap	= cpu_to_le64(reply_bitmap);
+	arsp.server_caps	= cpu_to_le64(AAPL_SERVER_CAPS_RESERVED);
+	arsp.vol_caps		= cpu_to_le64(vol_caps);
 
-	memset(payload, 0, sizeof(payload));
-	arsp->cmd		= cpu_to_le32(AAPL_SERVER_QUERY);
-	arsp->reserved		= 0;
-	arsp->reply_bitmap	= cpu_to_le64(reply_bitmap);
-	arsp->server_caps	= cpu_to_le64(server_caps);
-	arsp->vol_caps		= cpu_to_le64(vol_caps);
-	arsp->pad		= 0;
-	arsp->model_string_bytes = cpu_to_le32(model_bytes);
-
-	if (model_bytes)
-		memcpy(payload + sizeof(*arsp), aapl_model, model_bytes);
-
-	return aapl_append_rsp_ctx(work, rsp, payload, payload_len);
+	return aapl_append_rsp_ctx(work, rsp, &arsp, sizeof(arsp));
 }
 
 /**
@@ -193,15 +193,6 @@ static int aapl_handle_server_query(struct ksmbd_work *work,
  * Called from smb2_create() after the file has been opened and before the
  * response is sent.  Does nothing if the share does not have TIME_MACHINE
  * set, or if the client did not include an AAPL context.
- *
- * Integration point in fs/smb/server/smb2pdu.c — add near the end of
- * smb2_create(), after durable/lease context handling:
- *
- *   #include "aapl.h"
- *   ...
- *   err = smb2_aapl_create_ctx(work, req, rsp);
- *   if (err)
- *       pr_debug("ksmbd: AAPL context: %d\n", err);
  */
 int smb2_aapl_create_ctx(struct ksmbd_work *work,
 			  struct smb2_create_req *req,
@@ -228,7 +219,6 @@ int smb2_aapl_create_ctx(struct ksmbd_work *work,
 	case AAPL_SERVER_QUERY:
 		return aapl_handle_server_query(work, aapl_req, rsp);
 	default:
-		/* AAPL_RESOLVE_ID and future commands: ignore gracefully */
 		return 0;
 	}
 }
