@@ -1,0 +1,180 @@
+--- a/fs/smb/server/ksmbd_netlink.h	2026-05-28 10:33:26.998473999 +0000
++++ b/fs/smb/server/ksmbd_netlink.h	2026-05-28 10:37:03.056767178 +0000
+@@ -358,6 +358,7 @@
+ #define KSMBD_SHARE_FLAG_ACL_XATTR		BIT(13)
+ #define KSMBD_SHARE_FLAG_UPDATE			BIT(14)
+ #define KSMBD_SHARE_FLAG_CROSSMNT		BIT(15)
++#define KSMBD_SHARE_FLAG_TIME_MACHINE		BIT(16)
+ 
+ /*
+  * Tree connect request flags.
+--- a/fs/smb/server/smb2pdu.h	2026-05-28 10:33:26.987473882 +0000
++++ b/fs/smb/server/smb2pdu.h	2026-05-28 10:37:29.882052137 +0000
+@@ -66,6 +66,36 @@
+ /* Apple Defined Contexts */
+ #define SMB2_CREATE_AAPL		"AAPL"
+ 
++/*
++ * AAPL kAAPL_SERVER_QUERY response context.
++ * Wire format per Apple "Time Machine Over SMB" specification.
++ *
++ * Layout (56 bytes total, __packed):
++ *   ccontext  : 16  (create_context header)
++ *   Name[4]   :  4  "AAPL"
++ *   Pad[4]    :  4  align data to 8 bytes
++ *   cmd       :  4  kAAPL_SERVER_QUERY = 1
++ *   reserved  :  4
++ *   reply_bitmap : 8
++ *   server_caps  : 8  reserved, always 0
++ *   vol_caps     : 8  AAPL_VOLCAPS_FULL_SYNC when supported
++ */
++#define AAPL_SERVER_QUERY		1
++#define AAPL_BITMAP_SERVER_CAPS		0x01ULL
++#define AAPL_BITMAP_VOL_CAPS		0x02ULL
++#define AAPL_VOLCAPS_FULL_SYNC		0x04ULL
++
++struct create_aapl_rsp {
++	struct create_context ccontext;
++	__u8   Name[4];
++	__u8   Pad[4];
++	__le32 cmd;
++	__le32 reserved;
++	__le64 reply_bitmap;
++	__le64 server_caps;
++	__le64 vol_caps;
++} __packed;
++
+ struct create_durable_req_v2 {
+ 	struct create_context ccontext;
+ 	__u8   Name[8];
+--- a/fs/smb/server/smb_common.h	2026-05-28 10:33:26.994473956 +0000
++++ b/fs/smb/server/smb_common.h	2026-05-28 10:39:49.291533727 +0000
+@@ -370,6 +370,7 @@
+ 	size_t		create_mxac_size;
+ 	size_t		create_disk_id_size;
+ 	size_t		create_posix_size;
++	size_t		create_aapl_size;
+ };
+ 
+ struct filesystem_posix_info {
+--- a/fs/smb/server/smb2ops.c	2026-05-28 10:33:26.993473946 +0000
++++ b/fs/smb/server/smb2ops.c	2026-05-28 10:39:57.246618301 +0000
+@@ -36,6 +36,7 @@
+ 	.create_mxac_size = sizeof(struct create_mxac_rsp),
+ 	.create_disk_id_size = sizeof(struct create_disk_id_rsp),
+ 	.create_posix_size = sizeof(struct create_posix_rsp),
++	.create_aapl_size = sizeof(struct create_aapl_rsp),
+ };
+ 
+ static struct smb_version_values smb30_server_values = {
+@@ -63,6 +64,7 @@
+ 	.create_mxac_size = sizeof(struct create_mxac_rsp),
+ 	.create_disk_id_size = sizeof(struct create_disk_id_rsp),
+ 	.create_posix_size = sizeof(struct create_posix_rsp),
++	.create_aapl_size = sizeof(struct create_aapl_rsp),
+ };
+ 
+ static struct smb_version_values smb302_server_values = {
+@@ -90,6 +92,7 @@
+ 	.create_mxac_size = sizeof(struct create_mxac_rsp),
+ 	.create_disk_id_size = sizeof(struct create_disk_id_rsp),
+ 	.create_posix_size = sizeof(struct create_posix_rsp),
++	.create_aapl_size = sizeof(struct create_aapl_rsp),
+ };
+ 
+ static struct smb_version_values smb311_server_values = {
+@@ -117,6 +120,7 @@
+ 	.create_mxac_size = sizeof(struct create_mxac_rsp),
+ 	.create_disk_id_size = sizeof(struct create_disk_id_rsp),
+ 	.create_posix_size = sizeof(struct create_posix_rsp),
++	.create_aapl_size = sizeof(struct create_aapl_rsp),
+ };
+ 
+ static struct smb_version_ops smb2_0_server_ops = {
+--- a/fs/smb/server/oplock.h	2026-05-28 10:33:26.995473967 +0000
++++ b/fs/smb/server/oplock.h	2026-05-28 10:40:21.789879250 +0000
+@@ -120,6 +120,7 @@
+ void create_mxac_rsp_buf(char *cc, int maximal_access);
+ void create_disk_id_rsp_buf(char *cc, __u64 file_id, __u64 vol_id);
+ void create_posix_rsp_buf(char *cc, struct ksmbd_file *fp);
++void create_aapl_rsp_buf(char *cc, __u64 vol_caps);
+ struct create_context *smb2_find_context_vals(void *open_req, const char *tag, int tag_len);
+ struct oplock_info *lookup_lease_in_table(struct ksmbd_conn *conn,
+ 					  char *lease_key);
+--- a/fs/smb/server/oplock.c	2026-05-28 10:33:26.995473967 +0000
++++ b/fs/smb/server/oplock.c	2026-05-28 10:40:50.653186164 +0000
+@@ -1760,6 +1760,37 @@
+ 		  SIDUNIX_GROUP, (struct smb_sid *)&buf->SidBuffer[28]);
+ }
+ 
++/**
++ * create_aapl_rsp_buf() - build Apple AAPL kAAPL_SERVER_QUERY response context
++ * @cc:       buffer to write the create context into
++ * @vol_caps: volume capability flags to advertise (AAPL_VOLCAPS_*)
++ *
++ * Wire format per Apple "Time Machine Over SMB" specification.
++ * ServerCapabilities is always 0 ("reserved for future use" per spec).
++ * ReplyBitmap always includes SERVER_CAPS and VOL_CAPS; MODEL_INFO is
++ * never set in the server reply.
++ */
++void create_aapl_rsp_buf(char *cc, __u64 vol_caps)
++{
++	struct create_aapl_rsp *buf;
++
++	buf = (struct create_aapl_rsp *)cc;
++	memset(buf, 0, sizeof(struct create_aapl_rsp));
++	buf->ccontext.DataOffset = cpu_to_le16(offsetof(struct create_aapl_rsp, cmd));
++	buf->ccontext.DataLength = cpu_to_le32(32);
++	buf->ccontext.NameOffset = cpu_to_le16(offsetof(struct create_aapl_rsp, Name));
++	buf->ccontext.NameLength = cpu_to_le16(4);
++	buf->Name[0] = 'A';
++	buf->Name[1] = 'A';
++	buf->Name[2] = 'P';
++	buf->Name[3] = 'L';
++
++	buf->cmd          = cpu_to_le32(AAPL_SERVER_QUERY);
++	buf->reply_bitmap = cpu_to_le64(AAPL_BITMAP_SERVER_CAPS | AAPL_BITMAP_VOL_CAPS);
++	buf->server_caps  = 0; /* reserved per spec */
++	buf->vol_caps     = cpu_to_le64(vol_caps);
++}
++
+ /*
+  * Find lease object(opinfo) for given lease key/fid from lease
+  * break/file close path.
+--- a/fs/smb/server/smb2pdu.c	2026-05-28 10:33:26.991473925 +0000
++++ b/fs/smb/server/smb2pdu.c	2026-05-28 10:41:05.831347573 +0000
+@@ -3432,6 +3432,10 @@
+ 	}
+ 
+ 	if (posix_ctxt) {
++		struct create_context *posix_ccontext;
++
++		posix_ccontext = (struct create_context *)(rsp->Buffer +
++				le32_to_cpu(rsp->CreateContextsLength));
+ 		contxt_cnt++;
+ 		create_posix_rsp_buf(rsp->Buffer +
+ 				le32_to_cpu(rsp->CreateContextsLength),
+@@ -3441,6 +3445,23 @@
+ 		iov_len += conn->vals->create_posix_size;
+ 		if (next_ptr)
+ 			*next_ptr = cpu_to_le32(next_off);
++		next_ptr = &posix_ccontext->Next;
++		next_off = conn->vals->create_posix_size;
++	}
++
++	if (conn->is_aapl &&
++	    test_share_config_flag(tcon->share_conf,
++				   KSMBD_SHARE_FLAG_TIME_MACHINE)) {
++		contxt_cnt++;
++		create_aapl_rsp_buf(rsp->Buffer +
++				le32_to_cpu(rsp->CreateContextsLength),
++				AAPL_VOLCAPS_FULL_SYNC);
++		le32_add_cpu(&rsp->CreateContextsLength,
++			     conn->vals->create_aapl_size);
++		iov_len += conn->vals->create_aapl_size;
++		if (next_ptr)
++			*next_ptr = cpu_to_le32(next_off);
++		/* AAPL is last; next_ptr need not be updated */
+ 	}
+ 
+ 	if (contxt_cnt > 0) {
