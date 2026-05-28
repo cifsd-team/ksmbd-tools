@@ -55,10 +55,11 @@
 	read list = 
 	read only = ; yes
 	store dos attributes = yes
-	valid users = 
-	veto files = 
-	vfs objects = 
-	write list = 
+	time machine = no
+	valid users =
+	veto files =
+	vfs objects =
+	write list =
 
 [example]
 	; share parameters

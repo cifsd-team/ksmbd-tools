@@ -258,6 +258,7 @@ enum KSMBD_TREE_CONN_STATUS {
 #define KSMBD_SHARE_FLAG_ACL_XATTR		(1 << 13)
 #define KSMBD_SHARE_FLAG_UPDATE			(1 << 14)
 #define KSMBD_SHARE_FLAG_CROSSMNT		(1 << 15)
+#define KSMBD_SHARE_FLAG_TIME_MACHINE		(1 << 16)
 
 /*
  * Tree connect request flags.
