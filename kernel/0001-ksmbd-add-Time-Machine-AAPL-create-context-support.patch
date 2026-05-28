@@ -142,7 +142,7 @@
   * Find lease object(opinfo) for given lease key/fid from lease
   * break/file close path.
 --- a/fs/smb/server/smb2pdu.c	2026-05-28 10:33:26.991473925 +0000
-+++ b/fs/smb/server/smb2pdu.c	2026-05-28 10:41:05.831347573 +0000
++++ b/fs/smb/server/smb2pdu.c	2026-05-28 10:46:19.622686283 +0000
 @@ -3432,6 +3432,10 @@
  	}
  
@@ -154,7 +154,7 @@
  		contxt_cnt++;
  		create_posix_rsp_buf(rsp->Buffer +
  				le32_to_cpu(rsp->CreateContextsLength),
-@@ -3441,6 +3445,23 @@
+@@ -3441,6 +3445,35 @@
  		iov_len += conn->vals->create_posix_size;
  		if (next_ptr)
  			*next_ptr = cpu_to_le32(next_off);
@@ -162,13 +162,25 @@
 +		next_off = conn->vals->create_posix_size;
 +	}
 +
-+	if (conn->is_aapl &&
-+	    test_share_config_flag(tcon->share_conf,
-+				   KSMBD_SHARE_FLAG_TIME_MACHINE)) {
++	if (conn->is_aapl) {
++		__u64 vol_caps = 0;
++
++		/*
++		 * Always respond to AAPL: macOS sends this context on every
++		 * connection regardless of share type.  Gate FULL_SYNC on the
++		 * time machine flag — advertising it causes macOS to issue
++		 * SMB2 FLUSH with Reserved1=0xFFFF on every write, which is
++		 * the correct behaviour for a backup destination but an
++		 * unnecessary overhead on general-purpose shares.
++		 */
++		if (test_share_config_flag(tcon->share_conf,
++					   KSMBD_SHARE_FLAG_TIME_MACHINE))
++			vol_caps = AAPL_VOLCAPS_FULL_SYNC;
++
 +		contxt_cnt++;
 +		create_aapl_rsp_buf(rsp->Buffer +
 +				le32_to_cpu(rsp->CreateContextsLength),
-+				AAPL_VOLCAPS_FULL_SYNC);
++				vol_caps);
 +		le32_add_cpu(&rsp->CreateContextsLength,
 +			     conn->vals->create_aapl_size);
 +		iov_len += conn->vals->create_aapl_size;
