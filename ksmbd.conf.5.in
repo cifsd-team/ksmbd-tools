@@ -347,6 +347,12 @@ TCP port that is listened to.
 
 Default: \fBtcp port = 445\fR
 .TP
+\fBtime machine\fR (S)
+Advertise the share as an Apple Time Machine backup target via the SMB2 AAPL extension.
+Implicitly enables named streams so macOS can store Apple metadata such as \fBcom.apple.FinderInfo\fR and \fBcom.apple.ResourceFork\fR as named data streams.
+
+Default: \fBtime machine = no\fR
+.TP
 \fBvalid users\fR (S)
 List of the users that are allowed to connect to the share.
 With \fBvalid users = \fR, all users are allowed.
