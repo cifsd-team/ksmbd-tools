@@ -1,6 +1,14 @@
 --- a/fs/smb/server/ksmbd_netlink.h	2026-05-28 10:33:26.998473999 +0000
-+++ b/fs/smb/server/ksmbd_netlink.h	2026-05-29 12:22:00.868599221 +0000
-@@ -109,7 +109,8 @@
++++ b/fs/smb/server/ksmbd_netlink.h	2026-05-29 13:13:07.771554298 +0000
+@@ -75,6 +75,7 @@
+ #define KSMBD_GLOBAL_FLAG_SMB2_ENCRYPTION	BIT(1)
+ #define KSMBD_GLOBAL_FLAG_SMB3_MULTICHANNEL	BIT(2)
+ #define KSMBD_GLOBAL_FLAG_SMB2_ENCRYPTION_OFF	BIT(3)
++#define KSMBD_GLOBAL_FLAG_DURABLE_HANDLES	BIT(4)
+ 
+ /*
+  * IPC request for ksmbd server startup
+@@ -109,7 +110,8 @@
  	__u32	max_connections;	/* Number of maximum simultaneous connections */
  	__s8	bind_interfaces_only;
  	__u32	max_ip_connections;	/* Number of maximum connection per ip address */
@@ -10,7 +18,7 @@
  	__u32	ifc_list_sz;		/* interfaces list size */
  	__s8	____payload[];
  } __packed;
-@@ -358,6 +359,7 @@
+@@ -358,6 +360,7 @@
  #define KSMBD_SHARE_FLAG_ACL_XATTR		BIT(13)
  #define KSMBD_SHARE_FLAG_UPDATE			BIT(14)
  #define KSMBD_SHARE_FLAG_CROSSMNT		BIT(15)
@@ -111,7 +119,7 @@
  
  struct filesystem_posix_info {
 --- a/fs/smb/server/smb2ops.c	2026-05-28 10:33:26.993473946 +0000
-+++ b/fs/smb/server/smb2ops.c	2026-05-29 12:19:32.058928639 +0000
++++ b/fs/smb/server/smb2ops.c	2026-05-29 13:15:20.847012411 +0000
 @@ -36,6 +36,7 @@
  	.create_mxac_size = sizeof(struct create_mxac_rsp),
  	.create_disk_id_size = sizeof(struct create_disk_id_rsp),
@@ -144,6 +152,36 @@
  };
  
  static struct smb_version_ops smb2_0_server_ops = {
+@@ -224,6 +228,9 @@
+ 		conn->vals->capabilities |= SMB2_GLOBAL_CAP_LEASING |
+ 			SMB2_GLOBAL_CAP_DIRECTORY_LEASING;
+ 
++	if (server_conf.flags & KSMBD_GLOBAL_FLAG_DURABLE_HANDLES)
++		conn->vals->capabilities |= SMB2_GLOBAL_CAP_PERSISTENT_HANDLES;
++
+ 	if (server_conf.flags & KSMBD_GLOBAL_FLAG_SMB2_ENCRYPTION &&
+ 	    conn->cli_cap & SMB2_GLOBAL_CAP_ENCRYPTION)
+ 		conn->vals->capabilities |= SMB2_GLOBAL_CAP_ENCRYPTION;
+@@ -254,6 +261,9 @@
+ 		conn->vals->capabilities |= SMB2_GLOBAL_CAP_LEASING |
+ 			SMB2_GLOBAL_CAP_DIRECTORY_LEASING;
+ 
++	if (server_conf.flags & KSMBD_GLOBAL_FLAG_DURABLE_HANDLES)
++		conn->vals->capabilities |= SMB2_GLOBAL_CAP_PERSISTENT_HANDLES;
++
+ 	if (server_conf.flags & KSMBD_GLOBAL_FLAG_SMB2_ENCRYPTION ||
+ 	    (!(server_conf.flags & KSMBD_GLOBAL_FLAG_SMB2_ENCRYPTION_OFF) &&
+ 	     conn->cli_cap & SMB2_GLOBAL_CAP_ENCRYPTION))
+@@ -280,6 +290,9 @@
+ 		conn->vals->capabilities |= SMB2_GLOBAL_CAP_LEASING |
+ 			SMB2_GLOBAL_CAP_DIRECTORY_LEASING;
+ 
++	if (server_conf.flags & KSMBD_GLOBAL_FLAG_DURABLE_HANDLES)
++		conn->vals->capabilities |= SMB2_GLOBAL_CAP_PERSISTENT_HANDLES;
++
+ 	if (server_conf.flags & KSMBD_GLOBAL_FLAG_SMB3_MULTICHANNEL)
+ 		conn->vals->capabilities |= SMB2_GLOBAL_CAP_MULTI_CHANNEL;
+ 
 --- a/fs/smb/server/oplock.h	2026-05-28 10:33:26.995473967 +0000
 +++ b/fs/smb/server/oplock.h	2026-05-28 16:52:08.324887287 +0000
 @@ -120,6 +120,7 @@
