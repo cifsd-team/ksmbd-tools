@@ -27,8 +27,8 @@
  /*
   * Tree connect request flags.
 --- a/fs/smb/server/smb2pdu.h	2026-05-28 10:33:26.987473882 +0000
-+++ b/fs/smb/server/smb2pdu.h	2026-05-29 12:19:32.058928639 +0000
-@@ -66,6 +66,79 @@
++++ b/fs/smb/server/smb2pdu.h	2026-05-29 15:05:35.545386801 +0000
+@@ -66,6 +66,101 @@
  /* Apple Defined Contexts */
  #define SMB2_CREATE_AAPL		"AAPL"
  
@@ -51,7 +51,13 @@
 + * When MODEL_INFO is included, these follow immediately:
 + *   pad2(4) + model_string_bytes(4) + UTF-16LE model string
 + */
++/* AAPL create context layout constants */
++#define AAPL_CTX_NAME_OFF	16	/* == sizeof(struct create_context) */
++#define AAPL_CTX_DATA_OFF	24	/* == ALIGN(16 + 4, 8) */
++#define SMB2_CREATE_AAPL_LEN	4
++
 +#define AAPL_SERVER_QUERY		1
++#define AAPL_RESOLVE_ID			2  /* resolve node ID to path */
 +#define AAPL_BITMAP_SERVER_CAPS		0x01ULL
 +#define AAPL_BITMAP_VOL_CAPS		0x02ULL
 +#define AAPL_BITMAP_MODEL_INFO		0x04ULL
@@ -71,8 +77,24 @@
 +#define AAPL_SERVER_CAPS_KSMBD		AAPL_CAPS_UNIX_BASED
 +
 +/* Volume capability flags */
-+#define AAPL_VOLCAPS_RESOLVE_ID		0x01ULL
-+#define AAPL_VOLCAPS_FULL_SYNC		0x04ULL
++#define AAPL_VOLCAPS_RESOLVE_ID		0x01ULL  /* kAAPL_RESOLVE_ID supported */
++#define AAPL_VOLCAPS_FULL_SYNC		0x04ULL  /* SMB2 FLUSH = F_FULLFSYNC */
++
++/* AAPL kAAPL_RESOLVE_ID request: cmd(4)+reserved(4)+NodeID(8) */
++struct aapl_resolve_id_req {
++	__le32	cmd;		/* AAPL_RESOLVE_ID */
++	__le32	reserved;
++	__le64	node_id;	/* inode/node ID to resolve */
++} __packed;
++
++/* AAPL kAAPL_RESOLVE_ID response: cmd(4)+reserved(4)+status(4)+pad(4)+path */
++struct aapl_resolve_id_rsp {
++	__le32	cmd;
++	__le32	reserved;
++	__le32	nt_status;
++	__le32	pad;
++	/* UTF-16LE path follows (null-terminated) */
++} __packed;
 +
 +/* Model string: up to 31 ASCII chars (matching server_conf.aapl_model[32]) */
 +#define AAPL_MODEL_MAX_CHARS		31
@@ -193,8 +215,15 @@
  struct oplock_info *lookup_lease_in_table(struct ksmbd_conn *conn,
  					  char *lease_key);
 --- a/fs/smb/server/oplock.c	2026-05-28 10:33:26.995473967 +0000
-+++ b/fs/smb/server/oplock.c	2026-05-29 12:19:32.058928639 +0000
-@@ -15,6 +15,7 @@
++++ b/fs/smb/server/oplock.c	2026-05-29 15:07:03.257330493 +0000
+@@ -9,12 +9,14 @@
+ #include "glob.h"
+ #include "oplock.h"
+ 
++#include "smb2pdu.h"		/* AAPL_CTX_* constants */
+ #include "smb_common.h"
+ #include "smbstatus.h"
+ #include "connection.h"
  #include "mgmt/user_session.h"
  #include "mgmt/share_config.h"
  #include "mgmt/tree_connect.h"
@@ -202,7 +231,7 @@
  
  static LIST_HEAD(lease_table_list);
  static DEFINE_RWLOCK(lease_list_lock);
-@@ -1760,6 +1761,76 @@
+@@ -1760,6 +1762,76 @@
  		  SIDUNIX_GROUP, (struct smb_sid *)&buf->SidBuffer[28]);
  }
  
@@ -280,8 +309,195 @@
   * Find lease object(opinfo) for given lease key/fid from lease
   * break/file close path.
 --- a/fs/smb/server/smb2pdu.c	2026-05-28 10:33:26.991473925 +0000
-+++ b/fs/smb/server/smb2pdu.c	2026-05-28 21:56:13.776300068 +0000
-@@ -3432,6 +3432,10 @@
++++ b/fs/smb/server/smb2pdu.c	2026-05-29 15:07:03.257330493 +0000
+@@ -2694,6 +2694,8 @@
+ 	int req_op_level = 0, open_flags = 0, may_flags = 0, file_info = 0;
+ 	int rc = 0;
+ 	int contxt_cnt = 0, query_disk_id = 0;
++	u32 dh2q_timeout = 0; /* non-zero when DH2Q was in the request */
++	const u8 *dh2q_guid = NULL; /* CreateGuid from DH2Q, for DH2C validation */
+ 	bool maximal_access_ctxt = false, posix_ctxt = false;
+ 	int s_type = 0;
+ 	int next_off = 0;
+@@ -2842,6 +2844,119 @@
+ 	}
+ 
+ 	if (req->CreateContextsOffset) {
++		/*
++		 * Parse SMB2_CREATE_DURABLE_HANDLE_REQUEST_V2 (DH2Q).
++		 * ksmbd always assigns a persistent_id (ksmbd_open_durable_fd),
++		 * but without parsing DH2Q and responding with DH2V the client
++		 * never knows its durable handle was granted.  Time Machine
++		 * validation requires a DH2V response with a timeout in
++		 * [30, 180] seconds; without it TM reports "does not support
++		 * the required capacities".
++		 */
++		context = smb2_find_context_vals(req,
++						 SMB2_CREATE_DURABLE_HANDLE_REQUEST_V2, 4);
++		if (IS_ERR(context)) {
++			rc = PTR_ERR(context);
++			goto err_out2;
++		} else if (context) {
++			struct create_durable_req_v2 *dh2q =
++				(struct create_durable_req_v2 *)context;
++			u32 req_timeout = le32_to_cpu(dh2q->Timeout);
++
++			/*
++			 * Use the requested timeout when in [30s, 180s].
++			 * If the client sends 0 (discovery probe), respond
++			 * with 60 s so the follow-up probe with Timeout=30
++			 * is accepted.
++			 */
++			if (req_timeout == 0 || req_timeout > 180000)
++				req_timeout = 60000; /* 60 s in ms */
++			else if (req_timeout < 30000)
++				req_timeout = 30000; /* minimum 30 s */
++			dh2q_timeout = req_timeout;
++			dh2q_guid = dh2q->CreateGuid;
++		}
++
++		/*
++		 * Parse SMB2_CREATE_DURABLE_HANDLE_RECONNECT_V2 (DH2C).
++		 * Time Machine sends this when reconnecting after a network drop
++		 * to resume operations on an existing durable file handle.
++		 * If the handle is still alive we re-register it on the new
++		 * connection; if it was already cleaned up we return NOT_FOUND
++		 * so TM falls back to a normal open.
++		 */
++		context = smb2_find_context_vals(req,
++					SMB2_CREATE_DURABLE_HANDLE_RECONNECT_V2, 4);
++		if (IS_ERR(context)) {
++			rc = PTR_ERR(context);
++			goto err_out2;
++		} else if (context) {
++			struct create_durable_reconn_v2_req *dh2c =
++				(struct create_durable_reconn_v2_req *)context;
++			u64 persistent_id = le64_to_cpu(dh2c->Fid.PersistentFileId);
++			struct ksmbd_file *durable_fp;
++
++			durable_fp = ksmbd_lookup_durable_fd(persistent_id);
++			if (!durable_fp) {
++				rc = -EBADF;
++				goto err_out2;
++			}
++			/* Validate CreateGuid */
++			if (memcmp(durable_fp->create_guid, dh2c->CreateGuid,
++				   SMB2_CREATE_GUID_SIZE)) {
++				ksmbd_fd_put(work, durable_fp);
++				rc = -EBADF;
++				goto err_out2;
++			}
++
++			/* Re-register the durable fp on the new connection */
++			durable_fp->tcon = tcon;
++			durable_fp->conn = work->conn;
++
++			/* Assign a new volatile id in this session's table */
++			write_lock(&work->sess->file_table.lock);
++			rc = idr_alloc_cyclic(work->sess->file_table.idr,
++					      durable_fp, 0, INT_MAX - 1,
++					      GFP_NOWAIT);
++			if (rc >= 0) {
++				durable_fp->volatile_id = (u64)rc;
++				rc = 0;
++			} else {
++				durable_fp->volatile_id = KSMBD_NO_FID;
++			}
++			write_unlock(&work->sess->file_table.lock);
++
++			if (rc) {
++				ksmbd_fd_put(work, durable_fp);
++				rc = -ENOMEM;
++				goto err_out2;
++			}
++
++			/* Build reconnect response */
++			ksmbd_update_fstate(&work->sess->file_table,
++					    durable_fp, FP_INITED);
++			rsp->StructureSize = cpu_to_le16(89);
++			rsp->OplockLevel  = SMB2_OPLOCK_LEVEL_NONE;
++			rsp->Flags        = 0;
++			rsp->CreateAction = cpu_to_le32(FILE_OPENED);
++			rsp->PersistentFileId = durable_fp->persistent_id;
++			rsp->VolatileFileId   = durable_fp->volatile_id;
++
++			/* DH2C response context */
++			create_durable_v2_rsp_buf(rsp->Buffer, durable_fp);
++			rsp->CreateContextsOffset =
++				cpu_to_le32(offsetof(struct smb2_create_rsp,
++						     Buffer));
++			rsp->CreateContextsLength =
++				cpu_to_le32(conn->vals->create_durable_v2_size);
++			iov_len = offsetof(struct smb2_create_rsp, Buffer) +
++				  conn->vals->create_durable_v2_size;
++
++			ksmbd_fd_put(work, durable_fp);
++			rc = ksmbd_iov_pin_rsp(work, rsp, iov_len);
++			return rc;
++		}
++
+ 		/* Parse non-durable handle create contexts */
+ 		context = smb2_find_context_vals(req, SMB2_CREATE_EA_BUFFER, 4);
+ 		if (IS_ERR(context)) {
+@@ -3108,6 +3223,11 @@
+ 		rc = -ENOMEM;
+ 		goto err_out;
+ 	}
++	if (dh2q_timeout) {
++		fp->durable_timeout = dh2q_timeout;
++		if (dh2q_guid)
++			memcpy(fp->create_guid, dh2q_guid, SMB2_CREATE_GUID_SIZE);
++	}
+ 
+ 	fp->cdoption = req->CreateDisposition;
+ 	fp->daccess = daccess;
+@@ -3373,6 +3493,25 @@
+ 	rsp->CreateContextsLength = 0;
+ 	iov_len = offsetof(struct smb2_create_rsp, Buffer);
+ 
++	/* If DH2Q was requested, send DH2V response with negotiated timeout */
++	if (dh2q_timeout && has_file_id(fp->persistent_id)) {
++		struct create_context *dh2q_ccontext;
++
++		dh2q_ccontext = (struct create_context *)
++				(rsp->Buffer +
++				 le32_to_cpu(rsp->CreateContextsLength));
++		contxt_cnt++;
++		create_durable_v2_rsp_buf(rsp->Buffer +
++				le32_to_cpu(rsp->CreateContextsLength), fp);
++		le32_add_cpu(&rsp->CreateContextsLength,
++			     conn->vals->create_durable_v2_size);
++		iov_len += conn->vals->create_durable_v2_size;
++		if (next_ptr)
++			*next_ptr = cpu_to_le32(next_off);
++		next_ptr = &dh2q_ccontext->Next;
++		next_off = conn->vals->create_durable_v2_size;
++	}
++
+ 	/* If lease is request send lease context response */
+ 	if (opinfo && opinfo->is_lease) {
+ 		struct create_context *lease_ccontext;
+@@ -3381,12 +3520,17 @@
+ 			    name, opinfo->o_lease->state);
+ 		rsp->OplockLevel = SMB2_OPLOCK_LEVEL_LEASE;
+ 
+-		lease_ccontext = (struct create_context *)rsp->Buffer;
++		lease_ccontext = (struct create_context *)(rsp->Buffer +
++				le32_to_cpu(rsp->CreateContextsLength));
+ 		contxt_cnt++;
+-		create_lease_buf(rsp->Buffer, opinfo->o_lease);
++		create_lease_buf(rsp->Buffer +
++				 le32_to_cpu(rsp->CreateContextsLength),
++				 opinfo->o_lease);
+ 		le32_add_cpu(&rsp->CreateContextsLength,
+ 			     conn->vals->create_lease_size);
+ 		iov_len += conn->vals->create_lease_size;
++		if (next_ptr)
++			*next_ptr = cpu_to_le32(next_off);
+ 		next_ptr = &lease_ccontext->Next;
+ 		next_off = conn->vals->create_lease_size;
+ 	}
+@@ -3432,6 +3576,10 @@
  	}
  
  	if (posix_ctxt) {
@@ -292,7 +508,7 @@
  		contxt_cnt++;
  		create_posix_rsp_buf(rsp->Buffer +
  				le32_to_cpu(rsp->CreateContextsLength),
-@@ -3441,6 +3445,48 @@
+@@ -3441,6 +3589,140 @@
  		iov_len += conn->vals->create_posix_size;
  		if (next_ptr)
  			*next_ptr = cpu_to_le32(next_off);
@@ -325,12 +541,104 @@
 +		aapl_query = (const struct aapl_server_query_req *)
 +				((u8 *)aapl_req_ctx +
 +				 le16_to_cpu(aapl_req_ctx->DataOffset));
++
++		if (le32_to_cpu(aapl_query->cmd) == AAPL_RESOLVE_ID) {
++			/*
++			 * kAAPL_RESOLVE_ID: client wants to map a node ID to
++			 * a path.  Use vfs_path_lookup or dentry_path_raw to
++			 * return the path relative to the share root.
++			 * We respond with the full path so TM can locate the
++			 * quota.plist even after a server restart.
++			 */
++			const struct aapl_resolve_id_req *rid =
++				(const struct aapl_resolve_id_req *)aapl_query;
++			u64 node_id = le64_to_cpu(rid->node_id);
++			struct aapl_resolve_id_rsp *rid_rsp;
++			__le16 *path_utf16;
++			char *pathbuf = NULL;
++			struct inode *inode;
++			struct dentry *dentry = NULL;
++			int path_len = 0;
++			u32 rsp_data_len;
++
++			/* Allocate inline in rsp->Buffer */
++			rid_rsp = (struct aapl_resolve_id_rsp *)
++				  (rsp->Buffer +
++				   le32_to_cpu(rsp->CreateContextsLength) +
++				   AAPL_CTX_DATA_OFF);
++
++			inode = ilookup(path.dentry->d_sb, (unsigned long)node_id);
++			if (inode) {
++				dentry = d_find_alias(inode);
++				iput(inode);
++			}
++			if (dentry) {
++				pathbuf = kmalloc(PATH_MAX, GFP_KERNEL);
++				if (pathbuf) {
++					char *p = dentry_path_raw(dentry,
++								  pathbuf,
++								  PATH_MAX);
++					if (!IS_ERR(p)) {
++						/* strip share root prefix */
++						const char *root = share->path;
++						size_t rlen = strlen(root);
++
++						if (!strncmp(p, root, rlen))
++							p += rlen;
++						if (*p == '/')
++							p++;
++						path_len = smb_strtoUTF16(
++							(__le16 *)(rid_rsp + 1),
++							p, strlen(p) + 1,
++							conn->local_nls);
++						path_len *= 2;
++					}
++					kfree(pathbuf);
++				}
++				dput(dentry);
++			}
++
++			rsp_data_len = sizeof(*rid_rsp) + path_len;
++			/* Build the create context wrapper around rid_rsp */
++			{
++				struct create_context *cc =
++					(struct create_context *)
++					(rsp->Buffer +
++					 le32_to_cpu(rsp->CreateContextsLength));
++				u32 ctx_total = ALIGN(AAPL_CTX_DATA_OFF +
++						     rsp_data_len, 8);
++
++				memset(cc, 0, ctx_total);
++				cc->NameOffset = cpu_to_le16(AAPL_CTX_NAME_OFF);
++				cc->NameLength = cpu_to_le16(SMB2_CREATE_AAPL_LEN);
++				cc->DataOffset = cpu_to_le16(AAPL_CTX_DATA_OFF);
++				cc->DataLength = cpu_to_le32(rsp_data_len);
++				memcpy((u8 *)cc + AAPL_CTX_NAME_OFF,
++				       SMB2_CREATE_AAPL, SMB2_CREATE_AAPL_LEN);
++				rid_rsp->cmd       = cpu_to_le32(AAPL_RESOLVE_ID);
++				rid_rsp->reserved  = 0;
++				rid_rsp->nt_status = path_len ?
++					cpu_to_le32(0) :	/* STATUS_SUCCESS */
++					cpu_to_le32(0xC0000034);/* NOT_FOUND */
++				rid_rsp->pad       = 0;
++
++				if (next_ptr)
++					*next_ptr = cpu_to_le32(next_off);
++				contxt_cnt++;
++				le32_add_cpu(&rsp->CreateContextsLength,
++					     ctx_total);
++				iov_len += ctx_total;
++			}
++			goto aapl_done;
++		}
++
 +		req_bitmap = le64_to_cpu(aapl_query->req_bitmap);
 +
 +		contxt_cnt++;
 +		create_aapl_rsp_buf(rsp->Buffer +
 +				le32_to_cpu(rsp->CreateContextsLength),
-+				AAPL_VOLCAPS_FULL_SYNC, req_bitmap);
++				AAPL_VOLCAPS_FULL_SYNC | AAPL_VOLCAPS_RESOLVE_ID,
++				req_bitmap);
 +		le32_add_cpu(&rsp->CreateContextsLength,
 +			     conn->vals->create_aapl_size);
 +		iov_len += conn->vals->create_aapl_size;
@@ -341,7 +649,7 @@
  	}
  
  	if (contxt_cnt > 0) {
-@@ -8470,6 +8516,29 @@
+@@ -8470,6 +8752,29 @@
  		return 0;
  	}
  
