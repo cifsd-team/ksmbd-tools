@@ -9,29 +9,61 @@
  /*
   * Tree connect request flags.
 --- a/fs/smb/server/smb2pdu.h	2026-05-28 10:33:26.987473882 +0000
-+++ b/fs/smb/server/smb2pdu.h	2026-05-28 10:37:29.882052137 +0000
-@@ -66,6 +66,36 @@
++++ b/fs/smb/server/smb2pdu.h	2026-05-29 07:12:08.487392015 +0000
+@@ -66,6 +66,78 @@
  /* Apple Defined Contexts */
  #define SMB2_CREATE_AAPL		"AAPL"
  
 +/*
 + * AAPL kAAPL_SERVER_QUERY response context.
-+ * Wire format per Apple "Time Machine Over SMB" specification.
 + *
-+ * Layout (56 bytes total, __packed):
-+ *   ccontext  : 16  (create_context header)
-+ *   Name[4]   :  4  "AAPL"
-+ *   Pad[4]    :  4  align data to 8 bytes
-+ *   cmd       :  4  kAAPL_SERVER_QUERY = 1
-+ *   reserved  :  4
-+ *   reply_bitmap : 8
-+ *   server_caps  : 8  reserved, always 0
-+ *   vol_caps     : 8  AAPL_VOLCAPS_FULL_SYNC when supported
++ * Observed from macOS's own smbd (via Mac-to-Mac capture):
++ *   reply_bitmap = 0x07  (echoes client's full request, incl. MODEL_INFO)
++ *   server_caps  = 0x1f  (READDIR_ATTR|COPYFILE|UNIX_BASED|NFS_ACE|0x10)
++ *   vol_caps     = 0x05  (RESOLVE_ID|FULL_SYNC)
++ *   model string present ("MacBookAir10,1")
++ *
++ * Sending reply_bitmap=0x03 without a model string causes smbfs.kext to
++ * take an incompletely initialised "Apple server" disconnect path that
++ * hard-freezes on unmount and requires a macOS reboot to recover.
++ *
++ * Fixed layout (56 bytes):
++ *   ccontext (16) + Name[4] + Pad[4] + cmd(4) + reserved(4) +
++ *   reply_bitmap(8) + server_caps(8) + vol_caps(8)
++ * When MODEL_INFO is included, these follow immediately:
++ *   pad2(4) + model_string_bytes(4) + UTF-16LE model string
 + */
 +#define AAPL_SERVER_QUERY		1
 +#define AAPL_BITMAP_SERVER_CAPS		0x01ULL
 +#define AAPL_BITMAP_VOL_CAPS		0x02ULL
++#define AAPL_BITMAP_MODEL_INFO		0x04ULL
++
++/* Server capability flags */
++#define AAPL_CAPS_READDIR_ATTR		0x01ULL  /* bulk dir attr — not implemented */
++#define AAPL_CAPS_COPYFILE		0x02ULL  /* macOS copyfile */
++#define AAPL_CAPS_UNIX_BASED		0x04ULL  /* server is Unix-based */
++#define AAPL_CAPS_NFS_ACE		0x08ULL  /* NFS ACE ownership — not fully implemented */
++
++/*
++ * Capabilities we actually advertise.  Advertising NFS_ACE or READDIR_ATTR
++ * without implementing them causes macOS to set UNIX ACEs and read extended
++ * directory info in ways ksmbd doesn't support, resulting in wrong file
++ * permissions.  UNIX_BASED is truthful and harmless.
++ */
++#define AAPL_SERVER_CAPS_KSMBD		AAPL_CAPS_UNIX_BASED
++
++/* Volume capability flags */
++#define AAPL_VOLCAPS_RESOLVE_ID		0x01ULL
 +#define AAPL_VOLCAPS_FULL_SYNC		0x04ULL
++
++/* UTF-16LE "Samba" model string: 5 chars × 2 bytes */
++#define AAPL_MODEL_UTF16_BYTES		10
++
++/*
++ * Maximum AAPL response size: fixed struct + pad2(4) + model_bytes(4) +
++ * model string (10), 8-byte aligned: ALIGN(56+18, 8) = 80.
++ */
++#define AAPL_RSP_MAX_SIZE		80
 +
 +struct create_aapl_rsp {
 +	struct create_context ccontext;
@@ -42,6 +74,16 @@
 +	__le64 reply_bitmap;
 +	__le64 server_caps;
 +	__le64 vol_caps;
++	/* When AAPL_BITMAP_MODEL_INFO in reply_bitmap, appended after: */
++	/* __le32 pad2; __le32 model_string_bytes; __le16 model[]; */
++} __packed;
++
++/* AAPL server query request payload (client → server) */
++struct aapl_server_query_req {
++	__le32 cmd;
++	__le32 reserved;
++	__le64 req_bitmap;
++	__le64 client_caps;
 +} __packed;
 +
  struct create_durable_req_v2 {
@@ -58,12 +100,12 @@
  
  struct filesystem_posix_info {
 --- a/fs/smb/server/smb2ops.c	2026-05-28 10:33:26.993473946 +0000
-+++ b/fs/smb/server/smb2ops.c	2026-05-28 10:39:57.246618301 +0000
++++ b/fs/smb/server/smb2ops.c	2026-05-28 16:52:08.322887265 +0000
 @@ -36,6 +36,7 @@
  	.create_mxac_size = sizeof(struct create_mxac_rsp),
  	.create_disk_id_size = sizeof(struct create_disk_id_rsp),
  	.create_posix_size = sizeof(struct create_posix_rsp),
-+	.create_aapl_size = sizeof(struct create_aapl_rsp),
++	.create_aapl_size = AAPL_RSP_MAX_SIZE,
  };
  
  static struct smb_version_values smb30_server_values = {
@@ -71,7 +113,7 @@
  	.create_mxac_size = sizeof(struct create_mxac_rsp),
  	.create_disk_id_size = sizeof(struct create_disk_id_rsp),
  	.create_posix_size = sizeof(struct create_posix_rsp),
-+	.create_aapl_size = sizeof(struct create_aapl_rsp),
++	.create_aapl_size = AAPL_RSP_MAX_SIZE,
  };
  
  static struct smb_version_values smb302_server_values = {
@@ -79,7 +121,7 @@
  	.create_mxac_size = sizeof(struct create_mxac_rsp),
  	.create_disk_id_size = sizeof(struct create_disk_id_rsp),
  	.create_posix_size = sizeof(struct create_posix_rsp),
-+	.create_aapl_size = sizeof(struct create_aapl_rsp),
++	.create_aapl_size = AAPL_RSP_MAX_SIZE,
  };
  
  static struct smb_version_values smb311_server_values = {
@@ -87,44 +129,67 @@
  	.create_mxac_size = sizeof(struct create_mxac_rsp),
  	.create_disk_id_size = sizeof(struct create_disk_id_rsp),
  	.create_posix_size = sizeof(struct create_posix_rsp),
-+	.create_aapl_size = sizeof(struct create_aapl_rsp),
++	.create_aapl_size = AAPL_RSP_MAX_SIZE,
  };
  
  static struct smb_version_ops smb2_0_server_ops = {
 --- a/fs/smb/server/oplock.h	2026-05-28 10:33:26.995473967 +0000
-+++ b/fs/smb/server/oplock.h	2026-05-28 10:40:21.789879250 +0000
++++ b/fs/smb/server/oplock.h	2026-05-28 16:52:08.324887287 +0000
 @@ -120,6 +120,7 @@
  void create_mxac_rsp_buf(char *cc, int maximal_access);
  void create_disk_id_rsp_buf(char *cc, __u64 file_id, __u64 vol_id);
  void create_posix_rsp_buf(char *cc, struct ksmbd_file *fp);
-+void create_aapl_rsp_buf(char *cc, __u64 vol_caps);
++void create_aapl_rsp_buf(char *cc, __u64 vol_caps, __u64 req_bitmap);
  struct create_context *smb2_find_context_vals(void *open_req, const char *tag, int tag_len);
  struct oplock_info *lookup_lease_in_table(struct ksmbd_conn *conn,
  					  char *lease_key);
 --- a/fs/smb/server/oplock.c	2026-05-28 10:33:26.995473967 +0000
-+++ b/fs/smb/server/oplock.c	2026-05-28 10:40:50.653186164 +0000
-@@ -1760,6 +1760,37 @@
++++ b/fs/smb/server/oplock.c	2026-05-29 07:13:16.247120756 +0000
+@@ -1760,6 +1760,69 @@
  		  SIDUNIX_GROUP, (struct smb_sid *)&buf->SidBuffer[28]);
  }
  
++/* UTF-16LE "Samba" model string — matches Samba's vfs_fruit default */
++static const __le16 aapl_model_utf16[] = {
++	cpu_to_le16('S'), cpu_to_le16('a'), cpu_to_le16('m'),
++	cpu_to_le16('b'), cpu_to_le16('a'),
++};
++
 +/**
-+ * create_aapl_rsp_buf() - build Apple AAPL kAAPL_SERVER_QUERY response context
-+ * @cc:       buffer to write the create context into
-+ * @vol_caps: volume capability flags to advertise (AAPL_VOLCAPS_*)
++ * create_aapl_rsp_buf() - build Apple AAPL kAAPL_SERVER_QUERY response
++ * @cc:         buffer to write the create context into (AAPL_RSP_MAX_SIZE bytes)
++ * @vol_caps:   volume capability flags (AAPL_VOLCAPS_*)
++ * @req_bitmap: the client's request bitmap — echoed back in reply_bitmap
 + *
-+ * Wire format per Apple "Time Machine Over SMB" specification.
-+ * ServerCapabilities is always 0 ("reserved for future use" per spec).
-+ * ReplyBitmap always includes SERVER_CAPS and VOL_CAPS; MODEL_INFO is
-+ * never set in the server reply.
++ * Mirrors the response format observed from macOS's own smbd:
++ *   reply_bitmap = req_bitmap (echo all requested fields)
++ *   server_caps  = AAPL_SERVER_CAPS_ALL (0x1f)
++ *   vol_caps     = caller-supplied
++ *   model string = "Samba" in UTF-16LE, when AAPL_BITMAP_MODEL_INFO requested
++ *
++ * Sending reply_bitmap=0x03 without a model string causes smbfs.kext to
++ * enter a broken disconnect path requiring a macOS reboot to recover.
 + */
-+void create_aapl_rsp_buf(char *cc, __u64 vol_caps)
++void create_aapl_rsp_buf(char *cc, __u64 vol_caps, __u64 req_bitmap)
 +{
 +	struct create_aapl_rsp *buf;
++	u64 reply_bitmap;
++	u32 data_len;
 +
 +	buf = (struct create_aapl_rsp *)cc;
-+	memset(buf, 0, sizeof(struct create_aapl_rsp));
++	memset(buf, 0, AAPL_RSP_MAX_SIZE);
++
++	reply_bitmap = req_bitmap & (AAPL_BITMAP_SERVER_CAPS |
++				     AAPL_BITMAP_VOL_CAPS |
++				     AAPL_BITMAP_MODEL_INFO);
++
++	/* base data: cmd(4)+reserved(4)+reply_bitmap(8)+server_caps(8)+vol_caps(8) */
++	data_len = 32;
++	if (reply_bitmap & AAPL_BITMAP_MODEL_INFO)
++		data_len += 4 + 4 + AAPL_MODEL_UTF16_BYTES; /* pad2+model_bytes+string */
++
 +	buf->ccontext.DataOffset = cpu_to_le16(offsetof(struct create_aapl_rsp, cmd));
-+	buf->ccontext.DataLength = cpu_to_le32(32);
++	buf->ccontext.DataLength = cpu_to_le32(data_len);
 +	buf->ccontext.NameOffset = cpu_to_le16(offsetof(struct create_aapl_rsp, Name));
 +	buf->ccontext.NameLength = cpu_to_le16(4);
 +	buf->Name[0] = 'A';
@@ -132,17 +197,26 @@
 +	buf->Name[2] = 'P';
 +	buf->Name[3] = 'L';
 +
-+	buf->cmd          = cpu_to_le32(AAPL_SERVER_QUERY);
-+	buf->reply_bitmap = cpu_to_le64(AAPL_BITMAP_SERVER_CAPS | AAPL_BITMAP_VOL_CAPS);
-+	buf->server_caps  = 0; /* reserved per spec */
-+	buf->vol_caps     = cpu_to_le64(vol_caps);
++	buf->cmd         = cpu_to_le32(AAPL_SERVER_QUERY);
++	buf->reply_bitmap = cpu_to_le64(reply_bitmap);
++	buf->server_caps = (reply_bitmap & AAPL_BITMAP_SERVER_CAPS) ?
++			   cpu_to_le64(AAPL_SERVER_CAPS_KSMBD) : 0;
++	buf->vol_caps    = cpu_to_le64(vol_caps);
++
++	if (reply_bitmap & AAPL_BITMAP_MODEL_INFO) {
++		__le32 *p = (__le32 *)((u8 *)buf + sizeof(*buf));
++
++		p[0] = 0; /* pad2 */
++		p[1] = cpu_to_le32(AAPL_MODEL_UTF16_BYTES);
++		memcpy(p + 2, aapl_model_utf16, AAPL_MODEL_UTF16_BYTES);
++	}
 +}
 +
  /*
   * Find lease object(opinfo) for given lease key/fid from lease
   * break/file close path.
 --- a/fs/smb/server/smb2pdu.c	2026-05-28 10:33:26.991473925 +0000
-+++ b/fs/smb/server/smb2pdu.c	2026-05-28 13:55:50.061488131 +0000
++++ b/fs/smb/server/smb2pdu.c	2026-05-28 21:56:13.776300068 +0000
 @@ -3432,6 +3432,10 @@
  	}
  
@@ -154,7 +228,7 @@
  		contxt_cnt++;
  		create_posix_rsp_buf(rsp->Buffer +
  				le32_to_cpu(rsp->CreateContextsLength),
-@@ -3441,6 +3445,44 @@
+@@ -3441,6 +3445,48 @@
  		iov_len += conn->vals->create_posix_size;
  		if (next_ptr)
  			*next_ptr = cpu_to_le32(next_off);
@@ -162,33 +236,37 @@
 +		next_off = conn->vals->create_posix_size;
 +	}
 +
-+	if (conn->is_aapl) {
++	if (conn->is_aapl &&
++	    test_share_config_flag(tcon->share_conf,
++				   KSMBD_SHARE_FLAG_TIME_MACHINE)) {
 +		struct create_context *aapl_req_ctx;
-+		__u64 vol_caps = 0;
++		const struct aapl_server_query_req *aapl_query;
++		__u64 req_bitmap;
 +
 +		/*
-+		 * Only respond with AAPL when the request itself contains an
-+		 * AAPL context.  macOS sends it only on the first CREATE to a
-+		 * share; injecting AAPL into every subsequent CREATE response
-+		 * confuses smbfs.kext and causes a kernel hang on unmount.
++		 * Only respond when the request contains an AAPL context.
++		 * macOS sends it only on the first CREATE to a share.
 +		 *
-+		 * Gate FULL_SYNC on the time machine flag — advertising it
-+		 * causes macOS to issue SMB2 FLUSH with Reserved1=0xFFFF on
-+		 * every write, correct for backup destinations but unnecessary
-+		 * overhead on general-purpose shares.
++		 * Echo the client's full req_bitmap (including MODEL_INFO) and
++		 * include a model string when requested.  Sending reply_bitmap=0x03
++		 * without a model string causes smbfs.kext to take an incomplete
++		 * "Apple server" disconnect path that hard-freezes on unmount and
++		 * requires a macOS reboot to recover (confirmed by Mac-to-Mac
++		 * capture: macOS smbd always sends reply_bitmap=0x07 + model).
 +		 */
 +		aapl_req_ctx = smb2_find_context_vals(req, SMB2_CREATE_AAPL, 4);
 +		if (IS_ERR_OR_NULL(aapl_req_ctx))
 +			goto aapl_done;
 +
-+		if (test_share_config_flag(tcon->share_conf,
-+					   KSMBD_SHARE_FLAG_TIME_MACHINE))
-+			vol_caps = AAPL_VOLCAPS_FULL_SYNC;
++		aapl_query = (const struct aapl_server_query_req *)
++				((u8 *)aapl_req_ctx +
++				 le16_to_cpu(aapl_req_ctx->DataOffset));
++		req_bitmap = le64_to_cpu(aapl_query->req_bitmap);
 +
 +		contxt_cnt++;
 +		create_aapl_rsp_buf(rsp->Buffer +
 +				le32_to_cpu(rsp->CreateContextsLength),
-+				vol_caps);
++				AAPL_VOLCAPS_FULL_SYNC, req_bitmap);
 +		le32_add_cpu(&rsp->CreateContextsLength,
 +			     conn->vals->create_aapl_size);
 +		iov_len += conn->vals->create_aapl_size;
@@ -199,3 +277,33 @@
  	}
  
  	if (contxt_cnt > 0) {
+@@ -8470,6 +8516,29 @@
+ 		return 0;
+ 	}
+ 
++	/*
++	 * For AAPL-capable connections (macOS): send STATUS_PENDING followed
++	 * immediately by STATUS_NOTIFY_CLEANUP.
++	 *
++	 * macOS's smbfs.kext in AAPL mode expects Notify to go through the
++	 * async STATUS_PENDING → STATUS_NOTIFY_CLEANUP lifecycle.  Responding
++	 * with STATUS_NOT_IMPLEMENTED leaves the AAPL disconnect state machine
++	 * in an uninitialised state that hard-freezes on unmount (confirmed
++	 * by Mac-to-Mac capture: macOS smbd always responds STATUS_PENDING).
++	 *
++	 * The CLEANUP response tells macOS not to re-register, so this is
++	 * effectively a one-shot no-op Notify that satisfies the state machine.
++	 */
++	if (work->conn->is_aapl) {
++		if (setup_async_work(work, NULL, NULL) == 0) {
++			smb2_send_interim_resp(work, STATUS_PENDING);
++			release_async_work(work);
++		}
++		smb2_set_err_rsp(work);
++		rsp->hdr.Status = STATUS_NOTIFY_CLEANUP;
++		return 0;
++	}
++
+ 	smb2_set_err_rsp(work);
+ 	rsp->hdr.Status = STATUS_NOT_IMPLEMENTED;
+ 	return 0;
