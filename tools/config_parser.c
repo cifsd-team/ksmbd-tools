@@ -366,6 +366,10 @@ static int process_global_conf_kv(GHashTable *kv)
 		global_conf.server_string = cp_get_group_kv_string(v);
 	}
 
+	if (group_kv_steal(kv, "aapl model", &k, &v)) {
+		global_conf.aapl_model = cp_get_group_kv_string(v);
+	}
+
 	if (group_kv_steal(kv, "workgroup", &k, &v)) {
 		global_conf.work_group = cp_get_group_kv_string(v);
 	}

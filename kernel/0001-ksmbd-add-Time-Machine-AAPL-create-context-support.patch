@@ -1,6 +1,16 @@
 --- a/fs/smb/server/ksmbd_netlink.h	2026-05-28 10:33:26.998473999 +0000
-+++ b/fs/smb/server/ksmbd_netlink.h	2026-05-28 10:37:03.056767178 +0000
-@@ -358,6 +358,7 @@
++++ b/fs/smb/server/ksmbd_netlink.h	2026-05-29 12:22:00.868599221 +0000
+@@ -109,7 +109,8 @@
+ 	__u32	max_connections;	/* Number of maximum simultaneous connections */
+ 	__s8	bind_interfaces_only;
+ 	__u32	max_ip_connections;	/* Number of maximum connection per ip address */
+-	__s8	reserved[499];		/* Reserved room */
++	__s8	aapl_model[32];		/* AAPL model string for Finder icon, e.g. "Xserve3,1" */
++	__s8	reserved[467];		/* Reserved room */
+ 	__u32	ifc_list_sz;		/* interfaces list size */
+ 	__s8	____payload[];
+ } __packed;
+@@ -358,6 +359,7 @@
  #define KSMBD_SHARE_FLAG_ACL_XATTR		BIT(13)
  #define KSMBD_SHARE_FLAG_UPDATE			BIT(14)
  #define KSMBD_SHARE_FLAG_CROSSMNT		BIT(15)
@@ -9,8 +19,8 @@
  /*
   * Tree connect request flags.
 --- a/fs/smb/server/smb2pdu.h	2026-05-28 10:33:26.987473882 +0000
-+++ b/fs/smb/server/smb2pdu.h	2026-05-29 07:12:08.487392015 +0000
-@@ -66,6 +66,78 @@
++++ b/fs/smb/server/smb2pdu.h	2026-05-29 12:19:32.058928639 +0000
+@@ -66,6 +66,79 @@
  /* Apple Defined Contexts */
  #define SMB2_CREATE_AAPL		"AAPL"
  
@@ -56,14 +66,15 @@
 +#define AAPL_VOLCAPS_RESOLVE_ID		0x01ULL
 +#define AAPL_VOLCAPS_FULL_SYNC		0x04ULL
 +
-+/* UTF-16LE "Samba" model string: 5 chars × 2 bytes */
-+#define AAPL_MODEL_UTF16_BYTES		10
++/* Model string: up to 31 ASCII chars (matching server_conf.aapl_model[32]) */
++#define AAPL_MODEL_MAX_CHARS		31
++#define AAPL_MODEL_UTF16_BYTES		(AAPL_MODEL_MAX_CHARS * 2)	/* 62 */
 +
 +/*
 + * Maximum AAPL response size: fixed struct + pad2(4) + model_bytes(4) +
-+ * model string (10), 8-byte aligned: ALIGN(56+18, 8) = 80.
++ * model string (62 bytes max), 8-byte aligned: ALIGN(56+70, 8) = 128.
 + */
-+#define AAPL_RSP_MAX_SIZE		80
++#define AAPL_RSP_MAX_SIZE		128
 +
 +struct create_aapl_rsp {
 +	struct create_context ccontext;
@@ -100,7 +111,7 @@
  
  struct filesystem_posix_info {
 --- a/fs/smb/server/smb2ops.c	2026-05-28 10:33:26.993473946 +0000
-+++ b/fs/smb/server/smb2ops.c	2026-05-28 16:52:08.322887265 +0000
++++ b/fs/smb/server/smb2ops.c	2026-05-29 12:19:32.058928639 +0000
 @@ -36,6 +36,7 @@
  	.create_mxac_size = sizeof(struct create_mxac_rsp),
  	.create_disk_id_size = sizeof(struct create_disk_id_rsp),
@@ -144,16 +155,19 @@
  struct oplock_info *lookup_lease_in_table(struct ksmbd_conn *conn,
  					  char *lease_key);
 --- a/fs/smb/server/oplock.c	2026-05-28 10:33:26.995473967 +0000
-+++ b/fs/smb/server/oplock.c	2026-05-29 07:13:16.247120756 +0000
-@@ -1760,6 +1760,69 @@
++++ b/fs/smb/server/oplock.c	2026-05-29 12:19:32.058928639 +0000
+@@ -15,6 +15,7 @@
+ #include "mgmt/user_session.h"
+ #include "mgmt/share_config.h"
+ #include "mgmt/tree_connect.h"
++#include "server.h"		/* server_conf.aapl_model */
+ 
+ static LIST_HEAD(lease_table_list);
+ static DEFINE_RWLOCK(lease_list_lock);
+@@ -1760,6 +1761,76 @@
  		  SIDUNIX_GROUP, (struct smb_sid *)&buf->SidBuffer[28]);
  }
  
-+/* UTF-16LE "Samba" model string — matches Samba's vfs_fruit default */
-+static const __le16 aapl_model_utf16[] = {
-+	cpu_to_le16('S'), cpu_to_le16('a'), cpu_to_le16('m'),
-+	cpu_to_le16('b'), cpu_to_le16('a'),
-+};
 +
 +/**
 + * create_aapl_rsp_buf() - build Apple AAPL kAAPL_SERVER_QUERY response
@@ -205,10 +219,22 @@
 +
 +	if (reply_bitmap & AAPL_BITMAP_MODEL_INFO) {
 +		__le32 *p = (__le32 *)((u8 *)buf + sizeof(*buf));
++		__le16 *model_str = (__le16 *)(p + 2);
++		const char *src = server_conf.aapl_model[0] ?
++				  server_conf.aapl_model : "Xserve3,1";
++		int i, model_bytes = 0;
++
++		/* Convert ASCII model string to UTF-16LE in-place */
++		for (i = 0; src[i] && i < AAPL_MODEL_MAX_CHARS; i++) {
++			model_str[i] = cpu_to_le16((unsigned char)src[i]);
++			model_bytes += 2;
++		}
 +
 +		p[0] = 0; /* pad2 */
-+		p[1] = cpu_to_le32(AAPL_MODEL_UTF16_BYTES);
-+		memcpy(p + 2, aapl_model_utf16, AAPL_MODEL_UTF16_BYTES);
++		p[1] = cpu_to_le32(model_bytes);
++
++		/* Update DataLength to reflect actual model string size */
++		buf->ccontext.DataLength = cpu_to_le32(data_len - AAPL_MODEL_UTF16_BYTES + model_bytes);
 +	}
 +}
 +
@@ -307,3 +333,30 @@
  	smb2_set_err_rsp(work);
  	rsp->hdr.Status = STATUS_NOT_IMPLEMENTED;
  	return 0;
+--- a/fs/smb/server/server.h	2026-05-28 10:33:26.993473946 +0000
++++ b/fs/smb/server/server.h	2026-05-29 12:19:32.058928639 +0000
+@@ -47,6 +47,7 @@
+ 
+ 	char			*conf[SERVER_CONF_WORK_GROUP + 1];
+ 	bool			bind_interfaces_only;
++	char			aapl_model[32]; /* AAPL model string for Finder icon */
+ };
+ 
+ extern struct ksmbd_server_config server_conf;
+--- a/fs/smb/server/transport_ipc.c	2026-05-28 10:33:26.994473956 +0000
++++ b/fs/smb/server/transport_ipc.c	2026-05-29 12:22:17.340783127 +0000
+@@ -334,6 +334,14 @@
+ 	ret |= ksmbd_set_server_string(req->server_string);
+ 	ret |= ksmbd_set_work_group(req->work_group);
+ 	server_conf.bind_interfaces_only = req->bind_interfaces_only;
++
++	/* AAPL model string for Finder icon — default "Xserve3,1" */
++	if (req->aapl_model[0])
++		strscpy(server_conf.aapl_model, req->aapl_model,
++			sizeof(server_conf.aapl_model));
++	else
++		strscpy(server_conf.aapl_model, "Xserve3,1",
++			sizeof(server_conf.aapl_model));
+ 	ret |= ksmbd_tcp_set_interfaces(KSMBD_STARTUP_CONFIG_INTERFACES(req),
+ 					req->ifc_list_sz);
+ out:

@@ -16,6 +16,7 @@
 	max connections = 128
 	max ip connections = 8
 	max open files = 10000
+	aapl model = Xserve3,1
 	netbios name = KSMBD SERVER
 	restrict anonymous = 0
 	root directory = 
