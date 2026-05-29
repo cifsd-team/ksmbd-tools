@@ -61,6 +61,7 @@ const char *KSMBD_SHARE_CONF[KSMBD_SHARE_CONF_MAX] = {
 	"writable",
 /*30*/	"crossmnt",
 /*31*/	"time machine",
+/*32*/	"max size",
 };
 
 /*
@@ -103,6 +104,7 @@ const char *KSMBD_SHARE_DEFCONF[KSMBD_SHARE_CONF_MAX] = {
 	"",
 /*30*/	"yes",
 /*31*/	"no",
+/*32*/	"0",
 };
 
 static GHashTable	*shares_table;
@@ -766,6 +768,10 @@ static int process_share_conf_kv(struct ksmbd_share *share, GHashTable *kv)
 			set_share_flag(share, KSMBD_SHARE_FLAG_TIME_MACHINE);
 		else
 			clear_share_flag(share, KSMBD_SHARE_FLAG_TIME_MACHINE);
+	}
+
+	if (group_kv_steal(kv, KSMBD_SHARE_CONF_TM_MAX_SIZE, &k, &v)) {
+		share->tm_max_size = cp_memparse(v);
 	}
 
 	return 0;

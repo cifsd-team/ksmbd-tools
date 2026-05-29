@@ -57,6 +57,7 @@
 	read only = ; yes
 	store dos attributes = yes
 	time machine = no
+	; max size = 500G
 	valid users =
 	veto files =
 	vfs objects =

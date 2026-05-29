@@ -22,6 +22,46 @@
 #include "ipc.h"
 #include "management/share.h"
 #include "config_parser.h"
+#include <linux/ksmbd_server.h>
+
+#define TM_QUOTA_PLIST ".com.apple.TimeMachine.quota.plist"
+
+static void __tm_write_quota_plist(struct ksmbd_share *share, void *unused)
+{
+	char path[PATH_MAX];
+	FILE *f;
+
+	if (!test_share_flag(share, KSMBD_SHARE_FLAG_TIME_MACHINE))
+		return;
+	if (!share->path || !share->tm_max_size)
+		return;
+
+	snprintf(path, sizeof(path), "%s/" TM_QUOTA_PLIST, share->path);
+	f = fopen(path, "w");
+	if (!f) {
+		pr_err("Cannot write Time Machine quota plist `%s': %m\n", path);
+		return;
+	}
+	fprintf(f,
+		"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+		"<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\""
+		" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+		"<plist version=\"1.0\">\n"
+		"<dict>\n"
+		"\t<key>QuotaSize</key>\n"
+		"\t<integer>%llu</integer>\n"
+		"</dict>\n"
+		"</plist>\n",
+		share->tm_max_size);
+	fclose(f);
+	pr_debug("Written Time Machine quota (%llu bytes) to `%s'\n",
+		 share->tm_max_size, path);
+}
+
+static void tm_write_quota_plists(void)
+{
+	shm_iter_shares(__tm_write_quota_plist, NULL);
+}
 
 static void usage(int status)
 {
@@ -259,6 +299,7 @@ static int worker_init(void)
 	ret = load_config(global_conf.pwddb, global_conf.smbconf);
 	if (ret)
 		goto out;
+	tm_write_quota_plists();
 
 	for (;;) {
 		pthread_sigmask(SIG_UNBLOCK, &sigset, NULL);
@@ -274,6 +315,7 @@ static int worker_init(void)
 			ret = load_config(global_conf.pwddb,
 					  global_conf.smbconf);
 			if (!ret) {
+				tm_write_quota_plists();
 				pr_info("Reloaded config\n");
 				ksmbd_health_status &=
 					~KSMBD_SHOULD_RELOAD_CONFIG;
