@@ -16,6 +16,7 @@
 #include <rpc_wkssvc.h>
 #include <rpc_samr.h>
 #include <rpc_lsarpc.h>
+#include <rpc_mdssvc.h>
 #include <tools.h>
 
 static GHashTable	*pipes_table;
@@ -1122,6 +1123,8 @@ static int dcerpc_bind_ack_return(struct ksmbd_rpc_pipe *pipe)
 		addr = "\\PIPE\\samr";
 	else if (dce->bi_req.flags & KSMBD_RPC_LSARPC_METHOD_INVOKE)
 		addr = "\\PIPE\\lsarpc";
+	else if (dce->bi_req.flags & KSMBD_RPC_MDSSVC_METHOD_INVOKE)
+		addr = "\\PIPE\\mdssvc";
 	else
 		return KSMBD_RPC_EBAD_FUNC;
 
@@ -1279,6 +1282,9 @@ int rpc_read_request(struct ksmbd_rpc_command *req,
 
 	if (req->flags & KSMBD_RPC_LSARPC_METHOD_INVOKE)
 		return rpc_lsarpc_read_request(pipe, resp, max_resp_sz);
+
+	if (req->flags & KSMBD_RPC_MDSSVC_METHOD_INVOKE)
+		return rpc_mdssvc_read_request(pipe, resp, max_resp_sz);
 	return ret;
 }
 
@@ -1329,6 +1335,9 @@ int rpc_write_request(struct ksmbd_rpc_command *req,
 
 	if (req->flags & KSMBD_RPC_LSARPC_METHOD_INVOKE)
 		return rpc_lsarpc_write_request(pipe);
+
+	if (req->flags & KSMBD_RPC_MDSSVC_METHOD_INVOKE)
+		return rpc_mdssvc_write_request(pipe);
 	return KSMBD_RPC_ENOTIMPLEMENTED;
 }
 
