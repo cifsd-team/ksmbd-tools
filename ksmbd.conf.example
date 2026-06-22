@@ -28,7 +28,7 @@
 	smb2 leases = no
 	smb2 max credits = 8192
 	smb2 max read = 4MB
-	smb2 max trans = 1MB
+	smb2 max trans = 4MB
 	smb2 max write = 4MB
 	smb3 encryption = auto
 	smbd max io size = 8MB
