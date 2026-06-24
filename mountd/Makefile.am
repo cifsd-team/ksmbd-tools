@@ -19,4 +19,4 @@ install-exec-hook: uninstall-hook
 	  $(LN_S) $(libexecdir)/ksmbd.tools ksmbd.mountd )
 
 uninstall-hook:
-	-rm $(DESTDIR)$(sbindir)/ksmbd.mountd
+	-rm -f "$(DESTDIR)$(sbindir)/ksmbd.mountd"

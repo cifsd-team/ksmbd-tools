@@ -18,4 +18,4 @@ install-exec-hook: uninstall-hook
 	  $(LN_S) $(libexecdir)/ksmbd.tools ksmbd.control )
 
 uninstall-hook:
-	-rm $(DESTDIR)$(sbindir)/ksmbd.control
+	-rm -f "$(DESTDIR)$(sbindir)/ksmbd.control"
