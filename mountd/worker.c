@@ -42,8 +42,8 @@ static int login_request(struct ksmbd_ipc_msg *msg)
 	if (!resp_msg)
 		goto out;
 
-	req = KSMBD_IPC_MSG_PAYLOAD(msg);
-	resp = KSMBD_IPC_MSG_PAYLOAD(resp_msg);
+	req = (struct ksmbd_login_request *)msg->payload;
+	resp = (struct ksmbd_login_response *)resp_msg->payload;
 
 	resp->status = KSMBD_USER_FLAG_INVALID;
 	if (VALID_IPC_MSG(msg, struct ksmbd_login_request))
@@ -83,14 +83,14 @@ static int login_request_ext(struct ksmbd_ipc_msg *msg)
 	struct ksmbd_ipc_msg *resp_msg;
 	int payload_sz;
 
-	req = KSMBD_IPC_MSG_PAYLOAD(msg);
+	req = (struct ksmbd_login_request *)msg->payload;
 
 	payload_sz = login_response_payload_sz(req->account);
 	resp_msg = ipc_msg_alloc(sizeof(*resp) + payload_sz);
 	if (!resp_msg)
 		goto out;
 
-	resp = KSMBD_IPC_MSG_PAYLOAD(resp_msg);
+	resp = (struct ksmbd_login_response_ext *)resp_msg->payload;
 
 	if (VALID_IPC_MSG(msg, struct ksmbd_login_request))
 		usm_handle_login_request_ext(req, resp);
@@ -113,12 +113,12 @@ static int spnego_authen_request(struct ksmbd_ipc_msg *msg)
 	struct ksmbd_login_request login_req;
 	int retval = 0;
 
-	req = KSMBD_IPC_MSG_PAYLOAD(msg);
+	req = (struct ksmbd_spnego_authen_request *)msg->payload;
 	resp_msg = ipc_msg_alloc(sizeof(*resp));
 	if (!resp_msg)
 		return -ENOMEM;
 	resp_msg->type = KSMBD_EVENT_SPNEGO_AUTHEN_RESPONSE;
-	resp = KSMBD_IPC_MSG_PAYLOAD(resp_msg);
+	resp = (struct ksmbd_spnego_authen_response *)resp_msg->payload;
 	resp->handle = req->handle;
 	resp->login_response.status = KSMBD_USER_FLAG_INVALID;
 
@@ -142,7 +142,7 @@ static int spnego_authen_request(struct ksmbd_ipc_msg *msg)
 	}
 
 	resp_msg->type = KSMBD_EVENT_SPNEGO_AUTHEN_RESPONSE;
-	resp = KSMBD_IPC_MSG_PAYLOAD(resp_msg);
+	resp = (struct ksmbd_spnego_authen_response *)resp_msg->payload;
 	resp->handle = req->handle;
 	resp->login_response.status = KSMBD_USER_FLAG_INVALID;
 
@@ -183,8 +183,8 @@ static int tree_connect_request(struct ksmbd_ipc_msg *msg)
 	if (!resp_msg)
 		goto out;
 
-	req = KSMBD_IPC_MSG_PAYLOAD(msg);
-	resp = KSMBD_IPC_MSG_PAYLOAD(resp_msg);
+	req = (struct ksmbd_tree_connect_request *)msg->payload;
+	resp = (struct ksmbd_tree_connect_response *)resp_msg->payload;
 
 	resp->status = KSMBD_TREE_CONN_STATUS_ERROR;
 	resp->connection_flags = 0;
@@ -209,7 +209,7 @@ static int share_config_request(struct ksmbd_ipc_msg *msg)
 	struct ksmbd_ipc_msg *resp_msg;
 	int payload_sz = 0;
 
-	req = KSMBD_IPC_MSG_PAYLOAD(msg);
+	req = (struct ksmbd_share_config_request *)msg->payload;
 	if (VALID_IPC_MSG(msg, struct ksmbd_share_config_request)) {
 		share = shm_lookup_share(req->share_name);
 		if (share)
@@ -220,7 +220,7 @@ static int share_config_request(struct ksmbd_ipc_msg *msg)
 	if (!resp_msg)
 		goto out;
 
-	resp = KSMBD_IPC_MSG_PAYLOAD(resp_msg);
+	resp = (struct ksmbd_share_config_response *)resp_msg->payload;
 	resp->payload_sz = payload_sz;
 	shm_handle_share_config_request(share, resp);
 	resp_msg->type = KSMBD_EVENT_SHARE_CONFIG_RESPONSE;
@@ -240,7 +240,7 @@ static int tree_disconnect_request(struct ksmbd_ipc_msg *msg)
 	if (!VALID_IPC_MSG(msg, struct ksmbd_tree_disconnect_request))
 		return -EINVAL;
 
-	req = KSMBD_IPC_MSG_PAYLOAD(msg);
+	req = (struct ksmbd_tree_disconnect_request *)msg->payload;
 	tcm_handle_tree_disconnect(req->session_id, req->connect_id);
 
 	return 0;
@@ -251,7 +251,7 @@ static int logout_request(struct ksmbd_ipc_msg *msg)
 	if (!VALID_IPC_MSG(msg, struct ksmbd_logout_request))
 		return -EINVAL;
 
-	return usm_handle_logout_request(KSMBD_IPC_MSG_PAYLOAD(msg));
+	return usm_handle_logout_request(msg->payload);
 }
 
 static int heartbeat_request(struct ksmbd_ipc_msg *msg)
@@ -273,7 +273,7 @@ static int rpc_request(struct ksmbd_ipc_msg *msg)
 	if (msg->sz < sizeof(struct ksmbd_rpc_command))
 		goto out;
 
-	req = KSMBD_IPC_MSG_PAYLOAD(msg);
+	req = (struct ksmbd_rpc_command *)msg->payload;
 	if (req->flags & KSMBD_RPC_METHOD_RETURN)
 		resp_msg = ipc_msg_alloc(KSMBD_IPC_MAX_MESSAGE_SIZE -
 				sizeof(struct ksmbd_rpc_command));
@@ -282,7 +282,7 @@ static int rpc_request(struct ksmbd_ipc_msg *msg)
 	if (!resp_msg)
 		goto out;
 
-	resp = KSMBD_IPC_MSG_PAYLOAD(resp_msg);
+	resp = (struct ksmbd_rpc_command *)resp_msg->payload;
 
 	if ((req->flags & KSMBD_RPC_RAP_METHOD) == KSMBD_RPC_RAP_METHOD) {
 		pr_err("RAP command is not supported yet %x\n", req->flags);

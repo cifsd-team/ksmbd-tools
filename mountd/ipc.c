@@ -29,7 +29,7 @@ static struct nl_sock *sk;
 struct ksmbd_ipc_msg *ipc_msg_alloc(size_t sz)
 {
 	struct ksmbd_ipc_msg *msg;
-	size_t msg_sz = sz + sizeof(struct ksmbd_ipc_msg) + 1;
+	size_t msg_sz = sz + sizeof(struct ksmbd_ipc_msg);
 
 	if (msg_sz > KSMBD_IPC_MAX_MESSAGE_SIZE) {
 		pr_err("IPC message is too large: %zu\n", msg_sz);
@@ -58,9 +58,7 @@ static int generic_event(int type, void *payload, size_t sz)
 	event->type = type;
 	event->sz = sz;
 
-	memcpy(KSMBD_IPC_MSG_PAYLOAD(event),
-	       payload,
-	       sz);
+	memcpy(event->payload, payload, sz);
 	wp_ipc_msg_push(event);
 	return 0;
 }
@@ -132,7 +130,7 @@ static int ipc_ksmbd_starting_up(void)
 	if (!msg)
 		return -ENOMEM;
 
-	ev = KSMBD_IPC_MSG_PAYLOAD(msg);
+	ev = (struct ksmbd_startup_request *)msg->payload;
 	msg->type = KSMBD_EVENT_STARTING_UP;
 
 	ev->flags = global_conf.flags;
@@ -441,7 +439,7 @@ int ipc_msg_send(struct ksmbd_ipc_msg *msg)
 	}
 
 	/* Use msg->type as attribute TYPE */
-	ret = nla_put(nlmsg, msg->type, msg->sz, KSMBD_IPC_MSG_PAYLOAD(msg));
+	ret = nla_put(nlmsg, msg->type, msg->sz, msg->payload);
 	if (ret) {
 		pr_err("nla_put() has failed, aborting IPC send()\n");
 		goto out_error;

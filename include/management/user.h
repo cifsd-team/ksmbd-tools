@@ -68,7 +68,7 @@ struct ksmbd_logout_request;
 
 int usm_handle_login_request(struct ksmbd_login_request *req,
 			     struct ksmbd_login_response *resp);
-int usm_handle_logout_request(struct ksmbd_logout_request *req);
+int usm_handle_logout_request(void *data);
 int usm_handle_login_request_ext(struct ksmbd_login_request *req,
 			     struct ksmbd_login_response_ext *resp);
 
