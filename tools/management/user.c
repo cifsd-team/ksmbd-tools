@@ -294,7 +294,9 @@ int usm_add_guest_account(char *name)
 	if (!user) {
 		ret = -EINVAL;
 	} else {
+		g_rw_lock_writer_lock(&user->update_lock);
 		set_user_flag(user, KSMBD_USER_FLAG_GUEST_ACCOUNT);
+		g_rw_lock_writer_unlock(&user->update_lock);
 		put_ksmbd_user(user);
 	}
 	return ret;
@@ -371,13 +373,13 @@ static void __handle_login_request(struct ksmbd_login_response *resp,
 {
 	int hash_sz;
 
+	g_rw_lock_reader_lock(&user->update_lock);
 	resp->gid = user->gid;
 	resp->uid = user->uid;
-	resp->status = user->flags;
-	resp->status |= KSMBD_USER_FLAG_OK;
-
+	resp->status = user->flags | KSMBD_USER_FLAG_OK;
 	if (user->ngroups)
 		resp->status |= KSMBD_USER_FLAG_EXTENSION;
+	g_rw_lock_reader_unlock(&user->update_lock);
 
 	hash_sz = usm_copy_user_passhash(user,
 					 resp->hash,
@@ -456,6 +458,7 @@ int usm_handle_logout_request(struct ksmbd_logout_request *req)
 	if (!user)
 		return -ENOENT;
 
+	g_rw_lock_writer_lock(&user->update_lock);
 	if (req->account_flags & KSMBD_USER_FLAG_BAD_PASSWORD) {
 		if (user->failed_login_count < 10)
 			user->failed_login_count++;
@@ -465,6 +468,7 @@ int usm_handle_logout_request(struct ksmbd_logout_request *req)
 		user->failed_login_count = 0;
 		user->flags &= ~KSMBD_USER_FLAG_DELAY_SESSION;
 	}
+	g_rw_lock_writer_unlock(&user->update_lock);
 
 	put_ksmbd_user(user);
 	return 0;
