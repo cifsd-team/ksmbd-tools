@@ -1,0 +1,99 @@
+From: Time Machine ksmbd fix series
+Subject: [PATCH 2/2] ksmbd: fix AAPL copyfile COPYCHUNK with ChunkCount=0
+
+macOS uses FSCTL_SRV_COPYCHUNK with ChunkCount=0 to perform an
+atomic full-file copy when the server advertises AAPL COPYFILE in
+server_caps.  Two bugs prevented this from working:
+
+1. sizeof(struct copychunk_ioctl_req) == 33 due to the `Chunks[1]`
+   sentinel member, but macOS sends exactly 32 bytes for a ChunkCount=0
+   request (header only, no chunk descriptors).  The size guard
+   in smb2_ioctl() rejected the request with STATUS_INVALID_PARAMETER
+   before it reached fsctl_copychunk().
+
+   Fix: use offsetof(struct copychunk_ioctl_req, Chunks) == 32 as the
+   minimum required size, which is the correct wire minimum for a
+   COPYCHUNK request header without chunk descriptors.
+
+2. The ChunkCount=0 path in fsctl_copychunk() did nothing but return
+   success (the old "query limits" interpretation).  macOS treats
+   ChunkCount=0 as "copy the entire source file atomically"; it does
+   NOT send a follow-up COPYCHUNK with actual chunks after receiving
+   the limits response.  The result was an empty destination file and
+   Finder error -50 (paramErr).
+
+   Fix: when ChunkCount=0 is received and AAPL COPYFILE has been
+   negotiated, look up the source file from the ResumeKey, look up the
+   destination from the IOCTL's FileId, and perform a full file copy
+   via vfs_copy_file_range().  Report TotalBytesWritten in the response.
+
+Tested: Finder Cmd+D duplication of HEIC, PDF, and plain-text files
+all produce correct full copies after this fix.  Time Machine setup
+and backup continue to work.
+
+---
+ fs/smb/server/smb2pdu.c | 54 ++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 52 insertions(+), 2 deletions(-)
+
+--- a/fs/smb/server/smb2pdu.c
++++ b/fs/smb/server/smb2pdu.c
+@@ -7742,8 +7742,50 @@
+ 	chunks = (struct srv_copychunk *)&ci_req->Chunks[0];
+ 	chunk_count = le32_to_cpu(ci_req->ChunkCount);
+-	if (chunk_count == 0)
+-		goto out;
++	if (chunk_count == 0) {
++		/*
++		 * AAPL copyfile extension: ChunkCount=0 means copy the entire
++		 * source file to the destination atomically.  macOS uses this
++		 * when AAPL COPYFILE server capability is advertised.  Look up
++		 * the file handles, copy all bytes via vfs_copy_file_range, and
++		 * report TotalBytesWritten.  This is not the standard SMB2
++		 * "query limits" response (which also has ChunkCount=0 but is
++		 * handled before src/dst lookup).
++		 */
++		src_fp = ksmbd_lookup_foreign_fd(work,
++						 le64_to_cpu(ci_req->ResumeKey[0]));
++		dst_fp = ksmbd_lookup_fd_slow(work, volatile_id, persistent_id);
++		ret = -EINVAL;
++		if (!src_fp ||
++		    src_fp->persistent_id != le64_to_cpu(ci_req->ResumeKey[1])) {
++			rsp->hdr.Status = STATUS_OBJECT_NAME_NOT_FOUND;
++			goto out;
++		}
++		if (!dst_fp) {
++			rsp->hdr.Status = STATUS_FILE_CLOSED;
++			goto out;
++		}
++		{
++			loff_t src_size = i_size_read(file_inode(src_fp->filp));
++			loff_t copied = 0;
++
++			if (src_size > 0) {
++				copied = vfs_copy_file_range(src_fp->filp, 0,
++							     dst_fp->filp, 0,
++							     src_size, 0);
++				if (copied < 0) {
++					ret = copied;
++					rsp->hdr.Status = STATUS_UNEXPECTED_IO_ERROR;
++					goto out;
++				}
++			}
++			ci_rsp->ChunksWritten = 0;
++			ci_rsp->ChunkBytesWritten = 0;
++			ci_rsp->TotalBytesWritten = cpu_to_le32((u32)copied);
++		}
++		ret = 0;
++		goto out;
++	}
+ 	total_size_written = 0;
+
+ 	/* verify the SRV_COPYCHUNK_COPY packet */
+@@ -8276,7 +8318,7 @@
+ 		}
+
+-		if (in_buf_len < sizeof(struct copychunk_ioctl_req)) {
++		if (in_buf_len < offsetof(struct copychunk_ioctl_req, Chunks)) {
+ 			ret = -EINVAL;
+ 			goto out;
+ 		}
