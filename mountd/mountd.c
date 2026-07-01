@@ -124,6 +124,11 @@ static void tm_write_avahi_service(void)
 
 	fprintf(f,
 		"  </service>\n"
+		"  <service>\n"
+		"    <type>_device-info._tcp</type>\n"
+		"    <port>0</port>\n"
+		"    <txt-record>model=Xserve</txt-record>\n"
+		"  </service>\n"
 		"</service-group>\n");
 	fclose(f);
 
