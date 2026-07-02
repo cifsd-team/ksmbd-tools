@@ -387,7 +387,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  
 diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c' '--exclude=*.o' '--exclude=*.cmd' '--exclude=modules.order' '--exclude=Module.symvers' '--exclude=*.asn1.c' '--exclude=*.asn1.h' '--exclude=transport_rdma.c' linux-source-6.8.0/fs/smb/server.orig/smb2pdu.c linux-source-6.8.0/fs/smb/server/smb2pdu.c
 --- linux-source-6.8.0/fs/smb/server.orig/smb2pdu.c	2026-05-28 10:33:26.991473925 +0000
-+++ linux-source-6.8.0/fs/smb/server/smb2pdu.c	2026-07-02 22:48:33.513473618 +0000
++++ linux-source-6.8.0/fs/smb/server/smb2pdu.c	2026-07-02 23:06:42.263619238 +0000
 @@ -2323,7 +2323,13 @@
  out:
  	switch (err) {
@@ -472,7 +472,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  	bool maximal_access_ctxt = false, posix_ctxt = false;
  	int s_type = 0;
  	int next_off = 0;
-@@ -2842,6 +2889,38 @@
+@@ -2842,6 +2889,46 @@
  	}
  
  	if (req->CreateContextsOffset) {
@@ -493,7 +493,15 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
 +		} else if (context) {
 +			struct create_durable_req_v2 *dh2q =
 +				(struct create_durable_req_v2 *)context;
-+			u32 req_timeout = le32_to_cpu(dh2q->Timeout);
++			u32 req_timeout;
++
++			if (le16_to_cpu(context->DataOffset) +
++			    le32_to_cpu(context->DataLength) <
++			    sizeof(struct create_durable_req_v2)) {
++				rc = -EINVAL;
++				goto err_out2;
++			}
++			req_timeout = le32_to_cpu(dh2q->Timeout);
 +
 +			/*
 +			 * Use the requested timeout when in [30s, 180s].
@@ -511,7 +519,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  		/* Parse non-durable handle create contexts */
  		context = smb2_find_context_vals(req, SMB2_CREATE_EA_BUFFER, 4);
  		if (IS_ERR(context)) {
-@@ -2935,7 +3014,8 @@
+@@ -2935,7 +3022,8 @@
  			}
  		} else {
  			if (file_present && S_ISDIR(d_inode(path.dentry)->i_mode) &&
@@ -521,7 +529,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  				rc = -EIO;
  				rsp->hdr.Status = STATUS_FILE_IS_A_DIRECTORY;
  			}
-@@ -3108,6 +3188,9 @@
+@@ -3108,6 +3196,9 @@
  		rc = -ENOMEM;
  		goto err_out;
  	}
@@ -531,7 +539,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  
  	fp->cdoption = req->CreateDisposition;
  	fp->daccess = daccess;
-@@ -3359,9 +3442,18 @@
+@@ -3359,9 +3450,18 @@
  	rsp->LastWriteTime = cpu_to_le64(time);
  	time = ksmbd_UnixTimeToNT(stat.ctime);
  	rsp->ChangeTime = cpu_to_le64(time);
@@ -553,7 +561,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  	rsp->FileAttributes = fp->f_ci->m_fattr;
  
  	rsp->Reserved2 = 0;
-@@ -3373,6 +3465,26 @@
+@@ -3373,6 +3473,26 @@
  	rsp->CreateContextsLength = 0;
  	iov_len = offsetof(struct smb2_create_rsp, Buffer);
  
@@ -580,7 +588,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  	/* If lease is request send lease context response */
  	if (opinfo && opinfo->is_lease) {
  		struct create_context *lease_ccontext;
-@@ -3381,12 +3493,17 @@
+@@ -3381,12 +3501,17 @@
  			    name, opinfo->o_lease->state);
  		rsp->OplockLevel = SMB2_OPLOCK_LEVEL_LEASE;
  
@@ -600,7 +608,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  		next_ptr = &lease_ccontext->Next;
  		next_off = conn->vals->create_lease_size;
  	}
-@@ -3432,6 +3549,10 @@
+@@ -3432,6 +3557,10 @@
  	}
  
  	if (posix_ctxt) {
@@ -611,7 +619,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  		contxt_cnt++;
  		create_posix_rsp_buf(rsp->Buffer +
  				le32_to_cpu(rsp->CreateContextsLength),
-@@ -3441,6 +3562,47 @@
+@@ -3441,6 +3570,47 @@
  		iov_len += conn->vals->create_posix_size;
  		if (next_ptr)
  			*next_ptr = cpu_to_le32(next_off);
@@ -659,7 +667,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  	}
  
  	if (contxt_cnt > 0) {
-@@ -3731,17 +3893,39 @@
+@@ -3731,17 +3901,39 @@
  
  		fibdinfo = (struct file_id_both_directory_info *)kstat;
  		fibdinfo->FileNameLength = cpu_to_le32(conv_len);
@@ -704,7 +712,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  		if (d_info->hide_dot_file && d_info->name[0] == '.')
  			fibdinfo->ExtFileAttributes |= FILE_ATTRIBUTE_HIDDEN_LE;
  		memcpy(fibdinfo->FileName, conv_name, conv_len);
-@@ -4602,8 +4786,15 @@
+@@ -4602,8 +4794,15 @@
  	sinfo = (struct smb2_file_standard_info *)rsp->Buffer;
  	delete_pending = ksmbd_inode_pending_delete(fp);
  
@@ -722,7 +730,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  	sinfo->NumberOfLinks = cpu_to_le32(get_nlink(&stat) - delete_pending);
  	sinfo->DeletePending = delete_pending;
  	sinfo->Directory = S_ISDIR(stat.mode) ? 1 : 0;
-@@ -4668,9 +4859,15 @@
+@@ -4668,9 +4867,15 @@
  	file_info->ChangeTime = cpu_to_le64(time);
  	file_info->Attributes = fp->f_ci->m_fattr;
  	file_info->Pad1 = 0;
@@ -741,7 +749,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  	file_info->NumberOfLinks =
  			cpu_to_le32(get_nlink(&stat) - delete_pending);
  	file_info->DeletePending = delete_pending;
-@@ -4787,8 +4984,19 @@
+@@ -4787,8 +4992,19 @@
  		streamlen *= 2;
  		kfree(stream_buf);
  		file_info->StreamNameLength = cpu_to_le32(streamlen);
@@ -763,7 +771,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  
  		nbytes += next;
  		buf_free_len -= next;
-@@ -4867,8 +5075,15 @@
+@@ -4867,8 +5083,15 @@
  	time = ksmbd_UnixTimeToNT(stat.ctime);
  	file_info->ChangeTime = cpu_to_le64(time);
  	file_info->Attributes = fp->f_ci->m_fattr;
@@ -781,7 +789,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  	file_info->Reserved = cpu_to_le32(0);
  	rsp->OutputBufferLength =
  		cpu_to_le32(sizeof(struct smb2_file_ntwrk_info));
-@@ -4980,8 +5195,15 @@
+@@ -4980,8 +5203,15 @@
  	file_info->ChangeTime = cpu_to_le64(time);
  	file_info->DosAttributes = fp->f_ci->m_fattr;
  	file_info->Inode = cpu_to_le64(stat.ino);
@@ -799,7 +807,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  	file_info->HardLinks = cpu_to_le32(stat.nlink);
  	file_info->Mode = cpu_to_le32(stat.mode & 0777);
  	switch (stat.mode & S_IFMT) {
-@@ -5619,9 +5841,16 @@
+@@ -5619,9 +5849,16 @@
  		}
  
  		rsp->Flags = SMB2_CLOSE_FLAG_POSTQUERY_ATTRIB;
@@ -819,7 +827,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  		rsp->Attributes = fp->f_ci->m_fattr;
  		rsp->CreationTime = cpu_to_le64(fp->create_time);
  		time = ksmbd_UnixTimeToNT(stat.atime);
-@@ -6017,9 +6246,9 @@
+@@ -6017,9 +6254,9 @@
  		if (S_ISDIR(inode->i_mode) &&
  		    ksmbd_vfs_empty_dir(fp) == -ENOTEMPTY)
  			return -EBUSY;
@@ -831,7 +839,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  	}
  	return 0;
  }
-@@ -6270,7 +6499,7 @@
+@@ -6270,7 +6507,7 @@
  	else if (rc == -ESHARE)
  		rsp->hdr.Status = STATUS_SHARING_VIOLATION;
  	else if (rc == -ENOENT)
@@ -840,7 +848,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  	else if (rc == -EBUSY || rc == -ENOTEMPTY)
  		rsp->hdr.Status = STATUS_DIRECTORY_NOT_EMPTY;
  	else if (rc == -EAGAIN)
-@@ -7407,8 +7636,50 @@
+@@ -7407,8 +7644,50 @@
  
  	chunks = (struct srv_copychunk *)&ci_req->Chunks[0];
  	chunk_count = le32_to_cpu(ci_req->ChunkCount);
@@ -892,7 +900,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  	total_size_written = 0;
  
  	/* verify the SRV_COPYCHUNK_COPY packet */
-@@ -7469,6 +7740,8 @@
+@@ -7469,6 +7748,8 @@
  			rsp->hdr.Status = STATUS_FILE_LOCK_CONFLICT;
  		else if (ret == -EBADF)
  			rsp->hdr.Status = STATUS_INVALID_HANDLE;
@@ -901,7 +909,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  		else if (ret == -EFBIG || ret == -ENOSPC)
  			rsp->hdr.Status = STATUS_DISK_FULL;
  		else if (ret == -EINVAL)
-@@ -7752,10 +8025,13 @@
+@@ -7752,10 +8033,13 @@
  	idmap = file_mnt_idmap(fp->filp);
  
  	old_fattr = fp->f_ci->m_fattr;
@@ -918,7 +926,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  
  	if (fp->f_ci->m_fattr != old_fattr &&
  	    test_share_config_flag(work->tcon->share_conf,
-@@ -7934,7 +8210,7 @@
+@@ -7934,7 +8218,7 @@
  			goto out;
  		}
  
@@ -927,7 +935,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  			ret = -EINVAL;
  			goto out;
  		}
-@@ -8461,6 +8737,9 @@
+@@ -8461,6 +8745,9 @@
  {
  	struct smb2_change_notify_req *req;
  	struct smb2_change_notify_rsp *rsp;
@@ -937,7 +945,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  
  	WORK_BUFFERS(work, req, rsp);
  
-@@ -8470,8 +8749,108 @@
+@@ -8470,8 +8757,108 @@
  		return 0;
  	}
  
