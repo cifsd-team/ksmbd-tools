@@ -53,7 +53,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  }
 diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c' '--exclude=*.o' '--exclude=*.cmd' '--exclude=modules.order' '--exclude=Module.symvers' '--exclude=*.asn1.c' '--exclude=*.asn1.h' '--exclude=transport_rdma.c' linux-source-6.8.0/fs/smb/server.orig/oplock.c linux-source-6.8.0/fs/smb/server/oplock.c
 --- linux-source-6.8.0/fs/smb/server.orig/oplock.c	2026-05-28 10:33:26.995473967 +0000
-+++ linux-source-6.8.0/fs/smb/server/oplock.c	2026-07-02 22:41:38.339304841 +0000
++++ linux-source-6.8.0/fs/smb/server/oplock.c	2026-07-02 23:20:44.509846111 +0000
 @@ -9,12 +9,14 @@
  #include "glob.h"
  #include "oplock.h"
@@ -220,7 +220,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  }
  
  /**
-@@ -1760,6 +1787,77 @@
+@@ -1760,6 +1787,78 @@
  		  SIDUNIX_GROUP, (struct smb_sid *)&buf->SidBuffer[28]);
  }
  
@@ -291,7 +291,8 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
 +		p[1] = cpu_to_le32(model_bytes);
 +
 +		/* Update DataLength to reflect actual model string size */
-+		buf->ccontext.DataLength = cpu_to_le32(data_len - AAPL_MODEL_UTF16_BYTES + model_bytes);
++		buf->ccontext.DataLength =
++			cpu_to_le32(data_len - AAPL_MODEL_UTF16_BYTES + model_bytes);
 +	}
 +}
 +
@@ -387,7 +388,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  
 diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c' '--exclude=*.o' '--exclude=*.cmd' '--exclude=modules.order' '--exclude=Module.symvers' '--exclude=*.asn1.c' '--exclude=*.asn1.h' '--exclude=transport_rdma.c' linux-source-6.8.0/fs/smb/server.orig/smb2pdu.c linux-source-6.8.0/fs/smb/server/smb2pdu.c
 --- linux-source-6.8.0/fs/smb/server.orig/smb2pdu.c	2026-05-28 10:33:26.991473925 +0000
-+++ linux-source-6.8.0/fs/smb/server/smb2pdu.c	2026-07-02 23:06:42.263619238 +0000
++++ linux-source-6.8.0/fs/smb/server/smb2pdu.c	2026-07-02 23:20:54.553946304 +0000
 @@ -2323,7 +2323,13 @@
  out:
  	switch (err) {
@@ -667,7 +668,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  	}
  
  	if (contxt_cnt > 0) {
-@@ -3731,17 +3901,39 @@
+@@ -3731,17 +3901,40 @@
  
  		fibdinfo = (struct file_id_both_directory_info *)kstat;
  		fibdinfo->FileNameLength = cpu_to_le32(conv_len);
@@ -695,7 +696,8 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
 +			 *   Reserved2        = Unix mode bits (uint16 LE)
 +			 * Reparse-point tag is indicated via ExtFileAttributes, not EaSize.
 +			 */
-+			__le32 reparse_tag = smb2_get_reparse_tag_special_file(ksmbd_kstat->kstat->mode);
++			__le32 reparse_tag =
++				smb2_get_reparse_tag_special_file(ksmbd_kstat->kstat->mode);
 +
 +			if (reparse_tag)
 +				fibdinfo->ExtFileAttributes = FILE_ATTRIBUTE_REPARSE_POINT_LE;
@@ -712,7 +714,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  		if (d_info->hide_dot_file && d_info->name[0] == '.')
  			fibdinfo->ExtFileAttributes |= FILE_ATTRIBUTE_HIDDEN_LE;
  		memcpy(fibdinfo->FileName, conv_name, conv_len);
-@@ -4602,8 +4794,15 @@
+@@ -4602,8 +4795,15 @@
  	sinfo = (struct smb2_file_standard_info *)rsp->Buffer;
  	delete_pending = ksmbd_inode_pending_delete(fp);
  
@@ -730,7 +732,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  	sinfo->NumberOfLinks = cpu_to_le32(get_nlink(&stat) - delete_pending);
  	sinfo->DeletePending = delete_pending;
  	sinfo->Directory = S_ISDIR(stat.mode) ? 1 : 0;
-@@ -4668,9 +4867,15 @@
+@@ -4668,9 +4868,15 @@
  	file_info->ChangeTime = cpu_to_le64(time);
  	file_info->Attributes = fp->f_ci->m_fattr;
  	file_info->Pad1 = 0;
@@ -749,7 +751,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  	file_info->NumberOfLinks =
  			cpu_to_le32(get_nlink(&stat) - delete_pending);
  	file_info->DeletePending = delete_pending;
-@@ -4787,8 +4992,19 @@
+@@ -4787,8 +4993,19 @@
  		streamlen *= 2;
  		kfree(stream_buf);
  		file_info->StreamNameLength = cpu_to_le32(streamlen);
@@ -771,7 +773,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  
  		nbytes += next;
  		buf_free_len -= next;
-@@ -4867,8 +5083,15 @@
+@@ -4867,8 +5084,15 @@
  	time = ksmbd_UnixTimeToNT(stat.ctime);
  	file_info->ChangeTime = cpu_to_le64(time);
  	file_info->Attributes = fp->f_ci->m_fattr;
@@ -789,7 +791,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  	file_info->Reserved = cpu_to_le32(0);
  	rsp->OutputBufferLength =
  		cpu_to_le32(sizeof(struct smb2_file_ntwrk_info));
-@@ -4980,8 +5203,15 @@
+@@ -4980,8 +5204,15 @@
  	file_info->ChangeTime = cpu_to_le64(time);
  	file_info->DosAttributes = fp->f_ci->m_fattr;
  	file_info->Inode = cpu_to_le64(stat.ino);
@@ -807,7 +809,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  	file_info->HardLinks = cpu_to_le32(stat.nlink);
  	file_info->Mode = cpu_to_le32(stat.mode & 0777);
  	switch (stat.mode & S_IFMT) {
-@@ -5619,9 +5849,16 @@
+@@ -5619,9 +5850,16 @@
  		}
  
  		rsp->Flags = SMB2_CLOSE_FLAG_POSTQUERY_ATTRIB;
@@ -827,7 +829,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  		rsp->Attributes = fp->f_ci->m_fattr;
  		rsp->CreationTime = cpu_to_le64(fp->create_time);
  		time = ksmbd_UnixTimeToNT(stat.atime);
-@@ -6017,9 +6254,9 @@
+@@ -6017,9 +6255,9 @@
  		if (S_ISDIR(inode->i_mode) &&
  		    ksmbd_vfs_empty_dir(fp) == -ENOTEMPTY)
  			return -EBUSY;
@@ -839,7 +841,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  	}
  	return 0;
  }
-@@ -6270,7 +6507,7 @@
+@@ -6270,7 +6508,7 @@
  	else if (rc == -ESHARE)
  		rsp->hdr.Status = STATUS_SHARING_VIOLATION;
  	else if (rc == -ENOENT)
@@ -848,7 +850,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  	else if (rc == -EBUSY || rc == -ENOTEMPTY)
  		rsp->hdr.Status = STATUS_DIRECTORY_NOT_EMPTY;
  	else if (rc == -EAGAIN)
-@@ -7407,8 +7644,50 @@
+@@ -7407,8 +7645,50 @@
  
  	chunks = (struct srv_copychunk *)&ci_req->Chunks[0];
  	chunk_count = le32_to_cpu(ci_req->ChunkCount);
@@ -900,7 +902,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  	total_size_written = 0;
  
  	/* verify the SRV_COPYCHUNK_COPY packet */
-@@ -7469,6 +7748,8 @@
+@@ -7469,6 +7749,8 @@
  			rsp->hdr.Status = STATUS_FILE_LOCK_CONFLICT;
  		else if (ret == -EBADF)
  			rsp->hdr.Status = STATUS_INVALID_HANDLE;
@@ -909,7 +911,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  		else if (ret == -EFBIG || ret == -ENOSPC)
  			rsp->hdr.Status = STATUS_DISK_FULL;
  		else if (ret == -EINVAL)
-@@ -7752,10 +8033,13 @@
+@@ -7752,10 +8034,13 @@
  	idmap = file_mnt_idmap(fp->filp);
  
  	old_fattr = fp->f_ci->m_fattr;
@@ -926,7 +928,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  
  	if (fp->f_ci->m_fattr != old_fattr &&
  	    test_share_config_flag(work->tcon->share_conf,
-@@ -7934,7 +8218,7 @@
+@@ -7934,7 +8219,7 @@
  			goto out;
  		}
  
@@ -935,7 +937,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  			ret = -EINVAL;
  			goto out;
  		}
-@@ -8461,6 +8745,9 @@
+@@ -8461,6 +8746,9 @@
  {
  	struct smb2_change_notify_req *req;
  	struct smb2_change_notify_rsp *rsp;
@@ -945,7 +947,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  
  	WORK_BUFFERS(work, req, rsp);
  
-@@ -8470,8 +8757,108 @@
+@@ -8470,8 +8758,108 @@
  		return 0;
  	}
  
@@ -1165,7 +1167,7 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  out:
 diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c' '--exclude=*.o' '--exclude=*.cmd' '--exclude=modules.order' '--exclude=Module.symvers' '--exclude=*.asn1.c' '--exclude=*.asn1.h' '--exclude=transport_rdma.c' linux-source-6.8.0/fs/smb/server.orig/vfs.c linux-source-6.8.0/fs/smb/server/vfs.c
 --- linux-source-6.8.0/fs/smb/server.orig/vfs.c	2026-05-28 10:33:26.998473999 +0000
-+++ linux-source-6.8.0/fs/smb/server/vfs.c	2026-07-02 22:48:43.751577401 +0000
++++ linux-source-6.8.0/fs/smb/server/vfs.c	2026-07-02 23:21:13.871139118 +0000
 @@ -381,6 +381,10 @@
  	ssize_t nbytes = 0;
  	struct inode *inode = file_inode(filp);
@@ -1198,15 +1200,17 @@ diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c'
  {
  	return vfs_getxattr(idmap, dentry, xattr_name, NULL, 0);
  }
-@@ -1817,8 +1818,49 @@
+@@ -1817,8 +1818,51 @@
  		return -EACCES;
  	}
  
 -	if (ksmbd_stream_fd(src_fp) || ksmbd_stream_fd(dst_fp))
 -		return -EBADF;
 +	if (ksmbd_stream_fd(src_fp) || ksmbd_stream_fd(dst_fp)) {
-+		/* ADS stream copychunk: copy xattr from src to dst directly.
-+		 * vfs_copy_file_range doesn't work on xattr-backed streams. */
++		/*
++		 * ADS stream copychunk: copy xattr from src to dst directly.
++		 * vfs_copy_file_range doesn't work on xattr-backed streams.
++		 */
 +		char *buf = NULL;
 +		ssize_t buf_len;
 +		int sret;
