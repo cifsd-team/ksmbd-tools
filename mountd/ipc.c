@@ -171,6 +171,15 @@ static int ipc_ksmbd_starting_up(void)
 			global_conf.server_string,
 			sizeof(ev->server_string) - 1);
 	}
+
+	if (global_conf.aapl_model) {
+		strncpy(ev->aapl_model,
+			global_conf.aapl_model,
+			sizeof(ev->aapl_model) - 1);
+	} else {
+		strncpy(ev->aapl_model, "Xserve3,1",
+			sizeof(ev->aapl_model) - 1);
+	}
 	if (global_conf.work_group) {
 		strncpy(ev->work_group,
 			global_conf.work_group,

@@ -16,6 +16,7 @@
 	max connections = 128
 	max ip connections = 8
 	max open files = 10000
+	aapl model = Xserve3,1
 	netbios name = KSMBD SERVER
 	restrict anonymous = 0
 	root directory = 
@@ -55,10 +56,12 @@
 	read list = 
 	read only = ; yes
 	store dos attributes = yes
-	valid users = 
-	veto files = 
-	vfs objects = 
-	write list = 
+	time machine = no
+	; max size = 500G
+	valid users =
+	veto files =
+	vfs objects =
+	write list =
 
 [example]
 	; share parameters

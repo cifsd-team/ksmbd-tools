@@ -22,6 +22,125 @@
 #include "ipc.h"
 #include "management/share.h"
 #include "config_parser.h"
+#include <linux/ksmbd_server.h>
+
+#define TM_QUOTA_PLIST    ".com.apple.TimeMachine.quota.plist"
+#define AVAHI_SERVICE_DIR "/etc/avahi/services"
+#define AVAHI_SERVICE     AVAHI_SERVICE_DIR "/ksmbd-timemachine.service"
+
+/* --- quota plist ---------------------------------------------------------- */
+
+static void __tm_write_quota_plist(struct ksmbd_share *share, void *unused)
+{
+	char path[PATH_MAX];
+	FILE *f;
+
+	if (!test_share_flag(share, KSMBD_SHARE_FLAG_TIME_MACHINE))
+		return;
+	if (!share->path || !share->tm_max_size)
+		return;
+
+	snprintf(path, sizeof(path), "%s/" TM_QUOTA_PLIST, share->path);
+	f = fopen(path, "w");
+	if (!f) {
+		pr_err("Cannot write Time Machine quota plist `%s': %m\n", path);
+		return;
+	}
+	fprintf(f,
+		"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+		"<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\""
+		" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+		"<plist version=\"1.0\">\n"
+		"<dict>\n"
+		"\t<key>QuotaSize</key>\n"
+		"\t<integer>%llu</integer>\n"
+		"</dict>\n"
+		"</plist>\n",
+		share->tm_max_size);
+	fclose(f);
+	pr_debug("Written Time Machine quota (%llu bytes) to `%s'\n",
+		 share->tm_max_size, path);
+}
+
+static void tm_write_quota_plists(void)
+{
+	shm_iter_shares(__tm_write_quota_plist, NULL);
+}
+
+/* --- avahi service file --------------------------------------------------- */
+
+struct tm_avahi_ctx {
+	FILE	*f;
+	int	 idx;
+};
+
+static void __tm_avahi_dk(struct ksmbd_share *share, void *arg)
+{
+	struct tm_avahi_ctx *ctx = arg;
+
+	if (!test_share_flag(share, KSMBD_SHARE_FLAG_TIME_MACHINE))
+		return;
+	if (test_share_flag(share, KSMBD_SHARE_FLAG_PIPE))
+		return;
+
+	/*
+	 * adVF=0x82: bit1 (SMB supported) | bit7 (Time Machine destination)
+	 * adVN: the SMB share name macOS shows in the TM destination picker
+	 */
+	fprintf(ctx->f, "\t<txt-record>dk%d=adVN=%s,adVF=0x82</txt-record>\n",
+		ctx->idx++, share->name);
+}
+
+static void tm_write_avahi_service(void)
+{
+	struct tm_avahi_ctx ctx = { .idx = 0 };
+	FILE *f;
+
+	if (access(AVAHI_SERVICE_DIR, W_OK) != 0)
+		return; /* avahi not installed or not writable — skip silently */
+
+	f = fopen(AVAHI_SERVICE, "w");
+	if (!f) {
+		pr_err("Cannot write avahi service `%s': %m\n", AVAHI_SERVICE);
+		return;
+	}
+	ctx.f = f;
+
+	fprintf(f,
+		"<?xml version=\"1.0\" standalone='no'?>\n"
+		"<!DOCTYPE service-group SYSTEM \"avahi-service.dtd\">\n"
+		"<service-group>\n"
+		"  <name replace-wildcards=\"yes\">%%h</name>\n"
+		"  <service>\n"
+		"    <type>_smb._tcp</type>\n"
+		"    <port>445</port>\n"
+		"  </service>\n"
+		"  <service>\n"
+		"    <type>_adisk._tcp</type>\n"
+		"    <port>445</port>\n"
+		"    <txt-record>sys=waMa=0,adVF=0x100</txt-record>\n");
+
+	shm_iter_shares(__tm_avahi_dk, &ctx);
+
+	fprintf(f,
+		"  </service>\n"
+		"  <service>\n"
+		"    <type>_device-info._tcp</type>\n"
+		"    <port>0</port>\n"
+		"    <txt-record>model=Xserve</txt-record>\n"
+		"  </service>\n"
+		"</service-group>\n");
+	fclose(f);
+
+	if (ctx.idx == 0) {
+		/* No TM shares — remove the file so avahi stops advertising */
+		remove(AVAHI_SERVICE);
+		return;
+	}
+
+	pr_debug("Written avahi service with %d Time Machine volume(s)\n",
+		 ctx.idx);
+}
 
 static void usage(int status)
 {
@@ -259,6 +378,8 @@ static int worker_init(void)
 	ret = load_config(global_conf.pwddb, global_conf.smbconf);
 	if (ret)
 		goto out;
+	tm_write_quota_plists();
+	tm_write_avahi_service();
 
 	for (;;) {
 		pthread_sigmask(SIG_UNBLOCK, &sigset, NULL);
@@ -274,6 +395,8 @@ static int worker_init(void)
 			ret = load_config(global_conf.pwddb,
 					  global_conf.smbconf);
 			if (!ret) {
+				tm_write_quota_plists();
+	tm_write_avahi_service();
 				pr_info("Reloaded config\n");
 				ksmbd_health_status &=
 					~KSMBD_SHOULD_RELOAD_CONFIG;

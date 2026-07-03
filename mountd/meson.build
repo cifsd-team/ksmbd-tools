@@ -9,6 +9,7 @@ mountd_lib = static_library(
   'smbacl.c',
   'rpc_samr.c',
   'rpc_lsarpc.c',
+  'rpc_mdssvc.c',
   include_directories: include_dirs,
   c_args: [
     '-DSYSCONFDIR="@0@"'.format(get_option('prefix') / get_option('sysconfdir')),

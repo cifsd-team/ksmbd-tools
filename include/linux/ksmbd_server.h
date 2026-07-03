@@ -53,7 +53,8 @@ struct ksmbd_startup_request {
 	__u32	max_connections;	/* Number of maximum simultaneous connections */
 	__s8	bind_interfaces_only;
 	__u32   max_ip_connections;	/* Number of maximum connection per ip address */
-	__s8	reserved[499];		/* Reserved room */
+	__s8	aapl_model[32];		/* AAPL model string for Finder icon, e.g. "Xserve3,1" */
+	__s8	reserved[467];		/* Reserved room */
 	__u32	ifc_list_sz;
 	__s8	____payload[];
 } __attribute__((packed));
@@ -258,6 +259,7 @@ enum KSMBD_TREE_CONN_STATUS {
 #define KSMBD_SHARE_FLAG_ACL_XATTR		(1 << 13)
 #define KSMBD_SHARE_FLAG_UPDATE			(1 << 14)
 #define KSMBD_SHARE_FLAG_CROSSMNT		(1 << 15)
+#define KSMBD_SHARE_FLAG_TIME_MACHINE		(1 << 16)
 
 /*
  * Tree connect request flags.
@@ -294,6 +296,8 @@ enum KSMBD_TREE_CONN_STATUS {
 #define KSMBD_RPC_SAMR_METHOD_RETURN	((1 << 10) | KSMBD_RPC_METHOD_RETURN)
 #define KSMBD_RPC_LSARPC_METHOD_INVOKE	(1 << 11)
 #define KSMBD_RPC_LSARPC_METHOD_RETURN	((1 << 11) | KSMBD_RPC_METHOD_RETURN)
+#define KSMBD_RPC_MDSSVC_METHOD_INVOKE	(1 << 12)
+#define KSMBD_RPC_MDSSVC_METHOD_RETURN	((1 << 12) | KSMBD_RPC_METHOD_RETURN)
 
 #define KSMBD_RPC_OK			0
 #define KSMBD_RPC_EBAD_FUNC		0x00000001

@@ -1,0 +1,1365 @@
+diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c' '--exclude=*.o' '--exclude=*.cmd' '--exclude=modules.order' '--exclude=Module.symvers' '--exclude=*.asn1.c' '--exclude=*.asn1.h' '--exclude=transport_rdma.c' linux-source-6.8.0/fs/smb/server.orig/connection.h linux-source-6.8.0/fs/smb/server/connection.h
+--- linux-source-6.8.0/fs/smb/server.orig/connection.h	2026-05-28 10:33:26.995473967 +0000
++++ linux-source-6.8.0/fs/smb/server/connection.h	2026-06-27 14:12:03.461195510 +0000
+@@ -115,6 +115,7 @@
+ 	bool				binding;
+ 	atomic_t			refcnt;
+ 	bool				is_aapl;
++	bool				aapl_readdir_attr; /* READDIR_ATTR negotiated */
+ };
+ 
+ struct ksmbd_conn_ops {
+diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c' '--exclude=*.o' '--exclude=*.cmd' '--exclude=modules.order' '--exclude=Module.symvers' '--exclude=*.asn1.c' '--exclude=*.asn1.h' '--exclude=transport_rdma.c' linux-source-6.8.0/fs/smb/server.orig/ksmbd_netlink.h linux-source-6.8.0/fs/smb/server/ksmbd_netlink.h
+--- linux-source-6.8.0/fs/smb/server.orig/ksmbd_netlink.h	2026-05-28 10:33:26.998473999 +0000
++++ linux-source-6.8.0/fs/smb/server/ksmbd_netlink.h	2026-07-02 22:45:48.250803824 +0000
+@@ -75,6 +75,7 @@
+ #define KSMBD_GLOBAL_FLAG_SMB2_ENCRYPTION	BIT(1)
+ #define KSMBD_GLOBAL_FLAG_SMB3_MULTICHANNEL	BIT(2)
+ #define KSMBD_GLOBAL_FLAG_SMB2_ENCRYPTION_OFF	BIT(3)
++#define KSMBD_GLOBAL_FLAG_DURABLE_HANDLES	BIT(4)
+ 
+ /*
+  * IPC request for ksmbd server startup
+@@ -109,7 +110,8 @@
+ 	__u32	max_connections;	/* Number of maximum simultaneous connections */
+ 	__s8	bind_interfaces_only;
+ 	__u32	max_ip_connections;	/* Number of maximum connection per ip address */
+-	__s8	reserved[499];		/* Reserved room */
++	__s8	aapl_model[32];		/* AAPL model string for Finder icon, e.g. "Xserve" */
++	__s8	reserved[467];		/* Reserved room */
+ 	__u32	ifc_list_sz;		/* interfaces list size */
+ 	__s8	____payload[];
+ } __packed;
+@@ -358,6 +360,7 @@
+ #define KSMBD_SHARE_FLAG_ACL_XATTR		BIT(13)
+ #define KSMBD_SHARE_FLAG_UPDATE			BIT(14)
+ #define KSMBD_SHARE_FLAG_CROSSMNT		BIT(15)
++#define KSMBD_SHARE_FLAG_TIME_MACHINE		BIT(16)
+ 
+ /*
+  * Tree connect request flags.
+diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c' '--exclude=*.o' '--exclude=*.cmd' '--exclude=modules.order' '--exclude=Module.symvers' '--exclude=*.asn1.c' '--exclude=*.asn1.h' '--exclude=transport_rdma.c' linux-source-6.8.0/fs/smb/server.orig/mgmt/user_session.c linux-source-6.8.0/fs/smb/server/mgmt/user_session.c
+--- linux-source-6.8.0/fs/smb/server.orig/mgmt/user_session.c	2026-05-28 10:33:27.003474052 +0000
++++ linux-source-6.8.0/fs/smb/server/mgmt/user_session.c	2026-06-09 21:37:30.605297377 +0000
+@@ -86,6 +86,9 @@
+ 	if (!strcmp(rpc_name, "\\lsarpc") || !strcmp(rpc_name, "lsarpc"))
+ 		return KSMBD_RPC_LSARPC_METHOD_INVOKE;
+ 
++	if (!strcmp(rpc_name, "\\mdssvc") || !strcmp(rpc_name, "mdssvc"))
++		return 0; /* mdssvc disabled: NOT_FOUND so macOS falls back */
++
+ 	pr_err("Unsupported RPC: %s\n", rpc_name);
+ 	return 0;
+ }
+diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c' '--exclude=*.o' '--exclude=*.cmd' '--exclude=modules.order' '--exclude=Module.symvers' '--exclude=*.asn1.c' '--exclude=*.asn1.h' '--exclude=transport_rdma.c' linux-source-6.8.0/fs/smb/server.orig/oplock.c linux-source-6.8.0/fs/smb/server/oplock.c
+--- linux-source-6.8.0/fs/smb/server.orig/oplock.c	2026-05-28 10:33:26.995473967 +0000
++++ linux-source-6.8.0/fs/smb/server/oplock.c	2026-07-02 23:20:44.509846111 +0000
+@@ -9,12 +9,14 @@
+ #include "glob.h"
+ #include "oplock.h"
+ 
++#include "smb2pdu.h"		/* AAPL_CTX_* constants */
+ #include "smb_common.h"
+ #include "smbstatus.h"
+ #include "connection.h"
+ #include "mgmt/user_session.h"
+ #include "mgmt/share_config.h"
+ #include "mgmt/tree_connect.h"
++#include "server.h"		/* server_conf.aapl_model */
+ 
+ static LIST_HEAD(lease_table_list);
+ static DEFINE_RWLOCK(lease_list_lock);
+@@ -1088,82 +1090,107 @@
+ 	}
+ }
+ 
+-void smb_send_parent_lease_break_noti(struct ksmbd_file *fp,
+-				      struct lease_ctx_info *lctx)
++/*
++ * Collect refcounted lease holders on a parent directory that need to be
++ * broken, without holding p_ci->m_lock during the (possibly ~35s) break
++ * acknowledgment wait. Holding that lock across oplock_break() would block
++ * every other create/delete/rename under the same parent directory for the
++ * full wait duration whenever a single lease holder fails to acknowledge.
++ * Returns the number of entries filled into *out (caller must kfree it).
++ */
++static int collect_parent_lease_holders(struct ksmbd_inode *p_ci,
++					struct ksmbd_file *fp,
++					struct lease_ctx_info *lctx,
++					struct oplock_info ***out)
+ {
+-	struct oplock_info *opinfo;
+-	struct ksmbd_inode *p_ci = NULL;
+-
+-	if (lctx->version != 2)
+-		return;
+-
+-	p_ci = ksmbd_inode_lookup_lock(fp->filp->f_path.dentry->d_parent);
+-	if (!p_ci)
+-		return;
++	struct oplock_info *opinfo, **arr = NULL;
++	int count = 0, cap = 0;
+ 
+ 	down_read(&p_ci->m_lock);
+ 	list_for_each_entry(opinfo, &p_ci->m_op_list, op_entry) {
+ 		if (!opinfo->is_lease)
+ 			continue;
+-
+-		if (opinfo->o_lease->state != SMB2_OPLOCK_LEVEL_NONE &&
+-		    (!(lctx->flags & SMB2_LEASE_FLAG_PARENT_LEASE_KEY_SET_LE) ||
+-		     !compare_guid_key(opinfo, fp->conn->ClientGUID,
+-				      lctx->parent_lease_key))) {
+-			if (!atomic_inc_not_zero(&opinfo->refcount))
+-				continue;
+-
+-			if (ksmbd_conn_releasing(opinfo->conn)) {
++		if (opinfo->o_lease->state == SMB2_OPLOCK_LEVEL_NONE)
++			continue;
++		if (lctx && (lctx->flags & SMB2_LEASE_FLAG_PARENT_LEASE_KEY_SET_LE) &&
++		    compare_guid_key(opinfo, fp->conn->ClientGUID,
++				     lctx->parent_lease_key))
++			continue;
++		if (!atomic_inc_not_zero(&opinfo->refcount))
++			continue;
++		if (ksmbd_conn_releasing(opinfo->conn)) {
++			opinfo_put(opinfo);
++			continue;
++		}
++		if (count == cap) {
++			int new_cap = cap ? cap * 2 : 4;
++			struct oplock_info **n = krealloc(arr,
++					new_cap * sizeof(*n), GFP_KERNEL);
++			if (!n) {
+ 				opinfo_put(opinfo);
+ 				continue;
+ 			}
+-
+-			oplock_break(opinfo, SMB2_OPLOCK_LEVEL_NONE, NULL);
+-			opinfo_put(opinfo);
++			arr = n;
++			cap = new_cap;
+ 		}
++		arr[count++] = opinfo;
+ 	}
+ 	up_read(&p_ci->m_lock);
+ 
++	*out = arr;
++	return count;
++}
++
++void smb_send_parent_lease_break_noti(struct ksmbd_file *fp,
++				      struct lease_ctx_info *lctx)
++{
++	struct ksmbd_inode *p_ci = NULL;
++	struct oplock_info **to_break = NULL;
++	int count, i;
++
++	if (lctx->version != 2)
++		return;
++
++	p_ci = ksmbd_inode_lookup_lock(fp->filp->f_path.dentry->d_parent);
++	if (!p_ci)
++		return;
++
++	count = collect_parent_lease_holders(p_ci, fp, lctx, &to_break);
+ 	ksmbd_inode_put(p_ci);
++
++	for (i = 0; i < count; i++) {
++		oplock_break(to_break[i], SMB2_OPLOCK_LEVEL_NONE, NULL);
++		opinfo_put(to_break[i]);
++	}
++	kfree(to_break);
+ }
+ 
+ void smb_lazy_parent_lease_break_close(struct ksmbd_file *fp)
+ {
+ 	struct oplock_info *opinfo;
+ 	struct ksmbd_inode *p_ci = NULL;
++	struct oplock_info **to_break = NULL;
++	int count, i;
+ 
+ 	rcu_read_lock();
+ 	opinfo = rcu_dereference(fp->f_opinfo);
+ 	rcu_read_unlock();
+ 
+-	if (!opinfo->is_lease || opinfo->o_lease->version != 2)
++	if (!opinfo || !opinfo->is_lease || opinfo->o_lease->version != 2)
+ 		return;
+ 
+ 	p_ci = ksmbd_inode_lookup_lock(fp->filp->f_path.dentry->d_parent);
+ 	if (!p_ci)
+ 		return;
+ 
+-	down_read(&p_ci->m_lock);
+-	list_for_each_entry(opinfo, &p_ci->m_op_list, op_entry) {
+-		if (!opinfo->is_lease)
+-			continue;
+-
+-		if (opinfo->o_lease->state != SMB2_OPLOCK_LEVEL_NONE) {
+-			if (!atomic_inc_not_zero(&opinfo->refcount))
+-				continue;
+-
+-			if (ksmbd_conn_releasing(opinfo->conn)) {
+-				opinfo_put(opinfo);
+-				continue;
+-			}
++	count = collect_parent_lease_holders(p_ci, fp, NULL, &to_break);
++	ksmbd_inode_put(p_ci);
+ 
+-			oplock_break(opinfo, SMB2_OPLOCK_LEVEL_NONE, NULL);
+-			opinfo_put(opinfo);
+-		}
++	for (i = 0; i < count; i++) {
++		oplock_break(to_break[i], SMB2_OPLOCK_LEVEL_NONE, NULL);
++		opinfo_put(to_break[i]);
+ 	}
+-	up_read(&p_ci->m_lock);
+-
+-	ksmbd_inode_put(p_ci);
++	kfree(to_break);
+ }
+ 
+ /**
+@@ -1760,6 +1787,78 @@
+ 		  SIDUNIX_GROUP, (struct smb_sid *)&buf->SidBuffer[28]);
+ }
+ 
++/**
++ * create_aapl_rsp_buf() - build Apple AAPL kAAPL_SERVER_QUERY response
++ * @cc:         buffer to write the create context into (AAPL_RSP_MAX_SIZE bytes)
++ * @vol_caps:   volume capability flags (AAPL_VOLCAPS_*)
++ * @req_bitmap: the client's request bitmap, echoed back in reply_bitmap
++ *
++ * Response format follows the layout observed from macOS's own smbd:
++ *   reply_bitmap = req_bitmap masked to the fields we support
++ *   server_caps  = AAPL_SERVER_CAPS_KSMBD when requested
++ *   vol_caps     = caller-supplied
++ *   model string = server_conf.aapl_model (default "Xserve") in UTF-16LE,
++ *                  when AAPL_BITMAP_MODEL_INFO requested
++ *
++ * Sending reply_bitmap=0x03 without a model string causes smbfs.kext to
++ * enter a broken disconnect path requiring a macOS reboot to recover.
++ */
++void create_aapl_rsp_buf(char *cc, __u64 vol_caps, __u64 req_bitmap)
++{
++	struct create_aapl_rsp *buf;
++	u64 reply_bitmap;
++	u32 data_len;
++
++	buf = (struct create_aapl_rsp *)cc;
++	memset(buf, 0, AAPL_RSP_MAX_SIZE);
++
++	reply_bitmap = req_bitmap & (AAPL_BITMAP_SERVER_CAPS |
++				     AAPL_BITMAP_VOL_CAPS |
++				     AAPL_BITMAP_MODEL_INFO);
++
++	/* base data: cmd(4)+reserved(4)+reply_bitmap(8)+server_caps(8)+vol_caps(8) */
++	data_len = 32;
++	if (reply_bitmap & AAPL_BITMAP_MODEL_INFO)
++		data_len += 4 + 4 + AAPL_MODEL_UTF16_BYTES; /* pad2+model_bytes+string */
++
++	buf->ccontext.DataOffset = cpu_to_le16(offsetof(struct create_aapl_rsp, cmd));
++	buf->ccontext.DataLength = cpu_to_le32(data_len);
++	buf->ccontext.NameOffset = cpu_to_le16(offsetof(struct create_aapl_rsp, Name));
++	buf->ccontext.NameLength = cpu_to_le16(4);
++	buf->Name[0] = 'A';
++	buf->Name[1] = 'A';
++	buf->Name[2] = 'P';
++	buf->Name[3] = 'L';
++
++	buf->cmd = cpu_to_le32(AAPL_SERVER_QUERY);
++	buf->reply_bitmap = cpu_to_le64(reply_bitmap);
++	buf->server_caps = (reply_bitmap & AAPL_BITMAP_SERVER_CAPS) ?
++			   cpu_to_le64(AAPL_SERVER_CAPS_KSMBD) : 0;
++	buf->vol_caps = (reply_bitmap & AAPL_BITMAP_VOL_CAPS) ?
++			cpu_to_le64(vol_caps) : 0;
++
++	if (reply_bitmap & AAPL_BITMAP_MODEL_INFO) {
++		__le32 *p = (__le32 *)((u8 *)buf + sizeof(*buf));
++		__le16 *model_str = (__le16 *)(p + 2);
++		const char *src = server_conf.aapl_model[0] ?
++				  server_conf.aapl_model : "Xserve";
++		int i, model_bytes = 0;
++
++		/* Convert ASCII model string to UTF-16LE in-place */
++		for (i = 0; src[i] && i < AAPL_MODEL_MAX_CHARS; i++) {
++			model_str[i] = cpu_to_le16((unsigned char)src[i]);
++			model_bytes += 2;
++		}
++
++		p[0] = 0; /* pad2 */
++		p[1] = cpu_to_le32(model_bytes);
++
++		/* Update DataLength to reflect actual model string size */
++		buf->ccontext.DataLength =
++			cpu_to_le32(data_len - AAPL_MODEL_UTF16_BYTES + model_bytes);
++	}
++}
++
+ /*
+  * Find lease object(opinfo) for given lease key/fid from lease
+  * break/file close path.
+diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c' '--exclude=*.o' '--exclude=*.cmd' '--exclude=modules.order' '--exclude=Module.symvers' '--exclude=*.asn1.c' '--exclude=*.asn1.h' '--exclude=transport_rdma.c' linux-source-6.8.0/fs/smb/server.orig/oplock.h linux-source-6.8.0/fs/smb/server/oplock.h
+--- linux-source-6.8.0/fs/smb/server.orig/oplock.h	2026-05-28 10:33:26.995473967 +0000
++++ linux-source-6.8.0/fs/smb/server/oplock.h	2026-05-28 16:52:08.324887287 +0000
+@@ -120,6 +120,7 @@
+ void create_mxac_rsp_buf(char *cc, int maximal_access);
+ void create_disk_id_rsp_buf(char *cc, __u64 file_id, __u64 vol_id);
+ void create_posix_rsp_buf(char *cc, struct ksmbd_file *fp);
++void create_aapl_rsp_buf(char *cc, __u64 vol_caps, __u64 req_bitmap);
+ struct create_context *smb2_find_context_vals(void *open_req, const char *tag, int tag_len);
+ struct oplock_info *lookup_lease_in_table(struct ksmbd_conn *conn,
+ 					  char *lease_key);
+diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c' '--exclude=*.o' '--exclude=*.cmd' '--exclude=modules.order' '--exclude=Module.symvers' '--exclude=*.asn1.c' '--exclude=*.asn1.h' '--exclude=transport_rdma.c' linux-source-6.8.0/fs/smb/server.orig/server.h linux-source-6.8.0/fs/smb/server/server.h
+--- linux-source-6.8.0/fs/smb/server.orig/server.h	2026-05-28 10:33:26.993473946 +0000
++++ linux-source-6.8.0/fs/smb/server/server.h	2026-05-29 12:19:32.058928639 +0000
+@@ -47,6 +47,7 @@
+ 
+ 	char			*conf[SERVER_CONF_WORK_GROUP + 1];
+ 	bool			bind_interfaces_only;
++	char			aapl_model[32]; /* AAPL model string for Finder icon */
+ };
+ 
+ extern struct ksmbd_server_config server_conf;
+diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c' '--exclude=*.o' '--exclude=*.cmd' '--exclude=modules.order' '--exclude=Module.symvers' '--exclude=*.asn1.c' '--exclude=*.asn1.h' '--exclude=transport_rdma.c' linux-source-6.8.0/fs/smb/server.orig/smb2ops.c linux-source-6.8.0/fs/smb/server/smb2ops.c
+--- linux-source-6.8.0/fs/smb/server.orig/smb2ops.c	2026-05-28 10:33:26.993473946 +0000
++++ linux-source-6.8.0/fs/smb/server/smb2ops.c	2026-06-01 16:04:22.221937343 +0000
+@@ -36,6 +36,7 @@
+ 	.create_mxac_size = sizeof(struct create_mxac_rsp),
+ 	.create_disk_id_size = sizeof(struct create_disk_id_rsp),
+ 	.create_posix_size = sizeof(struct create_posix_rsp),
++	.create_aapl_size = AAPL_RSP_MAX_SIZE,
+ };
+ 
+ static struct smb_version_values smb30_server_values = {
+@@ -63,6 +64,7 @@
+ 	.create_mxac_size = sizeof(struct create_mxac_rsp),
+ 	.create_disk_id_size = sizeof(struct create_disk_id_rsp),
+ 	.create_posix_size = sizeof(struct create_posix_rsp),
++	.create_aapl_size = AAPL_RSP_MAX_SIZE,
+ };
+ 
+ static struct smb_version_values smb302_server_values = {
+@@ -90,6 +92,7 @@
+ 	.create_mxac_size = sizeof(struct create_mxac_rsp),
+ 	.create_disk_id_size = sizeof(struct create_disk_id_rsp),
+ 	.create_posix_size = sizeof(struct create_posix_rsp),
++	.create_aapl_size = AAPL_RSP_MAX_SIZE,
+ };
+ 
+ static struct smb_version_values smb311_server_values = {
+@@ -117,6 +120,7 @@
+ 	.create_mxac_size = sizeof(struct create_mxac_rsp),
+ 	.create_disk_id_size = sizeof(struct create_disk_id_rsp),
+ 	.create_posix_size = sizeof(struct create_posix_rsp),
++	.create_aapl_size = AAPL_RSP_MAX_SIZE,
+ };
+ 
+ static struct smb_version_ops smb2_0_server_ops = {
+@@ -224,6 +228,9 @@
+ 		conn->vals->capabilities |= SMB2_GLOBAL_CAP_LEASING |
+ 			SMB2_GLOBAL_CAP_DIRECTORY_LEASING;
+ 
++	if (server_conf.flags & KSMBD_GLOBAL_FLAG_DURABLE_HANDLES)
++		conn->vals->capabilities |= SMB2_GLOBAL_CAP_PERSISTENT_HANDLES;
++
+ 	if (server_conf.flags & KSMBD_GLOBAL_FLAG_SMB2_ENCRYPTION &&
+ 	    conn->cli_cap & SMB2_GLOBAL_CAP_ENCRYPTION)
+ 		conn->vals->capabilities |= SMB2_GLOBAL_CAP_ENCRYPTION;
+@@ -254,6 +261,9 @@
+ 		conn->vals->capabilities |= SMB2_GLOBAL_CAP_LEASING |
+ 			SMB2_GLOBAL_CAP_DIRECTORY_LEASING;
+ 
++	if (server_conf.flags & KSMBD_GLOBAL_FLAG_DURABLE_HANDLES)
++		conn->vals->capabilities |= SMB2_GLOBAL_CAP_PERSISTENT_HANDLES;
++
+ 	if (server_conf.flags & KSMBD_GLOBAL_FLAG_SMB2_ENCRYPTION ||
+ 	    (!(server_conf.flags & KSMBD_GLOBAL_FLAG_SMB2_ENCRYPTION_OFF) &&
+ 	     conn->cli_cap & SMB2_GLOBAL_CAP_ENCRYPTION))
+@@ -280,6 +290,9 @@
+ 		conn->vals->capabilities |= SMB2_GLOBAL_CAP_LEASING |
+ 			SMB2_GLOBAL_CAP_DIRECTORY_LEASING;
+ 
++	if (server_conf.flags & KSMBD_GLOBAL_FLAG_DURABLE_HANDLES)
++		conn->vals->capabilities |= SMB2_GLOBAL_CAP_PERSISTENT_HANDLES;
++
+ 	if (server_conf.flags & KSMBD_GLOBAL_FLAG_SMB3_MULTICHANNEL)
+ 		conn->vals->capabilities |= SMB2_GLOBAL_CAP_MULTI_CHANNEL;
+ 
+diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c' '--exclude=*.o' '--exclude=*.cmd' '--exclude=modules.order' '--exclude=Module.symvers' '--exclude=*.asn1.c' '--exclude=*.asn1.h' '--exclude=transport_rdma.c' linux-source-6.8.0/fs/smb/server.orig/smb2pdu.c linux-source-6.8.0/fs/smb/server/smb2pdu.c
+--- linux-source-6.8.0/fs/smb/server.orig/smb2pdu.c	2026-05-28 10:33:26.991473925 +0000
++++ linux-source-6.8.0/fs/smb/server/smb2pdu.c	2026-07-02 23:20:54.553946304 +0000
+@@ -2323,7 +2323,13 @@
+ out:
+ 	switch (err) {
+ 	case -EINVAL:
+-		rsp->hdr.Status = STATUS_INVALID_PARAMETER;
++		/*
++		 * Unknown pipe name: return STATUS_OBJECT_NAME_NOT_FOUND so
++		 * macOS clients skip it gracefully. STATUS_INVALID_PARAMETER
++		 * causes macOS Time Machine to abort the backup immediately
++		 * (confirmed in ksmbd issue #502 / namjaejeon/ksmbd).
++		 */
++		rsp->hdr.Status = STATUS_OBJECT_NAME_NOT_FOUND;
+ 		break;
+ 	case -ENOSPC:
+ 	case -ENOMEM:
+@@ -2475,6 +2481,21 @@
+ 		return 0;
+ 
+ 	if (fp->cdoption == FILE_OPEN_LE) {
++		if (!strcmp(stream_name, "AFP_AfpInfo")) {
++			/*
++			 * Synthesize an empty AFP_AfpInfo xattr on first access.
++			 * type=0/creator=0 tells macOS to use the file extension
++			 * for icon and type detection. Matches Samba vfs_fruit.
++			 */
++			static const u8 afpinfo_empty[60] = {
++				0x00, 0x05, 0x16, 0x07, /* magic  0x00051607 BE */
++				0x00, 0x02, 0x00, 0x00, /* version 0x00020000 BE */
++			};
++			rc = ksmbd_vfs_setxattr(idmap, path, xattr_stream_name,
++						(void *)afpinfo_empty,
++						sizeof(afpinfo_empty), 0, false);
++			return rc < 0 ? rc : 0;
++		}
+ 		ksmbd_debug(SMB, "XATTR stream name lookup failed: %d\n", rc);
+ 		return -EBADF;
+ 	}
+@@ -2485,6 +2506,21 @@
+ 	return 0;
+ }
+ 
++/*
++ * For stream (xattr-backed) files, stat.size reports the underlying file's
++ * size, not the xattr value size. Query the xattr directly so macOS sees the
++ * correct EndOfFile (e.g. 60 for AFP_AfpInfo). Matches Samba vfs_fruit which
++ * overrides st_ex_size = AFP_INFO_SIZE.
++ */
++static loff_t ksmbd_stream_eof(struct ksmbd_file *fp)
++{
++	ssize_t slen = ksmbd_vfs_casexattr_len(file_mnt_idmap(fp->filp),
++					       fp->filp->f_path.dentry,
++					       fp->stream.name,
++					       fp->stream.size);
++	return slen < 0 ? 0 : (loff_t)slen;
++}
++
+ static int smb2_remove_smb_xattrs(const struct path *path)
+ {
+ 	struct mnt_idmap *idmap = mnt_idmap(path->mnt);
+@@ -2575,6 +2611,16 @@
+ 	rc = ksmbd_vfs_get_dos_attrib_xattr(mnt_idmap(path->mnt),
+ 					    path->dentry, &da);
+ 	if (rc > 0) {
++		/*
++		 * Don't report a stale SPARSE bit (e.g. left over from a
++		 * previous client, or from before the share was reconfigured)
++		 * when the share isn't currently advertising sparse-file
++		 * support. TM sparsebundle band files rely on sparse status
++		 * being accurate, since macOS decides whether to use
++		 * FSCTL_SET_SPARSE based on it.
++		 */
++		if (!(server_conf.share_fake_fscaps & FILE_SUPPORTS_SPARSE_FILES))
++			da.attr &= ~FILE_ATTRIBUTE_SPARSE_FILE;
+ 		fp->f_ci->m_fattr = cpu_to_le32(da.attr);
+ 		fp->create_time = da.create_time;
+ 		fp->itime = da.itime;
+@@ -2694,6 +2740,7 @@
+ 	int req_op_level = 0, open_flags = 0, may_flags = 0, file_info = 0;
+ 	int rc = 0;
+ 	int contxt_cnt = 0, query_disk_id = 0;
++	u32 dh2q_timeout = 0; /* non-zero when DH2Q was in the request */
+ 	bool maximal_access_ctxt = false, posix_ctxt = false;
+ 	int s_type = 0;
+ 	int next_off = 0;
+@@ -2842,6 +2889,46 @@
+ 	}
+ 
+ 	if (req->CreateContextsOffset) {
++		/*
++		 * Parse SMB2_CREATE_DURABLE_HANDLE_REQUEST_V2 (DH2Q).
++		 * ksmbd always assigns a persistent_id (ksmbd_open_durable_fd),
++		 * but without parsing DH2Q and responding with DH2V the client
++		 * never knows its durable handle was granted.  Time Machine
++		 * validation requires a DH2V response with a timeout in
++		 * [30, 180] seconds; without it TM reports "does not support
++		 * the required capacities".
++		 */
++		context = smb2_find_context_vals(req,
++						 SMB2_CREATE_DURABLE_HANDLE_REQUEST_V2, 4);
++		if (IS_ERR(context)) {
++			rc = PTR_ERR(context);
++			goto err_out2;
++		} else if (context) {
++			struct create_durable_req_v2 *dh2q =
++				(struct create_durable_req_v2 *)context;
++			u32 req_timeout;
++
++			if (le16_to_cpu(context->DataOffset) +
++			    le32_to_cpu(context->DataLength) <
++			    sizeof(struct create_durable_req_v2)) {
++				rc = -EINVAL;
++				goto err_out2;
++			}
++			req_timeout = le32_to_cpu(dh2q->Timeout);
++
++			/*
++			 * Use the requested timeout when in [30s, 180s].
++			 * If the client sends 0 (discovery probe), respond
++			 * with 60 s so the follow-up probe with Timeout=30
++			 * is accepted.
++			 */
++			if (req_timeout == 0 || req_timeout > 180000)
++				req_timeout = 60000; /* 60 s in ms */
++			else if (req_timeout < 30000)
++				req_timeout = 30000; /* minimum 30 s */
++			dh2q_timeout = req_timeout;
++		}
++
+ 		/* Parse non-durable handle create contexts */
+ 		context = smb2_find_context_vals(req, SMB2_CREATE_EA_BUFFER, 4);
+ 		if (IS_ERR(context)) {
+@@ -2935,7 +3022,8 @@
+ 			}
+ 		} else {
+ 			if (file_present && S_ISDIR(d_inode(path.dentry)->i_mode) &&
+-			    s_type == DATA_STREAM) {
++			    s_type == DATA_STREAM &&
++			    strcmp(stream_name, "AFP_AfpInfo") != 0) {
+ 				rc = -EIO;
+ 				rsp->hdr.Status = STATUS_FILE_IS_A_DIRECTORY;
+ 			}
+@@ -3108,6 +3196,9 @@
+ 		rc = -ENOMEM;
+ 		goto err_out;
+ 	}
++	if (dh2q_timeout &&
++	    (server_conf.flags & KSMBD_GLOBAL_FLAG_DURABLE_HANDLES))
++		fp->durable_timeout = dh2q_timeout;
+ 
+ 	fp->cdoption = req->CreateDisposition;
+ 	fp->daccess = daccess;
+@@ -3359,9 +3450,18 @@
+ 	rsp->LastWriteTime = cpu_to_le64(time);
+ 	time = ksmbd_UnixTimeToNT(stat.ctime);
+ 	rsp->ChangeTime = cpu_to_le64(time);
+-	rsp->AllocationSize = S_ISDIR(stat.mode) ? 0 :
+-		cpu_to_le64(stat.blocks << 9);
+-	rsp->EndofFile = S_ISDIR(stat.mode) ? 0 : cpu_to_le64(stat.size);
++	if (S_ISDIR(stat.mode)) {
++		rsp->AllocationSize = 0;
++		rsp->EndofFile = 0;
++	} else if (ksmbd_stream_fd(fp)) {
++		loff_t seof = ksmbd_stream_eof(fp);
++
++		rsp->AllocationSize = cpu_to_le64((u64)seof);
++		rsp->EndofFile = cpu_to_le64((u64)seof);
++	} else {
++		rsp->AllocationSize = cpu_to_le64(stat.blocks << 9);
++		rsp->EndofFile = cpu_to_le64(stat.size);
++	}
+ 	rsp->FileAttributes = fp->f_ci->m_fattr;
+ 
+ 	rsp->Reserved2 = 0;
+@@ -3373,6 +3473,26 @@
+ 	rsp->CreateContextsLength = 0;
+ 	iov_len = offsetof(struct smb2_create_rsp, Buffer);
+ 
++	/* If DH2Q was requested and durable handles are enabled, send DH2V */
++	if (dh2q_timeout && has_file_id(fp->persistent_id) &&
++	    (server_conf.flags & KSMBD_GLOBAL_FLAG_DURABLE_HANDLES)) {
++		struct create_context *dh2q_ccontext;
++
++		dh2q_ccontext = (struct create_context *)
++				(rsp->Buffer +
++				 le32_to_cpu(rsp->CreateContextsLength));
++		contxt_cnt++;
++		create_durable_v2_rsp_buf(rsp->Buffer +
++				le32_to_cpu(rsp->CreateContextsLength), fp);
++		le32_add_cpu(&rsp->CreateContextsLength,
++			     conn->vals->create_durable_v2_size);
++		iov_len += conn->vals->create_durable_v2_size;
++		if (next_ptr)
++			*next_ptr = cpu_to_le32(next_off);
++		next_ptr = &dh2q_ccontext->Next;
++		next_off = conn->vals->create_durable_v2_size;
++	}
++
+ 	/* If lease is request send lease context response */
+ 	if (opinfo && opinfo->is_lease) {
+ 		struct create_context *lease_ccontext;
+@@ -3381,12 +3501,17 @@
+ 			    name, opinfo->o_lease->state);
+ 		rsp->OplockLevel = SMB2_OPLOCK_LEVEL_LEASE;
+ 
+-		lease_ccontext = (struct create_context *)rsp->Buffer;
++		lease_ccontext = (struct create_context *)(rsp->Buffer +
++				le32_to_cpu(rsp->CreateContextsLength));
+ 		contxt_cnt++;
+-		create_lease_buf(rsp->Buffer, opinfo->o_lease);
++		create_lease_buf(rsp->Buffer +
++				 le32_to_cpu(rsp->CreateContextsLength),
++				 opinfo->o_lease);
+ 		le32_add_cpu(&rsp->CreateContextsLength,
+ 			     conn->vals->create_lease_size);
+ 		iov_len += conn->vals->create_lease_size;
++		if (next_ptr)
++			*next_ptr = cpu_to_le32(next_off);
+ 		next_ptr = &lease_ccontext->Next;
+ 		next_off = conn->vals->create_lease_size;
+ 	}
+@@ -3432,6 +3557,10 @@
+ 	}
+ 
+ 	if (posix_ctxt) {
++		struct create_context *posix_ccontext;
++
++		posix_ccontext = (struct create_context *)(rsp->Buffer +
++				le32_to_cpu(rsp->CreateContextsLength));
+ 		contxt_cnt++;
+ 		create_posix_rsp_buf(rsp->Buffer +
+ 				le32_to_cpu(rsp->CreateContextsLength),
+@@ -3441,6 +3570,47 @@
+ 		iov_len += conn->vals->create_posix_size;
+ 		if (next_ptr)
+ 			*next_ptr = cpu_to_le32(next_off);
++		next_ptr = &posix_ccontext->Next;
++		next_off = conn->vals->create_posix_size;
++	}
++
++	if (conn->is_aapl &&
++	    test_share_config_flag(tcon->share_conf,
++				   KSMBD_SHARE_FLAG_TIME_MACHINE)) {
++		struct create_context *aapl_req_ctx;
++		const struct aapl_server_query_req *aapl_query;
++		__u64 req_bitmap;
++
++		/* Send AAPL create context response; see smb2pdu.h for capability rationale. */
++
++		aapl_req_ctx = smb2_find_context_vals(req, SMB2_CREATE_AAPL, 4);
++		if (IS_ERR_OR_NULL(aapl_req_ctx))
++			goto aapl_done;
++		if (le32_to_cpu(aapl_req_ctx->DataLength) <
++		    sizeof(struct aapl_server_query_req))
++			goto aapl_done;
++
++		aapl_query = (const struct aapl_server_query_req *)
++				((u8 *)aapl_req_ctx +
++				 le16_to_cpu(aapl_req_ctx->DataOffset));
++
++		req_bitmap = le64_to_cpu(aapl_query->req_bitmap);
++
++		if (le64_to_cpu(aapl_query->client_caps) & AAPL_CAPS_READDIR_ATTR)
++			conn->aapl_readdir_attr = true;
++
++		contxt_cnt++;
++		create_aapl_rsp_buf(rsp->Buffer +
++				le32_to_cpu(rsp->CreateContextsLength),
++				AAPL_VOLCAPS_FULL_SYNC,
++				req_bitmap);
++		le32_add_cpu(&rsp->CreateContextsLength,
++			     conn->vals->create_aapl_size);
++		iov_len += conn->vals->create_aapl_size;
++		if (next_ptr)
++			*next_ptr = cpu_to_le32(next_off);
++		/* AAPL is last; next_ptr need not be updated */
++aapl_done:;
+ 	}
+ 
+ 	if (contxt_cnt > 0) {
+@@ -3731,17 +3901,40 @@
+ 
+ 		fibdinfo = (struct file_id_both_directory_info *)kstat;
+ 		fibdinfo->FileNameLength = cpu_to_le32(conv_len);
+-		fibdinfo->EaSize =
+-			smb2_get_reparse_tag_special_file(ksmbd_kstat->kstat->mode);
+-		if (fibdinfo->EaSize)
+-			fibdinfo->ExtFileAttributes = FILE_ATTRIBUTE_REPARSE_POINT_LE;
+ 		if (conn->is_aapl)
+ 			fibdinfo->UniqueId = 0;
+ 		else
+ 			fibdinfo->UniqueId = cpu_to_le64(ksmbd_kstat->kstat->ino);
+ 		fibdinfo->ShortNameLength = 0;
+ 		fibdinfo->Reserved = 0;
+-		fibdinfo->Reserved2 = cpu_to_le16(0);
++		if (conn->aapl_readdir_attr) {
++			/*
++			 * READDIR_ATTR wire format, reverse-engineered from
++			 * macOS smbfs.kext network behavior:
++			 *   EaSize           = max_access (FILE_GENERIC_ALL, simplified)
++			 *   ShortName[0..7]  = resource fork size (uint64 LE, 0 = no rfork)
++			 *   ShortName[8..23] = compressed FinderInfo (type+creator+flags+
++			 *                      ext_flags+date_added, 16 bytes LE; all
++			 *                      zeros means type=0/creator=0, i.e. use
++			 *                      the file extension for icon lookup)
++			 *   Reserved2        = Unix mode bits (uint16 LE)
++			 * Reparse-point tag is indicated via ExtFileAttributes, not EaSize.
++			 */
++			__le32 reparse_tag =
++				smb2_get_reparse_tag_special_file(ksmbd_kstat->kstat->mode);
++
++			if (reparse_tag)
++				fibdinfo->ExtFileAttributes = FILE_ATTRIBUTE_REPARSE_POINT_LE;
++			fibdinfo->EaSize = cpu_to_le32(FILE_GENERIC_ALL);
++			memset(fibdinfo->ShortName, 0, sizeof(fibdinfo->ShortName));
++			fibdinfo->Reserved2 = cpu_to_le16(ksmbd_kstat->kstat->mode & 0xffff);
++		} else {
++			fibdinfo->EaSize =
++				smb2_get_reparse_tag_special_file(ksmbd_kstat->kstat->mode);
++			if (fibdinfo->EaSize)
++				fibdinfo->ExtFileAttributes = FILE_ATTRIBUTE_REPARSE_POINT_LE;
++			fibdinfo->Reserved2 = cpu_to_le16(0);
++		}
+ 		if (d_info->hide_dot_file && d_info->name[0] == '.')
+ 			fibdinfo->ExtFileAttributes |= FILE_ATTRIBUTE_HIDDEN_LE;
+ 		memcpy(fibdinfo->FileName, conv_name, conv_len);
+@@ -4602,8 +4795,15 @@
+ 	sinfo = (struct smb2_file_standard_info *)rsp->Buffer;
+ 	delete_pending = ksmbd_inode_pending_delete(fp);
+ 
+-	sinfo->AllocationSize = cpu_to_le64(stat.blocks << 9);
+-	sinfo->EndOfFile = S_ISDIR(stat.mode) ? 0 : cpu_to_le64(stat.size);
++	if (ksmbd_stream_fd(fp)) {
++		loff_t seof = ksmbd_stream_eof(fp);
++
++		sinfo->AllocationSize = cpu_to_le64((u64)seof);
++		sinfo->EndOfFile = cpu_to_le64((u64)seof);
++	} else {
++		sinfo->AllocationSize = cpu_to_le64(stat.blocks << 9);
++		sinfo->EndOfFile = S_ISDIR(stat.mode) ? 0 : cpu_to_le64(stat.size);
++	}
+ 	sinfo->NumberOfLinks = cpu_to_le32(get_nlink(&stat) - delete_pending);
+ 	sinfo->DeletePending = delete_pending;
+ 	sinfo->Directory = S_ISDIR(stat.mode) ? 1 : 0;
+@@ -4668,9 +4868,15 @@
+ 	file_info->ChangeTime = cpu_to_le64(time);
+ 	file_info->Attributes = fp->f_ci->m_fattr;
+ 	file_info->Pad1 = 0;
+-	file_info->AllocationSize =
+-		cpu_to_le64(stat.blocks << 9);
+-	file_info->EndOfFile = S_ISDIR(stat.mode) ? 0 : cpu_to_le64(stat.size);
++	if (ksmbd_stream_fd(fp)) {
++		loff_t seof = ksmbd_stream_eof(fp);
++
++		file_info->AllocationSize = cpu_to_le64((u64)seof);
++		file_info->EndOfFile = cpu_to_le64((u64)seof);
++	} else {
++		file_info->AllocationSize = cpu_to_le64(stat.blocks << 9);
++		file_info->EndOfFile = S_ISDIR(stat.mode) ? 0 : cpu_to_le64(stat.size);
++	}
+ 	file_info->NumberOfLinks =
+ 			cpu_to_le32(get_nlink(&stat) - delete_pending);
+ 	file_info->DeletePending = delete_pending;
+@@ -4787,8 +4993,19 @@
+ 		streamlen *= 2;
+ 		kfree(stream_buf);
+ 		file_info->StreamNameLength = cpu_to_le32(streamlen);
+-		file_info->StreamSize = cpu_to_le64(stream_name_len);
+-		file_info->StreamAllocationSize = cpu_to_le64(stream_name_len);
++		/*
++		 * Report actual xattr data size, not the name length.
++		 * macOS uses StreamSize to size its FSCTL_SRV_COPYCHUNK
++		 * request; a wrong value causes a size mismatch (-36).
++		 */
++		{
++			ssize_t data_len = ksmbd_vfs_xattr_len(mnt_idmap(path->mnt),
++							       path->dentry, stream_name);
++			if (data_len < 0)
++				data_len = 0;
++			file_info->StreamSize = cpu_to_le64(data_len);
++			file_info->StreamAllocationSize = cpu_to_le64(data_len);
++		}
+ 
+ 		nbytes += next;
+ 		buf_free_len -= next;
+@@ -4867,8 +5084,15 @@
+ 	time = ksmbd_UnixTimeToNT(stat.ctime);
+ 	file_info->ChangeTime = cpu_to_le64(time);
+ 	file_info->Attributes = fp->f_ci->m_fattr;
+-	file_info->AllocationSize = cpu_to_le64(stat.blocks << 9);
+-	file_info->EndOfFile = S_ISDIR(stat.mode) ? 0 : cpu_to_le64(stat.size);
++	if (ksmbd_stream_fd(fp)) {
++		loff_t seof = ksmbd_stream_eof(fp);
++
++		file_info->AllocationSize = cpu_to_le64((u64)seof);
++		file_info->EndOfFile = cpu_to_le64((u64)seof);
++	} else {
++		file_info->AllocationSize = cpu_to_le64(stat.blocks << 9);
++		file_info->EndOfFile = S_ISDIR(stat.mode) ? 0 : cpu_to_le64(stat.size);
++	}
+ 	file_info->Reserved = cpu_to_le32(0);
+ 	rsp->OutputBufferLength =
+ 		cpu_to_le32(sizeof(struct smb2_file_ntwrk_info));
+@@ -4980,8 +5204,15 @@
+ 	file_info->ChangeTime = cpu_to_le64(time);
+ 	file_info->DosAttributes = fp->f_ci->m_fattr;
+ 	file_info->Inode = cpu_to_le64(stat.ino);
+-	file_info->EndOfFile = cpu_to_le64(stat.size);
+-	file_info->AllocationSize = cpu_to_le64(stat.blocks << 9);
++	if (ksmbd_stream_fd(fp)) {
++		loff_t seof = ksmbd_stream_eof(fp);
++
++		file_info->EndOfFile = cpu_to_le64((u64)seof);
++		file_info->AllocationSize = cpu_to_le64((u64)seof);
++	} else {
++		file_info->EndOfFile = cpu_to_le64(stat.size);
++		file_info->AllocationSize = cpu_to_le64(stat.blocks << 9);
++	}
+ 	file_info->HardLinks = cpu_to_le32(stat.nlink);
+ 	file_info->Mode = cpu_to_le32(stat.mode & 0777);
+ 	switch (stat.mode & S_IFMT) {
+@@ -5619,9 +5850,16 @@
+ 		}
+ 
+ 		rsp->Flags = SMB2_CLOSE_FLAG_POSTQUERY_ATTRIB;
+-		rsp->AllocationSize = S_ISDIR(stat.mode) ? 0 :
+-			cpu_to_le64(stat.blocks << 9);
+-		rsp->EndOfFile = cpu_to_le64(stat.size);
++		if (ksmbd_stream_fd(fp)) {
++			loff_t seof = ksmbd_stream_eof(fp);
++
++			rsp->AllocationSize = cpu_to_le64((u64)seof);
++			rsp->EndOfFile = cpu_to_le64((u64)seof);
++		} else {
++			rsp->AllocationSize = S_ISDIR(stat.mode) ? 0 :
++				cpu_to_le64(stat.blocks << 9);
++			rsp->EndOfFile = cpu_to_le64(stat.size);
++		}
+ 		rsp->Attributes = fp->f_ci->m_fattr;
+ 		rsp->CreationTime = cpu_to_le64(fp->create_time);
+ 		time = ksmbd_UnixTimeToNT(stat.atime);
+@@ -6017,9 +6255,9 @@
+ 		if (S_ISDIR(inode->i_mode) &&
+ 		    ksmbd_vfs_empty_dir(fp) == -ENOTEMPTY)
+ 			return -EBUSY;
+-		ksmbd_set_inode_pending_delete(fp);
++		ksmbd_fd_set_delete_pending(fp);
+ 	} else {
+-		ksmbd_clear_inode_pending_delete(fp);
++		ksmbd_fd_clear_delete_pending(fp);
+ 	}
+ 	return 0;
+ }
+@@ -6270,7 +6508,7 @@
+ 	else if (rc == -ESHARE)
+ 		rsp->hdr.Status = STATUS_SHARING_VIOLATION;
+ 	else if (rc == -ENOENT)
+-		rsp->hdr.Status = STATUS_OBJECT_NAME_INVALID;
++		rsp->hdr.Status = STATUS_OBJECT_NAME_NOT_FOUND;
+ 	else if (rc == -EBUSY || rc == -ENOTEMPTY)
+ 		rsp->hdr.Status = STATUS_DIRECTORY_NOT_EMPTY;
+ 	else if (rc == -EAGAIN)
+@@ -7407,8 +7645,50 @@
+ 
+ 	chunks = (struct srv_copychunk *)&ci_req->Chunks[0];
+ 	chunk_count = le32_to_cpu(ci_req->ChunkCount);
+-	if (chunk_count == 0)
++	if (chunk_count == 0) {
++		/*
++		 * AAPL copyfile extension: ChunkCount=0 means copy the entire
++		 * source file to the destination atomically.  macOS uses this
++		 * when AAPL COPYFILE server capability is advertised.  Look up
++		 * the file handles, copy all bytes via vfs_copy_file_range, and
++		 * report TotalBytesWritten.  This is not the standard SMB2
++		 * "query limits" response (which also has ChunkCount=0 but is
++		 * handled before src/dst lookup).
++		 */
++		src_fp = ksmbd_lookup_foreign_fd(work,
++						 le64_to_cpu(ci_req->ResumeKey[0]));
++		dst_fp = ksmbd_lookup_fd_slow(work, volatile_id, persistent_id);
++		ret = -EINVAL;
++		if (!src_fp ||
++		    src_fp->persistent_id != le64_to_cpu(ci_req->ResumeKey[1])) {
++			rsp->hdr.Status = STATUS_OBJECT_NAME_NOT_FOUND;
++			goto out;
++		}
++		if (!dst_fp) {
++			rsp->hdr.Status = STATUS_FILE_CLOSED;
++			goto out;
++		}
++		{
++			loff_t src_size = i_size_read(file_inode(src_fp->filp));
++			loff_t copied = 0;
++
++			if (src_size > 0) {
++				copied = vfs_copy_file_range(src_fp->filp, 0,
++							     dst_fp->filp, 0,
++							     src_size, 0);
++				if (copied < 0) {
++					ret = copied;
++					rsp->hdr.Status = STATUS_UNEXPECTED_IO_ERROR;
++					goto out;
++				}
++			}
++			ci_rsp->ChunksWritten = 0;
++			ci_rsp->ChunkBytesWritten = 0;
++			ci_rsp->TotalBytesWritten = cpu_to_le32((u32)copied);
++		}
++		ret = 0;
+ 		goto out;
++	}
+ 	total_size_written = 0;
+ 
+ 	/* verify the SRV_COPYCHUNK_COPY packet */
+@@ -7469,6 +7749,8 @@
+ 			rsp->hdr.Status = STATUS_FILE_LOCK_CONFLICT;
+ 		else if (ret == -EBADF)
+ 			rsp->hdr.Status = STATUS_INVALID_HANDLE;
++		else if (ret == -EOPNOTSUPP)
++			rsp->hdr.Status = STATUS_NOT_SUPPORTED;
+ 		else if (ret == -EFBIG || ret == -ENOSPC)
+ 			rsp->hdr.Status = STATUS_DISK_FULL;
+ 		else if (ret == -EINVAL)
+@@ -7752,10 +8034,13 @@
+ 	idmap = file_mnt_idmap(fp->filp);
+ 
+ 	old_fattr = fp->f_ci->m_fattr;
+-	if (sparse->SetSparse)
+-		fp->f_ci->m_fattr |= FILE_ATTRIBUTE_SPARSE_FILE_LE;
+-	else
++	if (sparse->SetSparse) {
++		if (server_conf.share_fake_fscaps & FILE_SUPPORTS_SPARSE_FILES)
++			fp->f_ci->m_fattr |= FILE_ATTRIBUTE_SPARSE_FILE_LE;
++		/* silently ignore SetSparse when sparse files are disabled */
++	} else {
+ 		fp->f_ci->m_fattr &= ~FILE_ATTRIBUTE_SPARSE_FILE_LE;
++	}
+ 
+ 	if (fp->f_ci->m_fattr != old_fattr &&
+ 	    test_share_config_flag(work->tcon->share_conf,
+@@ -7934,7 +8219,7 @@
+ 			goto out;
+ 		}
+ 
+-		if (in_buf_len < sizeof(struct copychunk_ioctl_req)) {
++		if (in_buf_len < offsetof(struct copychunk_ioctl_req, Chunks)) {
+ 			ret = -EINVAL;
+ 			goto out;
+ 		}
+@@ -8461,6 +8746,9 @@
+ {
+ 	struct smb2_change_notify_req *req;
+ 	struct smb2_change_notify_rsp *rsp;
++	struct ksmbd_work *in_work;
++	struct smb2_hdr *in_hdr;
++	struct ksmbd_file *fp;
+ 
+ 	WORK_BUFFERS(work, req, rsp);
+ 
+@@ -8470,8 +8758,108 @@
+ 		return 0;
+ 	}
+ 
+-	smb2_set_err_rsp(work);
+-	rsp->hdr.Status = STATUS_NOT_IMPLEMENTED;
++	/*
++	 * macOS backupd sends CHANGE_NOTIFY with FileId=FFFF...FFFF (share-root
++	 * sentinel) to watch for changes on the share root without holding an
++	 * open handle. Respond STATUS_PENDING + STATUS_NOTIFY_CLEANUP immediately;
++	 * without this, backupd aborts Time Machine setup on STATUS_FILE_CLOSED.
++	 */
++	if (req->VolatileFileId == SMB2_NO_FID &&
++	    req->PersistentFileId == SMB2_NO_FID) {
++		in_work = ksmbd_alloc_work_struct();
++		if (!in_work || allocate_interim_rsp_buf(in_work)) {
++			if (in_work)
++				ksmbd_free_work_struct(in_work);
++			rsp->hdr.Status = STATUS_INSUFFICIENT_RESOURCES;
++			smb2_set_err_rsp(work);
++			return 0;
++		}
++		if (setup_async_work(work, NULL, NULL)) {
++			ksmbd_free_work_struct(in_work);
++			rsp->hdr.Status = STATUS_INSUFFICIENT_RESOURCES;
++			smb2_set_err_rsp(work);
++			return 0;
++		}
++		smb2_send_interim_resp(work, STATUS_PENDING);
++		in_work->conn = work->conn;
++		in_hdr = smb2_get_msg(in_work->response_buf);
++		memcpy(in_hdr, ksmbd_resp_buf_next(work),
++		       __SMB2_HEADER_STRUCTURE_SIZE);
++		in_hdr->Flags |= SMB2_FLAGS_ASYNC_COMMAND;
++		in_hdr->Id.AsyncId = cpu_to_le64(work->async_id);
++		smb2_set_err_rsp(in_work);
++		in_hdr->Status = STATUS_NOTIFY_CLEANUP;
++		in_work->async_id = work->async_id;
++		work->async_id = 0;
++		release_async_work(work);
++		ksmbd_conn_write(in_work);
++		ksmbd_free_work_struct(in_work);
++		work->send_no_response = 1;
++		return 0;
++	}
++
++	/*
++	 * KSMBD does not implement a real change-notification backend.
++	 * Genuine SMB2 servers (and macOS smbfs) never complete a
++	 * CHANGE_NOTIFY spontaneously: it is satisfied only by a real
++	 * directory change, or with STATUS_NOTIFY_CLEANUP when the watched
++	 * handle is closed. Completing it early (e.g. on a timer) makes
++	 * Finder treat the cleanup as "directory changed" and
++	 * re-enumerate the directory forever, leaving items unopenable.
++	 * Returning STATUS_NOT_IMPLEMENTED here (like stock ksmbd) makes
++	 * macOS smbfs hard-freeze on unmount, so this must stay deferred.
++	 */
++	fp = ksmbd_lookup_fd_slow(work, req->VolatileFileId, req->PersistentFileId);
++	if (!fp) {
++		rsp->hdr.Status = STATUS_FILE_CLOSED;
++		smb2_set_err_rsp(work);
++		return 0;
++	}
++
++	in_work = ksmbd_alloc_work_struct();
++	if (!in_work || allocate_interim_rsp_buf(in_work)) {
++		if (in_work)
++			ksmbd_free_work_struct(in_work);
++		ksmbd_fd_put(work, fp);
++		rsp->hdr.Status = STATUS_INSUFFICIENT_RESOURCES;
++		smb2_set_err_rsp(work);
++		return 0;
++	}
++
++	if (setup_async_work(work, NULL, NULL)) {
++		ksmbd_free_work_struct(in_work);
++		ksmbd_fd_put(work, fp);
++		rsp->hdr.Status = STATUS_INSUFFICIENT_RESOURCES;
++		smb2_set_err_rsp(work);
++		return 0;
++	}
++
++	smb2_send_interim_resp(work, STATUS_PENDING);
++
++	in_work->conn = work->conn;
++	in_hdr = smb2_get_msg(in_work->response_buf);
++	memcpy(in_hdr, ksmbd_resp_buf_next(work), __SMB2_HEADER_STRUCTURE_SIZE);
++	in_hdr->Flags |= SMB2_FLAGS_ASYNC_COMMAND;
++	in_hdr->Id.AsyncId = cpu_to_le64(work->async_id);
++	smb2_set_err_rsp(in_work);
++	in_hdr->Status = STATUS_NOTIFY_CLEANUP;
++
++	/*
++	 * Transfer ownership of the async id to in_work; it stays
++	 * reserved until in_work is freed after the deferred response is
++	 * sent on close, so it can't be reused for an unrelated async
++	 * command while this CHANGE_NOTIFY is still outstanding.
++	 */
++	in_work->async_id = work->async_id;
++	work->async_id = 0;
++	release_async_work(work);
++
++	spin_lock(&fp->f_lock);
++	list_add_tail(&in_work->fp_entry, &fp->notify_pendings);
++	spin_unlock(&fp->f_lock);
++
++	ksmbd_fd_put(work, fp);
++	work->send_no_response = 1;
+ 	return 0;
+ }
+ 
+diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c' '--exclude=*.o' '--exclude=*.cmd' '--exclude=modules.order' '--exclude=Module.symvers' '--exclude=*.asn1.c' '--exclude=*.asn1.h' '--exclude=transport_rdma.c' linux-source-6.8.0/fs/smb/server.orig/smb2pdu.h linux-source-6.8.0/fs/smb/server/smb2pdu.h
+--- linux-source-6.8.0/fs/smb/server.orig/smb2pdu.h	2026-05-28 10:33:26.987473882 +0000
++++ linux-source-6.8.0/fs/smb/server/smb2pdu.h	2026-07-02 22:46:31.738242129 +0000
+@@ -66,6 +66,74 @@
+ /* Apple Defined Contexts */
+ #define SMB2_CREATE_AAPL		"AAPL"
+ 
++/*
++ * Apple AAPL SMB2 extension -- kAAPL_SERVER_QUERY create context.
++ *
++ * Omitting the model string when reply_bitmap includes AAPL_BITMAP_MODEL_INFO
++ * causes smbfs.kext to enter a broken disconnect path requiring a reboot.
++ *
++ * Layout: ccontext(16) + Name[4] + Pad[4] + cmd(4) + reserved(4) +
++ *         reply_bitmap(8) + server_caps(8) + vol_caps(8)
++ * When MODEL_INFO requested, appended: pad2(4) + model_bytes(4) + UTF-16LE
++ */
++#define AAPL_CTX_NAME_OFF	16	/* sizeof(struct create_context) */
++#define AAPL_CTX_DATA_OFF	24	/* ALIGN(16 + 4, 8) */
++#define SMB2_CREATE_AAPL_LEN	4
++
++#define AAPL_SERVER_QUERY	1
++
++#define AAPL_BITMAP_SERVER_CAPS	0x01ULL
++#define AAPL_BITMAP_VOL_CAPS	0x02ULL
++#define AAPL_BITMAP_MODEL_INFO	0x04ULL
++
++/* Server capability flags (server_caps field) */
++#define AAPL_CAPS_READDIR_ATTR	0x01ULL  /* inline FinderInfo per FIND entry */
++#define AAPL_CAPS_COPYFILE	0x02ULL  /* FSCTL_SRV_COPYCHUNK for Cmd+D */
++#define AAPL_CAPS_UNIX_BASED	0x04ULL  /* server is Unix-based */
++
++/*
++ * UNIX_BASED: prevents macOS Windows-compat mode (question-mark icons).
++ * COPYFILE: enables server-side file copy via FSCTL_SRV_COPYCHUNK.
++ * READDIR_ATTR: inline FinderInfo per FIND entry, set when client also
++ *   advertises the bit; format: EaSize=max_access, ShortName[0..7]=rfork_size,
++ *   ShortName[8..23]=FinderInfo(16B), Reserved2=unix_mode.
++ */
++#define AAPL_SERVER_CAPS_KSMBD	(AAPL_CAPS_UNIX_BASED | AAPL_CAPS_COPYFILE | \
++				 AAPL_CAPS_READDIR_ATTR)
++
++/* Volume capability flags (vol_caps field) */
++#define AAPL_VOLCAPS_FULL_SYNC	0x04ULL  /* SMB2 FLUSH maps to F_FULLFSYNC */
++
++/* Model string: up to 31 ASCII chars */
++#define AAPL_MODEL_MAX_CHARS	31
++#define AAPL_MODEL_UTF16_BYTES	(AAPL_MODEL_MAX_CHARS * 2)
++
++/*
++ * Max AAPL response: header(24) + base data(32) + pad2(4) + model_bytes(4)
++ * + model(62), 8-byte aligned: ALIGN(126, 8) = 128 bytes.
++ */
++#define AAPL_RSP_MAX_SIZE	128
++
++struct create_aapl_rsp {
++	struct create_context ccontext;
++	__u8   Name[4];
++	__u8   Pad[4];
++	__le32 cmd;
++	__le32 reserved;
++	__le64 reply_bitmap;
++	__le64 server_caps;
++	__le64 vol_caps;
++	/* when AAPL_BITMAP_MODEL_INFO: __le32 pad2; __le32 model_bytes; __le16 model[] */
++} __packed;
++
++/* AAPL server query request (client->server) */
++struct aapl_server_query_req {
++	__le32 cmd;
++	__le32 reserved;
++	__le64 req_bitmap;
++	__le64 client_caps;
++} __packed;
++
+ struct create_durable_req_v2 {
+ 	struct create_context ccontext;
+ 	__u8   Name[8];
+diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c' '--exclude=*.o' '--exclude=*.cmd' '--exclude=modules.order' '--exclude=Module.symvers' '--exclude=*.asn1.c' '--exclude=*.asn1.h' '--exclude=transport_rdma.c' linux-source-6.8.0/fs/smb/server.orig/smb_common.h linux-source-6.8.0/fs/smb/server/smb_common.h
+--- linux-source-6.8.0/fs/smb/server.orig/smb_common.h	2026-05-28 10:33:26.994473956 +0000
++++ linux-source-6.8.0/fs/smb/server/smb_common.h	2026-05-28 10:39:49.291533727 +0000
+@@ -370,6 +370,7 @@
+ 	size_t		create_mxac_size;
+ 	size_t		create_disk_id_size;
+ 	size_t		create_posix_size;
++	size_t		create_aapl_size;
+ };
+ 
+ struct filesystem_posix_info {
+diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c' '--exclude=*.o' '--exclude=*.cmd' '--exclude=modules.order' '--exclude=Module.symvers' '--exclude=*.asn1.c' '--exclude=*.asn1.h' '--exclude=transport_rdma.c' linux-source-6.8.0/fs/smb/server.orig/transport_ipc.c linux-source-6.8.0/fs/smb/server/transport_ipc.c
+--- linux-source-6.8.0/fs/smb/server.orig/transport_ipc.c	2026-05-28 10:33:26.994473956 +0000
++++ linux-source-6.8.0/fs/smb/server/transport_ipc.c	2026-07-02 22:45:13.903458266 +0000
+@@ -334,6 +334,14 @@
+ 	ret |= ksmbd_set_server_string(req->server_string);
+ 	ret |= ksmbd_set_work_group(req->work_group);
+ 	server_conf.bind_interfaces_only = req->bind_interfaces_only;
++
++	/* AAPL model string for Finder icon */
++	if (req->aapl_model[0])
++		strscpy(server_conf.aapl_model, req->aapl_model,
++			sizeof(server_conf.aapl_model));
++	else
++		strscpy(server_conf.aapl_model, "Xserve",
++			sizeof(server_conf.aapl_model));
+ 	ret |= ksmbd_tcp_set_interfaces(KSMBD_STARTUP_CONFIG_INTERFACES(req),
+ 					req->ifc_list_sz);
+ out:
+diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c' '--exclude=*.o' '--exclude=*.cmd' '--exclude=modules.order' '--exclude=Module.symvers' '--exclude=*.asn1.c' '--exclude=*.asn1.h' '--exclude=transport_rdma.c' linux-source-6.8.0/fs/smb/server.orig/vfs.c linux-source-6.8.0/fs/smb/server/vfs.c
+--- linux-source-6.8.0/fs/smb/server.orig/vfs.c	2026-05-28 10:33:26.998473999 +0000
++++ linux-source-6.8.0/fs/smb/server/vfs.c	2026-07-02 23:21:13.871139118 +0000
+@@ -381,6 +381,10 @@
+ 	ssize_t nbytes = 0;
+ 	struct inode *inode = file_inode(filp);
+ 
++	/* Stream (xattr) reads work on directories too; check before S_ISDIR */
++	if (ksmbd_stream_fd(fp))
++		return ksmbd_vfs_stream_read(fp, rbuf, pos, count);
++
+ 	if (S_ISDIR(inode->i_mode))
+ 		return -EISDIR;
+ 
+@@ -394,9 +398,6 @@
+ 		}
+ 	}
+ 
+-	if (ksmbd_stream_fd(fp))
+-		return ksmbd_vfs_stream_read(fp, rbuf, pos, count);
+-
+ 	if (!work->tcon->posix_extensions) {
+ 		int ret;
+ 
+@@ -890,8 +891,8 @@
+ 	return size;
+ }
+ 
+-static ssize_t ksmbd_vfs_xattr_len(struct mnt_idmap *idmap,
+-				   struct dentry *dentry, char *xattr_name)
++ssize_t ksmbd_vfs_xattr_len(struct mnt_idmap *idmap,
++			    struct dentry *dentry, char *xattr_name)
+ {
+ 	return vfs_getxattr(idmap, dentry, xattr_name, NULL, 0);
+ }
+@@ -1817,8 +1818,51 @@
+ 		return -EACCES;
+ 	}
+ 
+-	if (ksmbd_stream_fd(src_fp) || ksmbd_stream_fd(dst_fp))
+-		return -EBADF;
++	if (ksmbd_stream_fd(src_fp) || ksmbd_stream_fd(dst_fp)) {
++		/*
++		 * ADS stream copychunk: copy xattr from src to dst directly.
++		 * vfs_copy_file_range doesn't work on xattr-backed streams.
++		 */
++		char *buf = NULL;
++		ssize_t buf_len;
++		int sret;
++
++		if (!ksmbd_stream_fd(src_fp) || !ksmbd_stream_fd(dst_fp))
++			return -EINVAL;
++
++		buf_len = ksmbd_vfs_getxattr(file_mnt_idmap(src_fp->filp),
++					     file_dentry(src_fp->filp),
++					     src_fp->stream.name, &buf);
++		if (buf_len < 0)
++			return buf_len;
++
++		if (buf_len > 0) {
++			/*
++			 * vfs_setxattr(NULL, 0) removes the xattr on Linux, so
++			 * skip it for empty streams: the Open already created
++			 * the empty xattr via smb2_set_stream_name_xattr.
++			 */
++			sret = ksmbd_vfs_setxattr(file_mnt_idmap(dst_fp->filp),
++						  &dst_fp->filp->f_path,
++						  dst_fp->stream.name,
++						  buf, buf_len, 0, false);
++			kfree(buf);
++			if (sret < 0)
++				return sret;
++		}
++
++		/*
++		 * macOS reuses the main file's chunk list for stream copies,
++		 * so req_total equals the file size, not the stream size.
++		 * Echo back TotalBytesWritten = sum(chunks) so macOS doesn't
++		 * treat the size mismatch as an error.
++		 */
++		*chunk_count_written = chunk_count;
++		*total_size_written = 0;
++		for (i = 0; i < chunk_count; i++)
++			*total_size_written += le32_to_cpu(chunks[i].Length);
++		return 0;
++	}
+ 
+ 	smb_break_all_levII_oplock(work, dst_fp, 1);
+ 
+diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c' '--exclude=*.o' '--exclude=*.cmd' '--exclude=modules.order' '--exclude=Module.symvers' '--exclude=*.asn1.c' '--exclude=*.asn1.h' '--exclude=transport_rdma.c' linux-source-6.8.0/fs/smb/server.orig/vfs.h linux-source-6.8.0/fs/smb/server/vfs.h
+--- linux-source-6.8.0/fs/smb/server.orig/vfs.h	2026-05-28 10:33:26.993473946 +0000
++++ linux-source-6.8.0/fs/smb/server/vfs.h	2026-07-02 22:47:23.865768585 +0000
+@@ -101,6 +101,8 @@
+ 			       unsigned int *chunk_size_written,
+ 			       loff_t  *total_size_written);
+ ssize_t ksmbd_vfs_listxattr(struct dentry *dentry, char **list);
++ssize_t ksmbd_vfs_xattr_len(struct mnt_idmap *idmap,
++			    struct dentry *dentry, char *xattr_name);
+ ssize_t ksmbd_vfs_getxattr(struct mnt_idmap *idmap,
+ 			   struct dentry *dentry,
+ 			   char *xattr_name,
+diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c' '--exclude=*.o' '--exclude=*.cmd' '--exclude=modules.order' '--exclude=Module.symvers' '--exclude=*.asn1.c' '--exclude=*.asn1.h' '--exclude=transport_rdma.c' linux-source-6.8.0/fs/smb/server.orig/vfs_cache.c linux-source-6.8.0/fs/smb/server/vfs_cache.c
+--- linux-source-6.8.0/fs/smb/server.orig/vfs_cache.c	2026-05-28 10:33:26.993473946 +0000
++++ linux-source-6.8.0/fs/smb/server/vfs_cache.c	2026-07-02 22:42:39.881916596 +0000
+@@ -150,6 +150,32 @@
+ 	up_write(&ci->m_lock);
+ }
+ 
++void ksmbd_fd_set_delete_pending(struct ksmbd_file *fp)
++{
++	struct ksmbd_inode *ci = fp->f_ci;
++
++	if (ksmbd_stream_fd(fp)) {
++		down_write(&ci->m_lock);
++		ci->m_flags |= S_DEL_ON_CLS_STREAM;
++		up_write(&ci->m_lock);
++	} else {
++		ksmbd_set_inode_pending_delete(fp);
++	}
++}
++
++void ksmbd_fd_clear_delete_pending(struct ksmbd_file *fp)
++{
++	struct ksmbd_inode *ci = fp->f_ci;
++
++	if (ksmbd_stream_fd(fp)) {
++		down_write(&ci->m_lock);
++		ci->m_flags &= ~S_DEL_ON_CLS_STREAM;
++		up_write(&ci->m_lock);
++	} else {
++		ksmbd_clear_inode_pending_delete(fp);
++	}
++}
++
+ void ksmbd_fd_set_delete_on_close(struct ksmbd_file *fp,
+ 				  int file_info)
+ {
+@@ -339,6 +365,7 @@
+ {
+ 	struct file *filp;
+ 	struct ksmbd_lock *smb_lock, *tmp_lock;
++	struct ksmbd_work *cn_work, *cn_tmp;
+ 
+ 	fd_limit_close();
+ 	__ksmbd_remove_durable_fd(fp);
+@@ -364,6 +391,19 @@
+ 		kfree(smb_lock);
+ 	}
+ 
++	/*
++	 * Complete any CHANGE_NOTIFY left pending on this handle now that
++	 * it is closed. KSMBD never completes CHANGE_NOTIFY spontaneously
++	 * (no real change-notification backend), only on close - matching
++	 * genuine SMB2/macOS smbfs semantics and avoiding the Finder
++	 * "directory changed, re-enumerate everything" loop.
++	 */
++	list_for_each_entry_safe(cn_work, cn_tmp, &fp->notify_pendings, fp_entry) {
++		list_del_init(&cn_work->fp_entry);
++		ksmbd_conn_write(cn_work);
++		ksmbd_free_work_struct(cn_work);
++	}
++
+ 	if (ksmbd_stream_fd(fp))
+ 		kfree(fp->stream.name);
+ 	kmem_cache_free(filp_cache, fp);
+@@ -611,6 +651,7 @@
+ 	INIT_LIST_HEAD(&fp->blocked_works);
+ 	INIT_LIST_HEAD(&fp->node);
+ 	INIT_LIST_HEAD(&fp->lock_list);
++	INIT_LIST_HEAD(&fp->notify_pendings);
+ 	spin_lock_init(&fp->f_lock);
+ 	atomic_set(&fp->refcount, 1);
+ 
+diff -ru --no-dereference '--exclude=*.ko' '--exclude=*.mod' '--exclude=*.mod.c' '--exclude=*.o' '--exclude=*.cmd' '--exclude=modules.order' '--exclude=Module.symvers' '--exclude=*.asn1.c' '--exclude=*.asn1.h' '--exclude=transport_rdma.c' linux-source-6.8.0/fs/smb/server.orig/vfs_cache.h linux-source-6.8.0/fs/smb/server/vfs_cache.h
+--- linux-source-6.8.0/fs/smb/server.orig/vfs_cache.h	2026-05-28 10:33:26.998473999 +0000
++++ linux-source-6.8.0/fs/smb/server/vfs_cache.h	2026-07-02 22:42:53.219049521 +0000
+@@ -101,6 +101,12 @@
+ 
+ 	int				durable_timeout;
+ 
++	/*
++	 * Pending CHANGE_NOTIFY completions for this handle, sent with
++	 * STATUS_NOTIFY_CLEANUP when the handle is closed.
++	 */
++	struct list_head		notify_pendings;
++
+ 	/* if ls is happening on directory, below is valid*/
+ 	struct ksmbd_readdir_data	readdir_data;
+ 	int				dot_dotdot[2];
+@@ -171,6 +177,8 @@
+ bool ksmbd_inode_pending_delete(struct ksmbd_file *fp);
+ void ksmbd_set_inode_pending_delete(struct ksmbd_file *fp);
+ void ksmbd_clear_inode_pending_delete(struct ksmbd_file *fp);
++void ksmbd_fd_set_delete_pending(struct ksmbd_file *fp);
++void ksmbd_fd_clear_delete_pending(struct ksmbd_file *fp);
+ void ksmbd_fd_set_delete_on_close(struct ksmbd_file *fp,
+ 				  int file_info);
+ int ksmbd_init_file_cache(void);

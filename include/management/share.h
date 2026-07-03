@@ -74,6 +74,8 @@ struct ksmbd_share {
 	GRWLock		maps_lock;
 
 	char		*comment;
+
+	unsigned long long	tm_max_size; /* Time Machine quota in bytes, 0 = unlimited */
 };
 
 /*
@@ -115,6 +117,8 @@ enum KSMBD_SHARE_CONF {
 	KSMBD_SHARE_CONF_VFS_OBJECTS,
 	KSMBD_SHARE_CONF_WRITABLE,
 	KSMBD_SHARE_CONF_CROSSMNT			= 30,
+	KSMBD_SHARE_CONF_TIME_MACHINE			= 31,
+	KSMBD_SHARE_CONF_TM_MAX_SIZE			= 32,
 	KSMBD_SHARE_CONF_MAX
 };
 
