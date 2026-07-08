@@ -260,7 +260,14 @@ enum KSMBD_TREE_CONN_STATUS {
 #define KSMBD_SHARE_FLAG_UPDATE			(1 << 14)
 #define KSMBD_SHARE_FLAG_CROSSMNT		(1 << 15)
 #define KSMBD_SHARE_FLAG_CONTINUOUS_AVAILABILITY	(1 << 16)
-#define KSMBD_SHARE_FLAG_TIME_MACHINE		(1 << 17)
+/*
+ * Reserved to match upstream (ksmbd-for-next-next); not implemented by
+ * this share.c/mountd, but the bit position must stay reserved so a
+ * future kernel with HIDE_UNREADABLE support doesn't collide with
+ * whatever bit this codebase assigns next.
+ */
+#define KSMBD_SHARE_FLAG_HIDE_UNREADABLE	(1 << 17)
+#define KSMBD_SHARE_FLAG_TIME_MACHINE		(1 << 18)
 
 /*
  * Tree connect request flags.
