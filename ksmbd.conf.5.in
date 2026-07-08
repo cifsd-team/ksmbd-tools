@@ -39,8 +39,14 @@ Global parameters, marked below with \fB(G)\fR, can only be given in the \fBglob
 Changes to global parameters apply only after restarting \fBksmbd.mountd\fR and \fBksmbd\fR.
 .\" .TP
 .\" \fBadmin users\fR (S)
-.\" 
+.\"
 .\" Default: \fBadmin users = \fR
+.TP
+\fBaapl model\fR (G)
+Model string sent in the SMB2 AAPL extension's server-capabilities response, used by macOS to choose a Finder icon for the server (e.g. \fBXserve\fR for a rack-server icon).
+Only relevant to shares with \fBtime machine = yes\fR.
+
+Default: \fBaapl model = Xserve\fR
 .TP
 \fBbind interfaces only\fR (G)
 Only bind to interfaces given with \fBinterfaces\fR.
@@ -346,6 +352,12 @@ Default: \fBstore dos attributes = yes\fR
 TCP port that is listened to.
 
 Default: \fBtcp port = 445\fR
+.TP
+\fBtime machine\fR (S)
+Advertise the share as an Apple Time Machine backup target via the SMB2 AAPL extension.
+macOS stores Apple metadata such as \fBcom.apple.FinderInfo\fR as named data streams, so the share also needs \fBvfs objects = streams_xattr\fR to work correctly; this option does not enable that on its own.
+
+Default: \fBtime machine = no\fR
 .TP
 \fBvalid users\fR (S)
 List of the users that are allowed to connect to the share.

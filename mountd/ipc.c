@@ -171,6 +171,17 @@ static int ipc_ksmbd_starting_up(void)
 			global_conf.server_string,
 			sizeof(ev->server_string) - 1);
 	}
+	if (global_conf.aapl_model) {
+		/*
+		 * Leave ev->aapl_model zeroed (its allocation is zero-filled)
+		 * when unset -- the kernel falls back to its own default
+		 * ("Xserve") for an empty string, so there's no need to
+		 * duplicate that default here too.
+		 */
+		strncpy(ev->aapl_model,
+			global_conf.aapl_model,
+			sizeof(ev->aapl_model) - 1);
+	}
 	if (global_conf.work_group) {
 		strncpy(ev->work_group,
 			global_conf.work_group,

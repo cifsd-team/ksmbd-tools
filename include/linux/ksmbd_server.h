@@ -53,7 +53,8 @@ struct ksmbd_startup_request {
 	__u32	max_connections;	/* Number of maximum simultaneous connections */
 	__s8	bind_interfaces_only;
 	__u32   max_ip_connections;	/* Number of maximum connection per ip address */
-	__s8	reserved[499];		/* Reserved room */
+	__s8	aapl_model[32];		/* AAPL model string for Finder icon, e.g. "Xserve" */
+	__s8	reserved[467];		/* Reserved room */
 	__u32	ifc_list_sz;
 	__s8	____payload[];
 } __attribute__((packed));
@@ -258,6 +259,15 @@ enum KSMBD_TREE_CONN_STATUS {
 #define KSMBD_SHARE_FLAG_ACL_XATTR		(1 << 13)
 #define KSMBD_SHARE_FLAG_UPDATE			(1 << 14)
 #define KSMBD_SHARE_FLAG_CROSSMNT		(1 << 15)
+#define KSMBD_SHARE_FLAG_CONTINUOUS_AVAILABILITY	(1 << 16)
+/*
+ * Reserved to match upstream (ksmbd-for-next-next); not implemented by
+ * this share.c/mountd, but the bit position must stay reserved so a
+ * future kernel with HIDE_UNREADABLE support doesn't collide with
+ * whatever bit this codebase assigns next.
+ */
+#define KSMBD_SHARE_FLAG_HIDE_UNREADABLE	(1 << 17)
+#define KSMBD_SHARE_FLAG_TIME_MACHINE		(1 << 18)
 
 /*
  * Tree connect request flags.
