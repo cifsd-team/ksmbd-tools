@@ -362,6 +362,7 @@ Default: \fBtcp port = 445\fR
 \fBtime machine\fR (S)
 Advertise the share as an Apple Time Machine backup target via the SMB2 AAPL extension.
 macOS stores Apple metadata such as \fBcom.apple.FinderInfo\fR as named data streams, so the share also needs \fBvfs objects = streams_xattr\fR to work correctly; this option does not enable that on its own.
+macOS also requires the global \fBdurable handles = yes\fR and \fBsmb2 leases = yes\fR to reconnect a Time Machine destination after a network interruption; without them, macOS refuses to configure the backup destination's reconnect settings.
 
 Default: \fBtime machine = no\fR
 .TP
