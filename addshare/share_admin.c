@@ -68,6 +68,7 @@ static const char *__defconf_fmt[KSMBD_SHARE_CONF_MAX] = {
 /*30*/	"; path lookup can cross mountpoints [%s]",
 	"; allow access-based directory enumeration [%s]",
 	"; advertise as apple time machine backup target [%s]",
+	"; allow administrator-created symlinks outside the share [%s]",
 };
 
 static char **__get_options(GHashTable *kv, int is_global)
@@ -332,6 +333,7 @@ static GList *new_conf_ml(GList *ml,
 	case KSMBD_SHARE_CONF_HIDE_DOT_FILES:
 	case KSMBD_SHARE_CONF_INHERIT_OWNER:
 	case KSMBD_SHARE_CONF_FOLLOW_SYMLINKS:
+	case KSMBD_SHARE_CONF_ALLOW_INSECURE_WIDE_LINKS:
 	case KSMBD_SHARE_CONF_WRITABLE:
 	case KSMBD_SHARE_CONF_CROSSMNT:
 	case KSMBD_SHARE_CONF_HIDE_UNREADABLE:

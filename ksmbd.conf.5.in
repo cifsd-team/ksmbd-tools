@@ -96,6 +96,15 @@ But this option does not allow to follow a symbolic link to /etc/passwd in their
 
 Default: \fBfollow symlinks = no\fR
 .TP
+\fBallow insecure wide links\fR (G)
+Allow administrator-created POSIX symbolic links to resolve outside the
+share path. This option is effective only when \fBfollow symlinks = yes\fR.
+Wide-link targets are opened read-only. Paths containing a client-supplied
+".." component are rejected by the wide-link fallback, and SMB reparse
+points are never followed by this option.
+
+Default: \fBallow insecure wide links = no\fR
+.TP
 \fBforce create mode\fR (S)
 Octal bitmask that gets bitwise ORed after the bitmask given with \fBcreate mask\fR is applied.
 

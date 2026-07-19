@@ -43,6 +43,7 @@
 	crossmnt = yes
 	directory mask = 0755
 	follow symlinks = no
+	allow insecure wide links = no
 	force create mode = 0000
 	force directory mode = 0000
 	force group = 

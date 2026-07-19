@@ -62,6 +62,7 @@ const char *KSMBD_SHARE_CONF[KSMBD_SHARE_CONF_MAX] = {
 /*30*/	"crossmnt",
 	"hide unreadable",
 	"time machine",
+	"allow insecure wide links",
 };
 
 /*
@@ -103,6 +104,7 @@ const char *KSMBD_SHARE_DEFCONF[KSMBD_SHARE_CONF_MAX] = {
 	"",
 	"",
 /*30*/	"yes",
+	"no",
 	"no",
 	"no",
 };
@@ -738,6 +740,14 @@ static int process_share_conf_kv(struct ksmbd_share *share, GHashTable *kv)
 			clear_share_flag(
 				share,
 				KSMBD_SHARE_FLAG_FOLLOW_SYMLINKS);
+	}
+
+	if (group_kv_steal(kv, KSMBD_SHARE_CONF_ALLOW_INSECURE_WIDE_LINKS,
+			   &k, &v)) {
+		if (cp_get_group_kv_bool(v))
+			set_share_flag(share, KSMBD_SHARE_FLAG_WIDE_LINKS);
+		else
+			clear_share_flag(share, KSMBD_SHARE_FLAG_WIDE_LINKS);
 	}
 
 	if (group_kv_steal(kv, KSMBD_SHARE_CONF_VFS_OBJECTS, &k, &v)) {
