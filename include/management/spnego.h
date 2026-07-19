@@ -13,6 +13,7 @@ struct ksmbd_spnego_auth_out {
 	unsigned int	blob_len;
 	char		*sess_key;
 	unsigned int	key_len;
+	unsigned long long	session_expiry;
 	char		*user_name;
 };
 

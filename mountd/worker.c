@@ -159,6 +159,7 @@ static int spnego_authen_request(struct ksmbd_ipc_msg *msg)
 	resp->session_key_len = auth_out.key_len;
 	memcpy(resp->payload, auth_out.sess_key, auth_out.key_len);
 	resp->spnego_blob_len = auth_out.blob_len;
+	resp->session_expiry = auth_out.session_expiry;
 	memcpy(resp->payload + auth_out.key_len, auth_out.spnego_blob,
 			auth_out.blob_len);
 out_free_auth:

@@ -172,6 +172,7 @@ struct ksmbd_spnego_authen_response {
 	struct ksmbd_login_response	login_response;
 	__u16	session_key_len;
 	__u16	spnego_blob_len;
+	__u64	session_expiry;
 	__u8	payload[];
 };
 

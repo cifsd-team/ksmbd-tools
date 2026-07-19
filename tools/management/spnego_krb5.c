@@ -201,7 +201,6 @@ static int handle_krb5_authen(struct spnego_mech_ctx *mech_ctx,
 	krb5_ctx = (struct spnego_krb5_ctx *)mech_ctx->private;
 	if (!krb5_ctx)
 		return -EINVAL;
-
 	krb_retval = krb5_auth_con_init(krb5_ctx->context, &auth_context);
 	if (krb_retval) {
 		pr_krb5_err(krb5_ctx->context, krb_retval,
@@ -294,6 +293,11 @@ static int handle_krb5_authen(struct spnego_mech_ctx *mech_ctx,
 	}
 	memcpy(auth_out->sess_key, KRB5_KEY_DATA(session_key), KRB5_KEY_LENGTH(session_key));
 	auth_out->key_len = KRB5_KEY_LENGTH(session_key);
+#ifdef HAVE_KRB5_AUTHENTICATOR_CLIENT
+	auth_out->session_expiry = ticket->enc_part2->times.endtime;
+#else
+	auth_out->session_expiry = ticket->ticket.endtime;
+#endif
 
 	if (spnego_encode(ap_rep.data, ap_rep.length,
 			mech_ctx->oid, mech_ctx->oid_len,
