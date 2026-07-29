@@ -132,6 +132,7 @@ static struct ksmbd_user *new_ksmbd_user(char *name, char *pwd)
 		g_free(sgid);
 		sgid = g_try_malloc0(sizeof(gid_t) * ngroups);
 		if (!sgid) {
+			g_free(user->pass);
 			g_free(user);
 			return NULL;
 		}
