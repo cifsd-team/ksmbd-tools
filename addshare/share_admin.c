@@ -69,6 +69,7 @@ static const char *__defconf_fmt[KSMBD_SHARE_CONF_MAX] = {
 	"; allow access-based directory enumeration [%s]",
 	"; advertise as apple time machine backup target [%s]",
 	"; allow administrator-created symlinks outside the share [%s]",
+	"; allow or require SMB3 encryption [%s]",
 };
 
 static char **__get_options(GHashTable *kv, int is_global)
@@ -339,6 +340,9 @@ static GList *new_conf_ml(GList *ml,
 	case KSMBD_SHARE_CONF_HIDE_UNREADABLE:
 	case KSMBD_SHARE_CONF_TIME_MACHINE:
 		ml = new_va_ml(ml, p, "yes", "no", NULL);
+		break;
+	case KSMBD_SHARE_CONF_SMB3_ENCRYPTION:
+		ml = new_va_ml(ml, p, "mandatory", "auto", "disabled", NULL);
 		break;
 	case KSMBD_SHARE_CONF_GUEST_ACCOUNT:
 		ml = new_user_ml(ml, p);

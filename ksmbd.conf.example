@@ -68,3 +68,4 @@
 	; share parameters
 	comment = read only /tmp access
 	path = /tmp
+	; smb3 encryption = mandatory

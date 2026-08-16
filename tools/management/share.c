@@ -63,6 +63,7 @@ const char *KSMBD_SHARE_CONF[KSMBD_SHARE_CONF_MAX] = {
 	"hide unreadable",
 	"time machine",
 	"allow insecure wide links",
+	"smb3 encryption",
 };
 
 /*
@@ -107,6 +108,7 @@ const char *KSMBD_SHARE_DEFCONF[KSMBD_SHARE_CONF_MAX] = {
 	"no",
 	"no",
 	"no",
+	"auto",
 };
 
 static GHashTable	*shares_table;
@@ -787,6 +789,18 @@ static int process_share_conf_kv(struct ksmbd_share *share, GHashTable *kv)
 			set_share_flag(share, KSMBD_SHARE_FLAG_TIME_MACHINE);
 		else
 			clear_share_flag(share, KSMBD_SHARE_FLAG_TIME_MACHINE);
+	}
+
+	if (group_kv_steal(kv, KSMBD_SHARE_CONF_SMB3_ENCRYPTION,
+			   &k, &v)) {
+		switch (cp_get_group_kv_config_opt(v)) {
+		case KSMBD_CONFIG_OPT_MANDATORY:
+			set_share_flag(share, KSMBD_SHARE_FLAG_ENCRYPT_DATA);
+			break;
+		default:
+			clear_share_flag(share, KSMBD_SHARE_FLAG_ENCRYPT_DATA);
+			break;
+		}
 	}
 
 	return 0;

@@ -264,6 +264,7 @@ enum KSMBD_TREE_CONN_STATUS {
 #define KSMBD_SHARE_FLAG_HIDE_UNREADABLE	(1 << 17)
 #define KSMBD_SHARE_FLAG_TIME_MACHINE		(1 << 18)
 #define KSMBD_SHARE_FLAG_WIDE_LINKS		(1 << 19)
+#define KSMBD_SHARE_FLAG_ENCRYPT_DATA		(1 << 20)
 
 /*
  * Tree connect request flags.

@@ -36,6 +36,7 @@ Share parameters, marked below with \fB(S)\fR, can be given in any section.
 When a share parameter is given in a section other than \fBglobal\fR, it is specific to that particular share.
 Under the \fBglobal\fR section, a share parameter sets its default value for all shares.
 Global parameters, marked below with \fB(G)\fR, can only be given in the \fBglobal\fR section and control functionality that applies to the server.
+Parameters marked \fB(G/S)\fR have scope-dependent behavior described in their entries.
 Changes to global parameters apply only after restarting \fBksmbd.mountd\fR and \fBksmbd\fR.
 .\" .TP
 .\" \fBadmin users\fR (S)
@@ -344,11 +345,18 @@ Number suffixes are allowed.
 
 Default: \fBsmb2 max write = 4MB\fR \" SMB3_DEFAULT_IOSIZE
 .TP
-\fBsmb3 encryption\fR (G)
+\fBsmb3 encryption\fR (G/S)
 Client is disallowed, allowed, or required to use SMB3 encryption.
-With \fBsmb3 encryption = disabled\fR, SMB3 encryption is disallowed even if it is requested by the client.
-With \fBsmb3 encryption = auto\fR, SMB3 encryption is allowed if it is requested by the client.
-With \fBsmb3 encryption = mandatory\fR, SMB3 encryption is required, i.e. clients that do not support encryption will be denied access to all shares.
+When specified in the \fBglobal\fR section, the setting applies to the
+server. With \fBsmb3 encryption = disabled\fR, SMB3 encryption is disallowed
+even if it is requested by the client. With \fBsmb3 encryption = auto\fR,
+SMB3 encryption is allowed if it is requested by the client. With
+\fBsmb3 encryption = mandatory\fR, SMB3 encryption is required, i.e. clients
+that do not support encryption will be denied access to all shares.
+
+When specified in a share section, \fBsmb3 encryption = mandatory\fR requires
+SMB3 encryption for that share only. With \fBsmb3 encryption = auto\fR or
+\fBdisabled\fR in a share section, the share does not require encryption.
 
 Default: \fBsmb3 encryption = auto\fR
 .TP
