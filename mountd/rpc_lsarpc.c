@@ -39,11 +39,6 @@
 #define LSARPC_MAX_SID_COUNT		20480
 #define LSARPC_MAX_NAME_COUNT		1000
 #define LSA_REF_DOMAIN_LIST_MULTIPLIER	32
-/*
- * LookupSids2 accepts up to 20480 input SIDs, but its translated-name
- * array is range-limited to 1000.  Responses are not fragmented here.
- */
-#define LSARPC_MAX_TRANSLATED_COUNT	1000
 #define LSA_POLICY_VIEW_LOCAL_INFORMATION	0x00000001
 #define LSA_POLICY_VIEW_AUDIT_INFORMATION	0x00000002
 #define LSA_POLICY_GET_PRIVATE_INFORMATION	0x00000004
@@ -892,8 +887,7 @@ static int lsarpc_lookup_sid2_invoke(struct ksmbd_rpc_pipe *pipe)
 
 	if (ndr_read_int32(dce, &num_sid))
 		goto fail;
-	if (num_sid > LSARPC_MAX_SID_COUNT ||
-	    num_sid > LSARPC_MAX_TRANSLATED_COUNT)
+	if (num_sid > LSARPC_MAX_SID_COUNT)
 		goto fail;
 	if (ndr_read_int32(dce, &array_ref))
 		goto fail;
@@ -971,8 +965,7 @@ static int lsarpc_lookup_sid_invoke(struct ksmbd_rpc_pipe *pipe)
 
 	if (ndr_read_int32(dce, &num_sid))
 		goto fail;
-	if (num_sid > LSARPC_MAX_SID_COUNT ||
-	    num_sid > LSARPC_MAX_TRANSLATED_COUNT)
+	if (num_sid > LSARPC_MAX_SID_COUNT)
 		goto fail;
 	if (ndr_read_int32(dce, &array_ref))
 		goto fail;
@@ -1144,6 +1137,7 @@ static int lsarpc_lookup_sid2_return(struct ksmbd_rpc_pipe *pipe)
 				rc = KSMBD_RPC_EBAD_DATA;
 				goto out;
 			}
+			auto_align_offset(dce);
 			if (ni->mapped && ni->resolved_name) {
 				if (ndr_write_string_rep(dce,
 							 ni->resolved_name)) {
@@ -1316,6 +1310,7 @@ static int lsarpc_lookup_sid_return(struct ksmbd_rpc_pipe *pipe)
 				rc = KSMBD_RPC_EBAD_DATA;
 				goto out;
 			}
+			auto_align_offset(dce);
 			if (ni->mapped && ni->resolved_name) {
 				if (ndr_write_string_rep(dce, ni->resolved_name)) {
 					rc = KSMBD_RPC_EBAD_DATA;
@@ -1700,6 +1695,7 @@ static int lsarpc_lookup_names3_return(struct ksmbd_rpc_pipe *pipe)
 				rc = KSMBD_RPC_EBAD_DATA;
 				goto out;
 			}
+			auto_align_offset(dce);
 			if (ni->mapped) {
 				dce->num_pointers++;
 				if (ndr_write_int32(dce, dce->num_pointers)) {
