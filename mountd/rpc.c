@@ -760,6 +760,31 @@ int ndr_write_string(struct ksmbd_dcerpc *dce, const char *str)
 	return ret;
 }
 
+int ndr_write_string_data(struct ksmbd_dcerpc *dce, const char *str)
+{
+	g_autofree char *out = NULL;
+	gsize bytes_written = 0;
+	size_t input_len, len;
+
+	if (!str)
+		str = "";
+
+	input_len = strlen(str);
+	out = ndr_convert_char_to_unicode(dce, str, input_len,
+					  &bytes_written);
+	if (!out || bytes_written % 2)
+		return -EINVAL;
+	len = bytes_written / 2;
+
+	if (ndr_write_int32(dce, len) ||
+	    ndr_write_int32(dce, 0) ||
+	    ndr_write_int32(dce, len) ||
+	    ndr_write_bytes(dce, out, bytes_written))
+		return -EINVAL;
+	auto_align_offset(dce);
+	return 0;
+}
+
 int ndr_write_string_rep(struct ksmbd_dcerpc *dce, const char *str)
 {
 	g_autofree char *out = NULL;

@@ -381,6 +381,8 @@ int ndr_read_bytes(struct ksmbd_dcerpc *dce, void *value, size_t sz);
 int ndr_write_vstring(struct ksmbd_dcerpc *dce, const void *value);
 int ndr_write_string(struct ksmbd_dcerpc *dce, const char *str);
 int ndr_write_lsa_string(struct ksmbd_dcerpc *dce, const char *str);
+int ndr_write_string_data(struct ksmbd_dcerpc *dce, const char *str);
+
 int ndr_write_string_rep(struct ksmbd_dcerpc *dce, const char *str);
 int ndr_write_lsa_string_rep(struct ksmbd_dcerpc *dce, const char *str);
 char *ndr_read_vstring(struct ksmbd_dcerpc *dce);
