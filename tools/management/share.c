@@ -901,6 +901,8 @@ int shm_lookup_hosts_map(struct ksmbd_share *share,
 
 	if (!lookup_map)
 		return -EINVAL;
+	if (!host)
+		return -ENOENT;
 
 	g_rw_lock_reader_lock(&share->maps_lock);
 	if (g_hash_table_lookup(lookup_map, host))
