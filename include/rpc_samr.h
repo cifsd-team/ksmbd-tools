@@ -19,6 +19,8 @@ enum samr_handle_type {
 	SAMR_HANDLE_SERVER,
 	SAMR_HANDLE_DOMAIN,
 	SAMR_HANDLE_USER,
+	SAMR_HANDLE_GROUP,
+	SAMR_HANDLE_ALIAS,
 };
 
 struct connect_handle {
@@ -30,6 +32,7 @@ struct connect_handle {
 	int retired;
 	struct smb_sid domain_sid;
 	struct ksmbd_user *user;
+	unsigned int rid;
 };
 
 int rpc_samr_read_request(struct ksmbd_rpc_pipe *pipe,

@@ -8,10 +8,13 @@
 #include <memory.h>
 #include <endian.h>
 #include <stdint.h>
+#include <unistd.h>
+#include <grp.h>
 #include <glib.h>
 #include <errno.h>
 #include <linux/ksmbd_server.h>
 
+#include <management/share.h>
 #include <management/user.h>
 #include <rpc.h>
 #include <rpc_samr.h>
@@ -22,7 +25,15 @@
 #define SAMR_OPNUM_ENUM_DOMAIN		6
 #define SAMR_OPNUM_LOOKUP_DOMAIN	5
 #define SAMR_OPNUM_OPEN_DOMAIN		7
+#define SAMR_OPNUM_ENUM_GROUPS		11
+#define SAMR_OPNUM_ENUM_USERS		13
+#define SAMR_OPNUM_ENUM_ALIASES		15
 #define SAMR_OPNUM_LOOKUP_NAMES		17
+#define SAMR_OPNUM_LOOKUP_IDS		18
+#define SAMR_OPNUM_OPEN_GROUP		19
+#define SAMR_OPNUM_GET_MEMBERS_IN_GROUP	25
+#define SAMR_OPNUM_OPEN_ALIAS		27
+#define SAMR_OPNUM_GET_MEMBERS_IN_ALIAS	33
 #define SAMR_OPNUM_OPEN_USER		34
 #define SAMR_OPNUM_QUERY_USER_INFO	36
 #define SAMR_OPNUM_QUERY_SECURITY	3
@@ -36,15 +47,26 @@
 #define SAMR_STATUS_BUFFER_TOO_SMALL	(-2006)
 #define SAM_SERVER_LOOKUP_DOMAIN		0x00000020
 #define SAM_DOMAIN_GET_ALIAS_MEMBERSHIP	0x00000080
+#define SAM_DOMAIN_LIST_ACCOUNTS		0x00000100
 #define SAM_DOMAIN_LOOKUP		0x00000200
 #define SAM_SERVER_ALL_ACCESS		0x000F003F
 #define SAM_DOMAIN_ALL_ACCESS		0x000F07FF
 #define SAM_USER_ALL_ACCESS		0x000F07FF
+#define SAM_GROUP_ALL_ACCESS		0x000F001F
+#define SAM_ALIAS_ALL_ACCESS		0x000F001F
 #define SAM_USER_READ_GENERAL		0x00000001
 #define SAM_USER_READ_LOGON		0x00000008
 #define SAM_USER_READ_ACCOUNT		0x00000010
 #define SAM_USER_LIST_GROUPS		0x00000100
+#define SAM_GROUP_LIST_MEMBERS		0x00000010
+#define SAM_ALIAS_LIST_MEMBERS		0x00000004
 #define SAM_USER_READ			0x0002031A
+#define SAM_GROUP_READ			0x00020010
+#define SAM_GROUP_WRITE			0x0002000E
+#define SAM_GROUP_EXECUTE		0x00020001
+#define SAM_ALIAS_READ			0x00020004
+#define SAM_ALIAS_WRITE			0x00020013
+#define SAM_ALIAS_EXECUTE		0x00020008
 #define SAM_READ_CONTROL		0x00020000
 #define SAM_STANDARD_WRITE_ACCESS	0x000D0000
 #define SAM_GENERIC_READ		0x80000000U
@@ -52,6 +74,7 @@
 #define SAM_GENERIC_EXECUTE		0x20000000U
 #define SAM_GENERIC_ALL		0x10000000U
 #define SAM_MAXIMUM_ALLOWED		0x02000000
+#define SAMR_USER_ACCOUNT_CONTROL_NORMAL 0x00000010
 
 #define SAMR_STATUS_INVALID_HANDLE	(-1001)
 #define SAMR_STATUS_NO_SUCH_DOMAIN	(-1002)
@@ -65,6 +88,61 @@ static GRWLock		ch_table_lock;
 static GPtrArray	*domain_entries;
 static gchar		*domain_name;
 static int		num_domain_entries;
+
+static void samr_init_builtin_sid(struct smb_sid *sid);
+
+struct samr_account_entry {
+	__u32 rid;
+	char *name;
+};
+
+enum samr_domain_kind {
+	SAMR_DOMAIN_KIND_LOCAL = 0,
+	SAMR_DOMAIN_KIND_BUILTIN,
+	SAMR_DOMAIN_KIND_OTHER,
+};
+
+static void samr_account_entry_free(gpointer data)
+{
+	struct samr_account_entry *entry = data;
+
+	if (!entry)
+		return;
+	g_free(entry->name);
+	g_free(entry);
+}
+
+static gint samr_account_entry_cmp(gconstpointer a, gconstpointer b)
+{
+	const struct samr_account_entry *ea =
+		*(const struct samr_account_entry *const *)a;
+	const struct samr_account_entry *eb =
+		*(const struct samr_account_entry *const *)b;
+
+	if (ea->rid < eb->rid)
+		return -1;
+	if (ea->rid > eb->rid)
+		return 1;
+	return g_ascii_strcasecmp(ea->name, eb->name);
+}
+
+static enum samr_domain_kind samr_get_domain_kind(const struct smb_sid *sid)
+{
+	struct smb_sid local_sid;
+	struct smb_sid builtin_sid;
+
+	if (!sid)
+		return SAMR_DOMAIN_KIND_OTHER;
+
+	smb_init_domain_sid(&local_sid);
+	if (!smb_compare_sids(sid, &local_sid))
+		return SAMR_DOMAIN_KIND_LOCAL;
+
+	samr_init_builtin_sid(&builtin_sid);
+	if (!smb_compare_sids(sid, &builtin_sid))
+		return SAMR_DOMAIN_KIND_BUILTIN;
+	return SAMR_DOMAIN_KIND_OTHER;
+}
 
 static void samr_ch_destroy(struct connect_handle *ch)
 {
@@ -143,7 +221,8 @@ static struct connect_handle *samr_ch_alloc(struct ksmbd_rpc_pipe *pipe,
 					    enum samr_handle_type type,
 					    unsigned int access_mask,
 					    const struct smb_sid *domain_sid,
-					    struct ksmbd_user *user)
+					    struct ksmbd_user *user,
+					    unsigned int rid)
 {
 	struct connect_handle *ch;
 
@@ -163,6 +242,7 @@ static struct connect_handle *samr_ch_alloc(struct ksmbd_rpc_pipe *pipe,
 	if (domain_sid)
 		smb_copy_sid(&ch->domain_sid, domain_sid);
 	ch->user = user;
+	ch->rid = rid;
 	g_rw_lock_writer_lock(&ch_table_lock);
 	if (g_hash_table_lookup(ch_table, ch->handle)) {
 		g_rw_lock_writer_unlock(&ch_table_lock);
@@ -189,9 +269,16 @@ static int samr_handle_access(const struct connect_handle *ch,
 		return SAMR_STATUS_INVALID_HANDLE;
 	if (type == SAMR_HANDLE_SERVER)
 		all_access = SAM_SERVER_ALL_ACCESS;
+	else if (type == SAMR_HANDLE_DOMAIN)
+		all_access = SAM_DOMAIN_ALL_ACCESS;
+	else if (type == SAMR_HANDLE_USER)
+		all_access = SAM_USER_ALL_ACCESS;
+	else if (type == SAMR_HANDLE_GROUP)
+		all_access = SAM_GROUP_ALL_ACCESS;
+	else if (type == SAMR_HANDLE_ALIAS)
+		all_access = SAM_ALIAS_ALL_ACCESS;
 	else
-		all_access = type == SAMR_HANDLE_DOMAIN ?
-			SAM_DOMAIN_ALL_ACCESS : SAM_USER_ALL_ACCESS;
+		return SAMR_STATUS_INVALID_HANDLE;
 	if (required && (ch->access_mask & required) != required &&
 	    !(ch->access_mask & SAM_GENERIC_ALL) &&
 	    !(ch->access_mask & SAM_MAXIMUM_ALLOWED) &&
@@ -257,6 +344,10 @@ static unsigned int samr_generic_read_access(enum samr_handle_type type)
 		return 0x00000084 | SAM_READ_CONTROL;
 	case SAMR_HANDLE_USER:
 		return SAM_USER_READ;
+	case SAMR_HANDLE_GROUP:
+		return SAM_GROUP_READ;
+	case SAMR_HANDLE_ALIAS:
+		return SAM_ALIAS_READ;
 	default:
 		return 0;
 	}
@@ -275,6 +366,10 @@ static unsigned int samr_generic_write_access(enum samr_handle_type type)
 	case SAMR_HANDLE_USER:
 		return SAM_STANDARD_WRITE_ACCESS | 0x00000004 | 0x00000020 |
 			0x00000040 | 0x00000080 | 0x00000400;
+	case SAMR_HANDLE_GROUP:
+		return SAM_GROUP_WRITE;
+	case SAMR_HANDLE_ALIAS:
+		return SAM_ALIAS_WRITE;
 	default:
 		return 0;
 	}
@@ -289,6 +384,10 @@ static unsigned int samr_generic_execute_access(enum samr_handle_type type)
 		return 0x00000301 | 0x00020000;
 	case SAMR_HANDLE_USER:
 		return 0x00000041 | 0x00020000;
+	case SAMR_HANDLE_GROUP:
+		return SAM_GROUP_EXECUTE;
+	case SAMR_HANDLE_ALIAS:
+		return SAM_ALIAS_EXECUTE;
 	default:
 		return 0;
 	}
@@ -363,6 +462,9 @@ static int samr_write_error_payload(struct ksmbd_dcerpc *dce,
 			return KSMBD_RPC_EBAD_DATA;
 		return KSMBD_RPC_OK;
 	case SAMR_OPNUM_ENUM_DOMAIN:
+	case SAMR_OPNUM_ENUM_GROUPS:
+	case SAMR_OPNUM_ENUM_USERS:
+	case SAMR_OPNUM_ENUM_ALIASES:
 		if (ndr_write_int32(dce, dce->sm_req.resume_handle) ||
 		    ndr_write_int32(dce, 0) ||
 		    ndr_write_int32(dce, 0))
@@ -375,6 +477,8 @@ static int samr_write_error_payload(struct ksmbd_dcerpc *dce,
 		return ndr_write_int32(dce, 0) ? KSMBD_RPC_EBAD_DATA :
 					 KSMBD_RPC_OK;
 	case SAMR_OPNUM_OPEN_DOMAIN:
+	case SAMR_OPNUM_OPEN_GROUP:
+	case SAMR_OPNUM_OPEN_ALIAS:
 	case SAMR_OPNUM_OPEN_USER:
 	case SAMR_OPNUM_CLOSE:
 		return samr_write_zero_handle(dce) ? KSMBD_RPC_EBAD_DATA :
@@ -382,6 +486,20 @@ static int samr_write_error_payload(struct ksmbd_dcerpc *dce,
 	case SAMR_OPNUM_LOOKUP_NAMES:
 		if (samr_write_ulong_array(dce, 0, NULL) ||
 		    samr_write_ulong_array(dce, 0, NULL))
+			return KSMBD_RPC_EBAD_DATA;
+		return KSMBD_RPC_OK;
+	case SAMR_OPNUM_LOOKUP_IDS:
+		if (ndr_write_int32(dce, 0) ||
+		    ndr_write_int32(dce, 0) ||
+		    samr_write_ulong_array(dce, 0, NULL))
+			return KSMBD_RPC_EBAD_DATA;
+		return KSMBD_RPC_OK;
+	case SAMR_OPNUM_GET_MEMBERS_IN_GROUP:
+		return ndr_write_int32(dce, 0) ? KSMBD_RPC_EBAD_DATA :
+					 KSMBD_RPC_OK;
+	case SAMR_OPNUM_GET_MEMBERS_IN_ALIAS:
+		if (ndr_write_int32(dce, 0) ||
+		    ndr_write_int32(dce, 0))
 			return KSMBD_RPC_EBAD_DATA;
 		return KSMBD_RPC_OK;
 	case SAMR_OPNUM_GET_ALIAS_MEMBERSHIP:
@@ -432,6 +550,274 @@ static int samr_lookup_domain_sid(const char *name, struct smb_sid *sid)
 		return 0;
 	}
 	return -ENOENT;
+}
+
+struct samr_collect_users_ctx {
+	GPtrArray *entries;
+	GHashTable *seen;
+	int status;
+};
+
+struct samr_collect_groups_ctx {
+	GPtrArray *entries;
+	GHashTable *seen;
+	int status;
+};
+
+struct samr_collect_members_ctx {
+	GArray *members;
+	GHashTable *seen;
+	__u32 rid;
+};
+
+static int samr_add_account_entry(GPtrArray *entries, GHashTable *seen,
+				  __u32 rid, const char *name)
+{
+	struct samr_account_entry *entry;
+	gpointer key;
+
+	if (!entries || !name)
+		return -EINVAL;
+	key = GUINT_TO_POINTER(rid + 1);
+	if (seen && g_hash_table_contains(seen, key))
+		return 0;
+
+	entry = g_try_malloc0(sizeof(*entry));
+	if (!entry)
+		return -ENOMEM;
+	entry->rid = rid;
+	entry->name = g_strdup(name);
+	if (!entry->name) {
+		g_free(entry);
+		return -ENOMEM;
+	}
+	if (seen)
+		g_hash_table_add(seen, key);
+	g_ptr_array_add(entries, entry);
+	return 0;
+}
+
+static void samr_collect_user_cb(struct ksmbd_user *user, void *data)
+{
+	struct samr_collect_users_ctx *ctx = data;
+
+	if (!ctx || !user || !user->name)
+		return;
+	if (user->uid == (uid_t)KSMBD_SHARE_INVALID_UID)
+		return;
+	if (ctx->status)
+		return;
+	ctx->status = samr_add_account_entry(ctx->entries, ctx->seen,
+					     user->uid, user->name);
+}
+
+static int samr_add_group_gid(GPtrArray *entries, GHashTable *seen, gid_t gid)
+{
+	struct group grp;
+	struct group *result = NULL;
+
+	g_autofree char *buf = NULL;
+	g_autofree char *group_name = NULL;
+	g_autofree char *gid_name = NULL;
+	long buflen;
+	int rc;
+
+	if (gid == (gid_t)KSMBD_SHARE_INVALID_GID)
+		return 0;
+
+	buflen = sysconf(_SC_GETGR_R_SIZE_MAX);
+	if (buflen < 1024)
+		buflen = 1024;
+	buf = g_try_malloc0(buflen);
+	if (!buf)
+		return -ENOMEM;
+
+	rc = getgrgid_r(gid, &grp, buf, buflen, &result);
+	if (!rc && result && result->gr_name && result->gr_name[0])
+		group_name = g_strdup(result->gr_name);
+	else if (rc && rc != ENOENT)
+		return -rc;
+
+	if (!group_name)
+		gid_name = g_strdup_printf("GID-%u", (__u32)gid);
+	if (!group_name && !gid_name)
+		return -ENOMEM;
+	return samr_add_account_entry(entries, seen, (__u32)gid,
+				      group_name ? group_name : gid_name);
+}
+
+static void samr_collect_group_cb(struct ksmbd_user *user, void *data)
+{
+	struct samr_collect_groups_ctx *ctx = data;
+	int i;
+
+	if (!ctx || !user)
+		return;
+	if (ctx->status)
+		return;
+
+	ctx->status = samr_add_group_gid(ctx->entries, ctx->seen, user->gid);
+	for (i = 0; !ctx->status && i < user->ngroups; i++)
+		ctx->status = samr_add_group_gid(ctx->entries, ctx->seen,
+						 user->sgid[i]);
+}
+
+static GPtrArray *samr_collect_user_entries(__u32 user_account_control)
+{
+	struct samr_collect_users_ctx ctx;
+	GPtrArray *entries;
+
+	entries = g_ptr_array_new_with_free_func(samr_account_entry_free);
+	if (!entries)
+		return NULL;
+
+	if (user_account_control &&
+	    !(user_account_control & SAMR_USER_ACCOUNT_CONTROL_NORMAL))
+		return entries;
+
+	ctx.entries = entries;
+	ctx.seen = g_hash_table_new(g_direct_hash, g_direct_equal);
+	ctx.status = 0;
+	if (!ctx.seen) {
+		g_ptr_array_free(entries, 1);
+		return NULL;
+	}
+
+	usm_iter_users(samr_collect_user_cb, &ctx);
+	g_hash_table_destroy(ctx.seen);
+	if (ctx.status) {
+		g_ptr_array_free(entries, 1);
+		return NULL;
+	}
+	g_ptr_array_sort(entries, samr_account_entry_cmp);
+	return entries;
+}
+
+static GPtrArray *samr_collect_group_entries(void)
+{
+	struct samr_collect_groups_ctx ctx;
+	GPtrArray *entries;
+
+	entries = g_ptr_array_new_with_free_func(samr_account_entry_free);
+	if (!entries)
+		return NULL;
+
+	ctx.entries = entries;
+	ctx.seen = g_hash_table_new(g_direct_hash, g_direct_equal);
+	ctx.status = 0;
+	if (!ctx.seen) {
+		g_ptr_array_free(entries, 1);
+		return NULL;
+	}
+
+	usm_iter_users(samr_collect_group_cb, &ctx);
+	g_hash_table_destroy(ctx.seen);
+	if (ctx.status) {
+		g_ptr_array_free(entries, 1);
+		return NULL;
+	}
+	g_ptr_array_sort(entries, samr_account_entry_cmp);
+	return entries;
+}
+
+static int samr_user_in_group(const struct ksmbd_user *user, __u32 rid)
+{
+	int i;
+
+	if (!user)
+		return 0;
+	if (user->gid == rid)
+		return 1;
+	for (i = 0; i < user->ngroups; i++)
+		if (user->sgid[i] == rid)
+			return 1;
+	return 0;
+}
+
+static void samr_collect_group_member_cb(struct ksmbd_user *user, void *data)
+{
+	struct samr_collect_members_ctx *ctx = data;
+	__u32 member_rid;
+	gpointer key;
+
+	if (!ctx || !user || user->uid == (uid_t)KSMBD_SHARE_INVALID_UID ||
+	    !samr_user_in_group(user, ctx->rid))
+		return;
+	member_rid = user->uid;
+	key = GUINT_TO_POINTER(member_rid + 1);
+	if (g_hash_table_contains(ctx->seen, key))
+		return;
+	g_hash_table_add(ctx->seen, key);
+	g_array_append_val(ctx->members, member_rid);
+}
+
+static gint samr_u32_cmp(gconstpointer a, gconstpointer b)
+{
+	const __u32 *va = a;
+	const __u32 *vb = b;
+
+	if (*va < *vb)
+		return -1;
+	if (*va > *vb)
+		return 1;
+	return 0;
+}
+
+static GArray *samr_collect_group_members(__u32 rid)
+{
+	struct samr_collect_members_ctx ctx;
+	GArray *members;
+
+	members = g_array_new(0, 0, sizeof(__u32));
+	if (!members)
+		return NULL;
+
+	ctx.members = members;
+	ctx.rid = rid;
+	ctx.seen = g_hash_table_new(g_direct_hash, g_direct_equal);
+	if (!ctx.seen) {
+		g_array_free(members, 1);
+		return NULL;
+	}
+
+	usm_iter_users(samr_collect_group_member_cb, &ctx);
+	g_hash_table_destroy(ctx.seen);
+	g_array_sort(members, samr_u32_cmp);
+	return members;
+}
+
+static struct samr_account_entry *
+samr_find_account_entry_by_rid(GPtrArray *entries, __u32 rid)
+{
+	unsigned int i;
+
+	if (!entries)
+		return NULL;
+	for (i = 0; i < entries->len; i++) {
+		struct samr_account_entry *entry;
+
+		entry = g_ptr_array_index(entries, i);
+		if (entry->rid == rid)
+			return entry;
+	}
+	return NULL;
+}
+
+static struct samr_account_entry *
+samr_find_account_entry_by_name(GPtrArray *entries, const char *name)
+{
+	unsigned int i;
+
+	if (!entries || !name)
+		return NULL;
+	for (i = 0; i < entries->len; i++) {
+		struct samr_account_entry *entry;
+
+		entry = g_ptr_array_index(entries, i);
+		if (!g_ascii_strcasecmp(entry->name, name))
+			return entry;
+	}
+	return NULL;
 }
 
 static int samr_syntax_supported(struct ksmbd_rpc_pipe *pipe,
@@ -503,7 +889,7 @@ static int samr_connect5_return(struct ksmbd_rpc_pipe *pipe)
 		return KSMBD_RPC_EBAD_DATA;
 
 	ch = samr_ch_alloc(pipe, SAMR_HANDLE_SERVER,
-			   dce->sm_req.access_mask, NULL, NULL);
+			   dce->sm_req.access_mask, NULL, NULL, 0);
 	if (!ch) {
 		if (samr_write_zero_handle(dce))
 			return KSMBD_RPC_EBAD_DATA;
@@ -573,12 +959,90 @@ static int samr_ndr_write_domain_array(struct ksmbd_rpc_pipe *pipe,
 		char *entry;
 
 		entry = g_ptr_array_index(domain_entries, start + i);
-		ret = ndr_write_string(dce, entry);
+		ret = ndr_write_string_data(dce, entry);
 		if (ret)
 			return ret;
 	}
 
 	return ret;
+}
+
+static int samr_ndr_write_account_array(struct ksmbd_dcerpc *dce,
+					GPtrArray *entries,
+					unsigned int start,
+					unsigned int count)
+{
+	unsigned int i;
+
+	for (i = 0; i < count; i++) {
+		struct samr_account_entry *entry;
+
+		entry = g_ptr_array_index(entries, start + i);
+		if (ndr_write_int32(dce, entry->rid) ||
+		    ndr_write_string_rep(dce, entry->name))
+			return -EINVAL;
+	}
+
+	for (i = 0; i < count; i++) {
+		struct samr_account_entry *entry;
+
+		entry = g_ptr_array_index(entries, start + i);
+		if (ndr_write_string_data(dce, entry->name))
+			return -EINVAL;
+	}
+	return 0;
+}
+
+static int samr_write_enum_entries_response(struct ksmbd_rpc_pipe *pipe,
+					    GPtrArray *entries)
+{
+	struct ksmbd_dcerpc *dce = pipe->dce;
+	unsigned int start, count, next;
+	unsigned int total_entries = entries ? entries->len : 0;
+
+	start = dce->sm_req.resume_handle;
+	if (start > total_entries)
+		return KSMBD_RPC_EINVALID_PARAMETER;
+
+	count = total_entries - start;
+	if (dce->sm_req.buf_size && count > dce->sm_req.buf_size / 64)
+		count = dce->sm_req.buf_size / 64;
+	if (count > total_entries - start)
+		count = total_entries - start;
+	if (start < total_entries && !count)
+		return SAMR_STATUS_BUFFER_TOO_SMALL;
+
+	next = start + count;
+	dce->sm_req.resume_handle = next;
+	dce->sm_req.enum_start = start;
+	dce->sm_req.enum_count = count;
+	if (next < total_entries)
+		dce->sm_req.operation_status = KSMBD_RPC_EMORE_DATA;
+	else
+		dce->sm_req.operation_status = KSMBD_RPC_OK;
+
+	if (ndr_write_int32(dce, next))
+		return KSMBD_RPC_EBAD_DATA;
+
+	dce->num_pointers++;
+	if (ndr_write_int32(dce, dce->num_pointers) ||
+	    ndr_write_int32(dce, count))
+		return KSMBD_RPC_EBAD_DATA;
+
+	if (count) {
+		dce->num_pointers++;
+		if (ndr_write_int32(dce, dce->num_pointers) ||
+		    ndr_write_int32(dce, count) ||
+		    samr_ndr_write_account_array(dce, entries, start, count))
+			return KSMBD_RPC_EBAD_DATA;
+	} else if (ndr_write_int32(dce, 0)) {
+		return KSMBD_RPC_EBAD_DATA;
+	}
+
+	if (ndr_write_int32(dce, count))
+		return KSMBD_RPC_EBAD_DATA;
+
+	return dce->sm_req.operation_status;
 }
 
 static int samr_enum_domain_return(struct ksmbd_rpc_pipe *pipe)
@@ -649,6 +1113,138 @@ static int samr_enum_domain_return(struct ksmbd_rpc_pipe *pipe)
 	goto out;
 bad_data:
 	ret = KSMBD_RPC_EBAD_DATA;
+out:
+	samr_ch_put(ch);
+	return ret;
+}
+
+static int samr_enum_accounts_invoke(struct ksmbd_rpc_pipe *pipe, int users)
+{
+	struct ksmbd_dcerpc *dce = pipe->dce;
+
+	if (ndr_read_bytes(dce, dce->sm_req.handle, HANDLE_SIZE))
+		return KSMBD_RPC_EINVALID_PARAMETER;
+	if (ndr_read_int32(dce, &dce->sm_req.resume_handle))
+		return KSMBD_RPC_EINVALID_PARAMETER;
+	if (users &&
+	    ndr_read_int32(dce, &dce->sm_req.lookup_options))
+		return KSMBD_RPC_EINVALID_PARAMETER;
+	if (ndr_read_int32(dce, &dce->sm_req.buf_size))
+		return KSMBD_RPC_EINVALID_PARAMETER;
+
+	return ndr_request_end(dce) ? KSMBD_RPC_EINVALID_PARAMETER :
+				      KSMBD_RPC_OK;
+}
+
+static int samr_enum_groups_invoke(struct ksmbd_rpc_pipe *pipe)
+{
+	return samr_enum_accounts_invoke(pipe, 0);
+}
+
+static int samr_enum_users_invoke(struct ksmbd_rpc_pipe *pipe)
+{
+	return samr_enum_accounts_invoke(pipe, 1);
+}
+
+static int samr_enum_aliases_invoke(struct ksmbd_rpc_pipe *pipe)
+{
+	return samr_enum_accounts_invoke(pipe, 0);
+}
+
+static int samr_enum_users_return(struct ksmbd_rpc_pipe *pipe)
+{
+	struct ksmbd_dcerpc *dce = pipe->dce;
+	struct connect_handle *ch;
+	GPtrArray *entries = NULL;
+	int ret;
+
+	ch = samr_ch_lookup(pipe, dce->sm_req.handle);
+	ret = samr_handle_access(ch, SAMR_HANDLE_DOMAIN,
+				 SAM_DOMAIN_LIST_ACCOUNTS);
+	if (ret)
+		goto out;
+
+	if (samr_get_domain_kind(&ch->domain_sid) == SAMR_DOMAIN_KIND_LOCAL) {
+		entries = samr_collect_user_entries(dce->sm_req.lookup_options);
+		if (!entries) {
+			ret = KSMBD_RPC_ENOMEM;
+			goto out;
+		}
+	} else {
+		entries = g_ptr_array_new_with_free_func(samr_account_entry_free);
+		if (!entries) {
+			ret = KSMBD_RPC_ENOMEM;
+			goto out;
+		}
+	}
+
+	ret = samr_write_enum_entries_response(pipe, entries);
+out:
+	if (entries)
+		g_ptr_array_free(entries, 1);
+	samr_ch_put(ch);
+	return ret;
+}
+
+static int samr_enum_groups_return(struct ksmbd_rpc_pipe *pipe)
+{
+	struct ksmbd_dcerpc *dce = pipe->dce;
+	struct connect_handle *ch;
+	GPtrArray *entries = NULL;
+	int ret;
+
+	ch = samr_ch_lookup(pipe, dce->sm_req.handle);
+	ret = samr_handle_access(ch, SAMR_HANDLE_DOMAIN,
+				 SAM_DOMAIN_LIST_ACCOUNTS);
+	if (ret)
+		goto out;
+
+	if (samr_get_domain_kind(&ch->domain_sid) == SAMR_DOMAIN_KIND_LOCAL) {
+		entries = samr_collect_group_entries();
+		if (!entries) {
+			ret = KSMBD_RPC_ENOMEM;
+			goto out;
+		}
+	} else {
+		entries = g_ptr_array_new_with_free_func(samr_account_entry_free);
+		if (!entries) {
+			ret = KSMBD_RPC_ENOMEM;
+			goto out;
+		}
+	}
+
+	ret = samr_write_enum_entries_response(pipe, entries);
+out:
+	if (entries)
+		g_ptr_array_free(entries, 1);
+	samr_ch_put(ch);
+	return ret;
+}
+
+static int samr_enum_aliases_return(struct ksmbd_rpc_pipe *pipe)
+{
+	struct ksmbd_dcerpc *dce = pipe->dce;
+	struct connect_handle *ch;
+	GPtrArray *entries;
+	int ret;
+
+	ch = samr_ch_lookup(pipe, dce->sm_req.handle);
+	ret = samr_handle_access(ch, SAMR_HANDLE_DOMAIN,
+				 SAM_DOMAIN_LIST_ACCOUNTS);
+	if (ret)
+		goto out;
+
+	/*
+	 * The local configuration has no separate SAM alias database.
+	 * Do not expose POSIX groups again as aliases with identical RIDs.
+	 */
+	entries = g_ptr_array_new_with_free_func(samr_account_entry_free);
+	if (!entries) {
+		ret = KSMBD_RPC_ENOMEM;
+		goto out;
+	}
+	ret = samr_write_enum_entries_response(pipe, entries);
+	g_ptr_array_free(entries, 1);
 out:
 	samr_ch_put(ch);
 	return ret;
@@ -754,7 +1350,7 @@ static int samr_open_domain_return(struct ksmbd_rpc_pipe *pipe)
 	}
 
 	domain = samr_ch_alloc(pipe, SAMR_HANDLE_DOMAIN,
-			       dce->sm_req.access_mask, &sid, NULL);
+			       dce->sm_req.access_mask, &sid, NULL, 0);
 	if (!domain) {
 		ret = KSMBD_RPC_ENOMEM;
 		goto fail;
@@ -880,6 +1476,7 @@ static int samr_lookup_names_return(struct ksmbd_rpc_pipe *pipe)
 	struct ksmbd_dcerpc *dce = pipe->dce;
 	struct connect_handle *ch;
 	struct smb_sid local_sid;
+	GPtrArray *groups = NULL;
 	g_autofree __u32 *rids = NULL;
 	g_autofree __u32 *types = NULL;
 	unsigned int i, mapped = 0;
@@ -899,6 +1496,13 @@ static int samr_lookup_names_return(struct ksmbd_rpc_pipe *pipe)
 	}
 
 	smb_init_domain_sid(&local_sid);
+	if (!smb_compare_sids(&ch->domain_sid, &local_sid)) {
+		groups = samr_collect_group_entries();
+		if (!groups) {
+			ret = KSMBD_RPC_ENOMEM;
+			goto out;
+		}
+	}
 	for (i = 0; i < dce->sm_req.name_count; i++) {
 		rids[i] = UINT32_MAX;
 		types[i] = SID_TYPE_UNKNOWN;
@@ -910,12 +1514,23 @@ static int samr_lookup_names_return(struct ksmbd_rpc_pipe *pipe)
 		if (smb_compare_sids(&ch->domain_sid, &local_sid))
 			continue;
 		user = usm_lookup_user_casefold(name);
-		if (!user)
+		if (user) {
+			rids[i] = user->uid;
+			types[i] = SID_TYPE_USER;
+			mapped++;
+			put_ksmbd_user(user);
 			continue;
-		rids[i] = user->uid;
-		types[i] = SID_TYPE_USER;
-		mapped++;
-		put_ksmbd_user(user);
+		}
+		if (groups) {
+			struct samr_account_entry *group;
+
+			group = samr_find_account_entry_by_name(groups, name);
+			if (group) {
+				rids[i] = group->rid;
+				types[i] = SID_TYPE_GROUP;
+				mapped++;
+			}
+		}
 	}
 
 	if (samr_write_ulong_array(dce, dce->sm_req.name_count, rids) ||
@@ -928,6 +1543,174 @@ static int samr_lookup_names_return(struct ksmbd_rpc_pipe *pipe)
 		ret = mapped ? SAMR_STATUS_SOME_NOT_MAPPED :
 			      SAMR_STATUS_NONE_MAPPED;
 out:
+	samr_free_names(&dce->sm_req);
+	samr_ch_put(ch);
+	return ret;
+}
+
+static int samr_lookup_ids_invoke(struct ksmbd_rpc_pipe *pipe)
+{
+	struct ksmbd_dcerpc *dce = pipe->dce;
+	__u32 count, max_count, offset, actual;
+	unsigned int i;
+
+	if (ndr_read_bytes(dce, dce->sm_req.handle, HANDLE_SIZE))
+		return KSMBD_RPC_EINVALID_PARAMETER;
+	if (ndr_read_int32(dce, &count) ||
+	    ndr_read_int32(dce, &max_count) ||
+	    ndr_read_int32(dce, &offset) ||
+	    ndr_read_int32(dce, &actual))
+		return KSMBD_RPC_EINVALID_PARAMETER;
+	if (count > SAMR_MAX_LOOKUP_NAME_COUNT || max_count < count ||
+	    offset || actual != count)
+		return KSMBD_RPC_EINVALID_PARAMETER;
+
+	samr_free_names(&dce->sm_req);
+	dce->sm_req.names = g_ptr_array_new_with_free_func(g_free);
+	if (!dce->sm_req.names)
+		return KSMBD_RPC_ENOMEM;
+
+	for (i = 0; i < count; i++) {
+		__u32 *rid;
+
+		rid = g_try_malloc(sizeof(*rid));
+		if (!rid || ndr_read_int32(dce, rid)) {
+			g_free(rid);
+			samr_free_names(&dce->sm_req);
+			return KSMBD_RPC_EINVALID_PARAMETER;
+		}
+		g_ptr_array_add(dce->sm_req.names, rid);
+	}
+	dce->sm_req.name_count = count;
+
+	return ndr_request_end(dce) ? KSMBD_RPC_EINVALID_PARAMETER :
+				      KSMBD_RPC_OK;
+}
+
+static int samr_write_returned_ustring_array(struct ksmbd_dcerpc *dce,
+					     unsigned int count,
+					     char **names)
+{
+	unsigned int i;
+
+	if (ndr_write_int32(dce, count))
+		return -EINVAL;
+	if (!count)
+		return ndr_write_int32(dce, 0);
+
+	dce->num_pointers++;
+	if (ndr_write_int32(dce, dce->num_pointers) ||
+	    ndr_write_int32(dce, count))
+		return -EINVAL;
+
+	for (i = 0; i < count; i++) {
+		if (!names[i]) {
+			if (samr_write_null_string_rep(dce))
+				return -EINVAL;
+			continue;
+		}
+		if (ndr_write_string_rep(dce, names[i]))
+			return -EINVAL;
+	}
+
+	for (i = 0; i < count; i++)
+		if (names[i] && ndr_write_string_data(dce, names[i]))
+			return -EINVAL;
+	return 0;
+}
+
+static int samr_lookup_ids_return(struct ksmbd_rpc_pipe *pipe)
+{
+	struct ksmbd_dcerpc *dce = pipe->dce;
+	struct connect_handle *ch;
+	GPtrArray *groups = NULL;
+	char **names = NULL;
+	__u32 *types = NULL;
+	unsigned int mapped = 0;
+	unsigned int i;
+	int ret;
+
+	ch = samr_ch_lookup(pipe, dce->sm_req.handle);
+	ret = samr_handle_access(ch, SAMR_HANDLE_DOMAIN, SAM_DOMAIN_LOOKUP);
+	if (ret)
+		goto out;
+
+	if (samr_get_domain_kind(&ch->domain_sid) == SAMR_DOMAIN_KIND_LOCAL) {
+		groups = samr_collect_group_entries();
+		if (!groups) {
+			ret = KSMBD_RPC_ENOMEM;
+			goto out;
+		}
+	}
+
+	if (dce->sm_req.name_count) {
+		names = g_try_malloc0_n(dce->sm_req.name_count, sizeof(*names));
+		types = g_try_malloc0_n(dce->sm_req.name_count, sizeof(*types));
+		if (!names || !types) {
+			ret = KSMBD_RPC_ENOMEM;
+			goto out;
+		}
+	}
+
+	for (i = 0; i < dce->sm_req.name_count; i++) {
+		__u32 *rid;
+		struct ksmbd_user *user = NULL;
+
+		rid = g_ptr_array_index(dce->sm_req.names, i);
+		types[i] = SID_TYPE_UNKNOWN;
+		if (!rid ||
+		    samr_get_domain_kind(&ch->domain_sid) != SAMR_DOMAIN_KIND_LOCAL)
+			continue;
+
+		user = usm_lookup_uid(*rid);
+		if (user) {
+			names[i] = g_strdup(user->name);
+			put_ksmbd_user(user);
+			if (!names[i]) {
+				ret = KSMBD_RPC_ENOMEM;
+				goto out;
+			}
+			types[i] = SID_TYPE_USER;
+			mapped++;
+			continue;
+		}
+
+		if (groups) {
+			struct samr_account_entry *group;
+
+			group = samr_find_account_entry_by_rid(groups, *rid);
+			if (!group)
+				continue;
+			names[i] = g_strdup(group->name);
+			if (!names[i]) {
+				ret = KSMBD_RPC_ENOMEM;
+				goto out;
+			}
+			types[i] = SID_TYPE_GROUP;
+			mapped++;
+		}
+	}
+
+	if (samr_write_returned_ustring_array(dce, dce->sm_req.name_count, names) ||
+	    samr_write_ulong_array(dce, dce->sm_req.name_count, types)) {
+		ret = KSMBD_RPC_EBAD_DATA;
+		goto out;
+	}
+
+	if (mapped != dce->sm_req.name_count)
+		ret = mapped ? SAMR_STATUS_SOME_NOT_MAPPED :
+			      SAMR_STATUS_NONE_MAPPED;
+	else
+		ret = KSMBD_RPC_OK;
+out:
+	if (names) {
+		for (i = 0; i < dce->sm_req.name_count; i++)
+			g_free(names[i]);
+		g_free(names);
+	}
+	g_free(types);
+	if (groups)
+		g_ptr_array_free(groups, 1);
 	samr_free_names(&dce->sm_req);
 	samr_ch_put(ch);
 	return ret;
@@ -978,7 +1761,7 @@ static int samr_open_user_return(struct ksmbd_rpc_pipe *pipe)
 
 	user_handle = samr_ch_alloc(pipe, SAMR_HANDLE_USER,
 				    dce->sm_req.access_mask,
-				    &ch->domain_sid, user);
+				    &ch->domain_sid, user, dce->sm_req.rid);
 	if (!user_handle) {
 		put_ksmbd_user(user);
 		ret = KSMBD_RPC_ENOMEM;
@@ -998,6 +1781,256 @@ static int samr_open_user_return(struct ksmbd_rpc_pipe *pipe)
 fail:
 	if (samr_write_zero_handle(dce))
 		ret = KSMBD_RPC_EBAD_DATA;
+	samr_ch_put(ch);
+	return ret;
+}
+
+static int samr_open_group_invoke(struct ksmbd_rpc_pipe *pipe)
+{
+	return samr_open_user_invoke(pipe);
+}
+
+static int samr_open_alias_invoke(struct ksmbd_rpc_pipe *pipe)
+{
+	return samr_open_user_invoke(pipe);
+}
+
+static int samr_open_account_handle_return(struct ksmbd_rpc_pipe *pipe,
+					   enum samr_handle_type type)
+{
+	struct ksmbd_dcerpc *dce = pipe->dce;
+	struct connect_handle *ch;
+	struct connect_handle *account;
+	GPtrArray *groups = NULL;
+	int ret;
+
+	ch = samr_ch_lookup(pipe, dce->sm_req.handle);
+	ret = samr_handle_access(ch, SAMR_HANDLE_DOMAIN, SAM_DOMAIN_LOOKUP);
+	if (ret)
+		goto fail;
+
+	if (samr_get_domain_kind(&ch->domain_sid) != SAMR_DOMAIN_KIND_LOCAL) {
+		ret = KSMBD_RPC_EINVALID_PARAMETER;
+		goto fail;
+	}
+	if (type == SAMR_HANDLE_ALIAS) {
+		ret = KSMBD_RPC_EINVALID_PARAMETER;
+		goto fail;
+	}
+
+	groups = samr_collect_group_entries();
+	if (!groups) {
+		ret = KSMBD_RPC_ENOMEM;
+		goto fail;
+	}
+	if (!samr_find_account_entry_by_rid(groups, dce->sm_req.rid)) {
+		ret = KSMBD_RPC_EINVALID_PARAMETER;
+		goto fail;
+	}
+
+	account = samr_ch_alloc(pipe, type, dce->sm_req.access_mask,
+				&ch->domain_sid, NULL, dce->sm_req.rid);
+	if (!account) {
+		ret = KSMBD_RPC_ENOMEM;
+		goto fail;
+	}
+
+	if (ndr_write_bytes(dce, account->handle, HANDLE_SIZE)) {
+		samr_ch_close(pipe, account->handle);
+		ret = KSMBD_RPC_EBAD_DATA;
+		goto fail;
+	}
+
+	ret = KSMBD_RPC_OK;
+	g_ptr_array_free(groups, 1);
+	samr_ch_put(ch);
+	return ret;
+fail:
+	if (groups)
+		g_ptr_array_free(groups, 1);
+	if (samr_write_zero_handle(dce))
+		ret = KSMBD_RPC_EBAD_DATA;
+	samr_ch_put(ch);
+	return ret;
+}
+
+static int samr_open_group_return(struct ksmbd_rpc_pipe *pipe)
+{
+	return samr_open_account_handle_return(pipe, SAMR_HANDLE_GROUP);
+}
+
+static int samr_open_alias_return(struct ksmbd_rpc_pipe *pipe)
+{
+	return samr_open_account_handle_return(pipe, SAMR_HANDLE_ALIAS);
+}
+
+static int samr_get_members_in_group_invoke(struct ksmbd_rpc_pipe *pipe)
+{
+	struct ksmbd_dcerpc *dce = pipe->dce;
+
+	if (ndr_read_bytes(dce, dce->sm_req.handle, HANDLE_SIZE))
+		return KSMBD_RPC_EINVALID_PARAMETER;
+
+	return ndr_request_end(dce) ? KSMBD_RPC_EINVALID_PARAMETER :
+				      KSMBD_RPC_OK;
+}
+
+static int samr_get_members_in_alias_invoke(struct ksmbd_rpc_pipe *pipe)
+{
+	return samr_get_members_in_group_invoke(pipe);
+}
+
+static int samr_write_ulong_conformant_array(struct ksmbd_dcerpc *dce,
+					     unsigned int count,
+					     const __u32 *values)
+{
+	unsigned int i;
+
+	if (ndr_write_int32(dce, count))
+		return -EINVAL;
+	for (i = 0; i < count; i++)
+		if (ndr_write_int32(dce, values[i]))
+			return -EINVAL;
+	return 0;
+}
+
+static int samr_write_group_members_buffer(struct ksmbd_dcerpc *dce,
+					   GArray *members)
+{
+	unsigned int count = members ? members->len : 0;
+	__u32 *member_ids = count ? (__u32 *)members->data : NULL;
+	g_autofree __u32 *attrs = NULL;
+	unsigned int i;
+
+	dce->num_pointers++;
+	if (ndr_write_int32(dce, dce->num_pointers) ||
+	    ndr_write_int32(dce, count))
+		return -EINVAL;
+
+	if (!count)
+		return ndr_write_int32(dce, 0) || ndr_write_int32(dce, 0) ?
+			-EINVAL : 0;
+
+	attrs = g_try_malloc0_n(count, sizeof(*attrs));
+	if (!attrs)
+		return -ENOMEM;
+	for (i = 0; i < count; i++)
+		attrs[i] = 0x00000007;
+
+	dce->num_pointers++;
+	if (ndr_write_int32(dce, dce->num_pointers))
+		return -EINVAL;
+	dce->num_pointers++;
+	if (ndr_write_int32(dce, dce->num_pointers))
+		return -EINVAL;
+
+	if (samr_write_ulong_conformant_array(dce, count, member_ids) ||
+	    samr_write_ulong_conformant_array(dce, count, attrs))
+		return -EINVAL;
+	return 0;
+}
+
+static int samr_build_user_sid(const struct smb_sid *domain_sid,
+			       __u32 rid,
+			       struct smb_sid *sid)
+{
+	if (!domain_sid || !sid ||
+	    domain_sid->num_subauth >= SID_MAX_SUB_AUTHORITIES)
+		return -EINVAL;
+	smb_copy_sid(sid, domain_sid);
+	sid->sub_auth[sid->num_subauth++] = rid;
+	return 0;
+}
+
+static int samr_write_alias_members(struct ksmbd_dcerpc *dce,
+				    const struct smb_sid *domain_sid,
+				    GArray *members)
+{
+	unsigned int count = members ? members->len : 0;
+	__u32 *member_ids = count ? (__u32 *)members->data : NULL;
+	unsigned int i;
+
+	if (ndr_write_int32(dce, count))
+		return -EINVAL;
+	if (!count)
+		return ndr_write_int32(dce, 0);
+
+	dce->num_pointers++;
+	if (ndr_write_int32(dce, dce->num_pointers) ||
+	    ndr_write_int32(dce, count))
+		return -EINVAL;
+
+	for (i = 0; i < count; i++) {
+		dce->num_pointers++;
+		if (ndr_write_int32(dce, dce->num_pointers))
+			return -EINVAL;
+	}
+
+	for (i = 0; i < count; i++) {
+		struct smb_sid sid;
+
+		if (samr_build_user_sid(domain_sid, member_ids[i], &sid) ||
+		    ndr_write_int32(dce, sid.num_subauth) ||
+		    smb_write_sid(dce, &sid))
+			return -EINVAL;
+	}
+	return 0;
+}
+
+static int samr_get_members_in_group_return(struct ksmbd_rpc_pipe *pipe)
+{
+	struct ksmbd_dcerpc *dce = pipe->dce;
+	struct connect_handle *ch;
+	GArray *members = NULL;
+	int ret;
+
+	ch = samr_ch_lookup(pipe, dce->sm_req.handle);
+	ret = samr_handle_access(ch, SAMR_HANDLE_GROUP, SAM_GROUP_LIST_MEMBERS);
+	if (ret)
+		goto out;
+
+	members = samr_collect_group_members(ch->rid);
+	if (!members) {
+		ret = KSMBD_RPC_ENOMEM;
+		goto out;
+	}
+
+	if (samr_write_group_members_buffer(dce, members))
+		ret = KSMBD_RPC_EBAD_DATA;
+	else
+		ret = KSMBD_RPC_OK;
+out:
+	if (members)
+		g_array_free(members, 1);
+	samr_ch_put(ch);
+	return ret;
+}
+
+static int samr_get_members_in_alias_return(struct ksmbd_rpc_pipe *pipe)
+{
+	struct ksmbd_dcerpc *dce = pipe->dce;
+	struct connect_handle *ch;
+	GArray *members = NULL;
+	int ret;
+
+	ch = samr_ch_lookup(pipe, dce->sm_req.handle);
+	ret = samr_handle_access(ch, SAMR_HANDLE_ALIAS, SAM_ALIAS_LIST_MEMBERS);
+	if (ret)
+		goto out;
+
+	members = samr_collect_group_members(ch->rid);
+	if (!members) {
+		ret = KSMBD_RPC_ENOMEM;
+		goto out;
+	}
+
+	if (samr_write_alias_members(dce, &ch->domain_sid, members))
+		ret = KSMBD_RPC_EBAD_DATA;
+	else
+		ret = KSMBD_RPC_OK;
+out:
+	if (members)
+		g_array_free(members, 1);
 	samr_ch_put(ch);
 	return ret;
 }
@@ -1103,23 +2136,23 @@ static int samr_query_user_info_simple(struct ksmbd_dcerpc *dce,
 		ret = samr_write_user_string_rep(dce, "");
 		if (ret)
 			return KSMBD_RPC_EBAD_DATA;
-		if (ndr_write_string(dce, ch->user->name) ||
-		    ndr_write_string(dce, ch->user->name) ||
-		    ndr_write_string(dce, "") ||
-		    ndr_write_string(dce, ""))
+		if (ndr_write_string_data(dce, ch->user->name) ||
+		    ndr_write_string_data(dce, ch->user->name) ||
+		    ndr_write_string_data(dce, "") ||
+		    ndr_write_string_data(dce, ""))
 			return KSMBD_RPC_EBAD_DATA;
 		break;
 	case 6: /* UserNameInformation */
 		if (samr_write_user_string_rep(dce, ch->user->name) ||
 		    samr_write_user_string_rep(dce, ch->user->name) ||
-		    ndr_write_string(dce, ch->user->name) ||
-		    ndr_write_string(dce, ch->user->name))
+		    ndr_write_string_data(dce, ch->user->name) ||
+		    ndr_write_string_data(dce, ch->user->name))
 			return KSMBD_RPC_EBAD_DATA;
 		break;
 	case 7: /* UserAccountNameInformation */
 	case 8: /* UserFullNameInformation */
 		if (samr_write_user_string_rep(dce, ch->user->name) ||
-		    ndr_write_string(dce, ch->user->name))
+		    ndr_write_string_data(dce, ch->user->name))
 			return KSMBD_RPC_EBAD_DATA;
 		break;
 	case 9: /* UserPrimaryGroupInformation */
@@ -1129,24 +2162,24 @@ static int samr_query_user_info_simple(struct ksmbd_dcerpc *dce,
 	case 10: /* UserHomeInformation */
 		if (samr_write_user_string_rep(dce, home) ||
 		    samr_write_user_string_rep(dce, "") ||
-		    ndr_write_string(dce, home) ||
-		    ndr_write_string(dce, ""))
+		    ndr_write_string_data(dce, home) ||
+		    ndr_write_string_data(dce, ""))
 			return KSMBD_RPC_EBAD_DATA;
 		break;
 	case 11: /* UserScriptInformation */
 		if (samr_write_user_string_rep(dce, "") ||
-		    ndr_write_string(dce, ""))
+		    ndr_write_string_data(dce, ""))
 			return KSMBD_RPC_EBAD_DATA;
 		break;
 	case 12: /* UserProfileInformation */
 		if (samr_write_user_string_rep(dce, profile) ||
-		    ndr_write_string(dce, profile))
+		    ndr_write_string_data(dce, profile))
 			return KSMBD_RPC_EBAD_DATA;
 		break;
 	case 13: /* UserAdminCommentInformation */
 	case 14: /* UserWorkStationsInformation */
 		if (samr_write_user_string_rep(dce, "") ||
-		    ndr_write_string(dce, ""))
+		    ndr_write_string_data(dce, ""))
 			return KSMBD_RPC_EBAD_DATA;
 		break;
 	}
@@ -1347,20 +2380,20 @@ static int samr_query_user_info_return(struct ksmbd_rpc_pipe *pipe)
 		goto out;
 
 
-	ret = ndr_write_string(dce, ch->user->name);
+	ret = ndr_write_string_data(dce, ch->user->name);
 	if (ret)
 		goto out;
 
-	ret = ndr_write_string(dce, ch->user->name);
+	ret = ndr_write_string_data(dce, ch->user->name);
 	if (ret)
 		goto out;
 
-	ret = ndr_write_string(dce, home_dir);
+	ret = ndr_write_string_data(dce, home_dir);
 	if (ret)
 		goto out;
 
 
-	ret = ndr_write_string(dce, profile_path);
+	ret = ndr_write_string_data(dce, profile_path);
 	if (ret)
 		goto out;
 
@@ -1434,6 +2467,9 @@ static int samr_query_security_return(struct ksmbd_rpc_pipe *pipe)
 			goto out;
 		}
 		rid = ch->user->uid;
+	} else if (ch->type == SAMR_HANDLE_GROUP ||
+		   ch->type == SAMR_HANDLE_ALIAS) {
+		rid = ch->rid;
 	}
 
 	curr_offset = dce->offset;
@@ -1656,8 +2692,32 @@ static int samr_invoke(struct ksmbd_rpc_pipe *pipe)
 	case SAMR_OPNUM_OPEN_DOMAIN:
 		ret = samr_open_domain_invoke(pipe);
 		break;
+	case SAMR_OPNUM_ENUM_GROUPS:
+		ret = samr_enum_groups_invoke(pipe);
+		break;
+	case SAMR_OPNUM_ENUM_USERS:
+		ret = samr_enum_users_invoke(pipe);
+		break;
+	case SAMR_OPNUM_ENUM_ALIASES:
+		ret = samr_enum_aliases_invoke(pipe);
+		break;
 	case SAMR_OPNUM_LOOKUP_NAMES:
 		ret = samr_lookup_names_invoke(pipe);
+		break;
+	case SAMR_OPNUM_LOOKUP_IDS:
+		ret = samr_lookup_ids_invoke(pipe);
+		break;
+	case SAMR_OPNUM_OPEN_GROUP:
+		ret = samr_open_group_invoke(pipe);
+		break;
+	case SAMR_OPNUM_GET_MEMBERS_IN_GROUP:
+		ret = samr_get_members_in_group_invoke(pipe);
+		break;
+	case SAMR_OPNUM_OPEN_ALIAS:
+		ret = samr_open_alias_invoke(pipe);
+		break;
+	case SAMR_OPNUM_GET_MEMBERS_IN_ALIAS:
+		ret = samr_get_members_in_alias_invoke(pipe);
 		break;
 	case SAMR_OPNUM_OPEN_USER:
 		ret = samr_open_user_invoke(pipe);
@@ -1728,8 +2788,32 @@ static int samr_return(struct ksmbd_rpc_pipe *pipe,
 		case SAMR_OPNUM_OPEN_DOMAIN:
 			status = samr_open_domain_return(pipe);
 			break;
+		case SAMR_OPNUM_ENUM_GROUPS:
+			status = samr_enum_groups_return(pipe);
+			break;
+		case SAMR_OPNUM_ENUM_USERS:
+			status = samr_enum_users_return(pipe);
+			break;
+		case SAMR_OPNUM_ENUM_ALIASES:
+			status = samr_enum_aliases_return(pipe);
+			break;
 		case SAMR_OPNUM_LOOKUP_NAMES:
 			status = samr_lookup_names_return(pipe);
+			break;
+		case SAMR_OPNUM_LOOKUP_IDS:
+			status = samr_lookup_ids_return(pipe);
+			break;
+		case SAMR_OPNUM_OPEN_GROUP:
+			status = samr_open_group_return(pipe);
+			break;
+		case SAMR_OPNUM_GET_MEMBERS_IN_GROUP:
+			status = samr_get_members_in_group_return(pipe);
+			break;
+		case SAMR_OPNUM_OPEN_ALIAS:
+			status = samr_open_alias_return(pipe);
+			break;
+		case SAMR_OPNUM_GET_MEMBERS_IN_ALIAS:
+			status = samr_get_members_in_alias_return(pipe);
 			break;
 		case SAMR_OPNUM_OPEN_USER:
 			status = samr_open_user_return(pipe);
