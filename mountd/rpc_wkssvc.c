@@ -11,7 +11,7 @@
 #include <errno.h>
 #include <linux/ksmbd_server.h>
 
-#include <management/share.h>
+#include <management/session.h>
 
 #include <rpc.h>
 #include <rpc_wkssvc.h>
@@ -41,115 +41,128 @@ static void wkssvc_request_cleanup(struct ksmbd_rpc_pipe *pipe)
 		ndr_free_uniq_vstring_ptr(&pipe->dce->wi_req.server_name);
 }
 
-static int __netwksta_entry_rep_ctr100(struct ksmbd_dcerpc *dce,
-				       gpointer entry)
+static const char *__wkssvc_computer_name(void)
 {
-	int ret = 0;
+	return global_conf.netbios_name ? global_conf.netbios_name : "";
+}
 
-	/* srvsvc_PlatformId */
+static const char *__wkssvc_lanroot(void)
+{
+	return global_conf.root_dir ? global_conf.root_dir : "";
+}
+
+static int __netwksta_entry_rep(struct ksmbd_dcerpc *dce, gpointer entry)
+{
+	int ret;
+
+	(void)entry;
+	dce->num_pointers++;
+	ret = ndr_write_int32(dce, dce->num_pointers);
+	if (ret)
+		return ret;
 	ret = ndr_write_int32(dce, WKSSVC_PLATFORM_ID_NT);
 	if (ret)
 		return ret;
-
-	/* server_name */
 	dce->num_pointers++;
-	ret = ndr_write_int32(dce, dce->num_pointers); /* ref pointer */
+	ret = ndr_write_int32(dce, dce->num_pointers);
 	if (ret)
 		return ret;
-
-	/* domain_name */
 	dce->num_pointers++;
-	ret = ndr_write_int32(dce, dce->num_pointers); /* ref pointer */
+	ret = ndr_write_int32(dce, dce->num_pointers);
 	if (ret)
 		return ret;
-
-	/* version_major */
 	ret = ndr_write_int32(dce, WKSSVC_VERSION_MAJOR);
 	if (ret)
 		return ret;
-
-	/* version_minor */
 	ret = ndr_write_int32(dce, WKSSVC_VERSION_MINOR);
-
-	return ret;
-}
-
-static int __netwksta_entry_data_ctr100(struct ksmbd_dcerpc *dce,
-					gpointer entry)
-{
-	int ret = 0;
-
-	/*
-	 * Umm... Hmm... Huh...
-	 */
-	ret = ndr_write_vstring(dce, STR_VAL(dce->wi_req.server_name));
 	if (ret)
 		return ret;
 
-	return ndr_write_vstring(dce, global_conf.work_group);
+	if (dce->wi_req.level >= 101) {
+		dce->num_pointers++;
+		ret = ndr_write_int32(dce, dce->num_pointers);
+		if (ret)
+			return ret;
+	}
+	if (dce->wi_req.level == 102)
+		return ndr_write_int32(dce, sm_session_count());
+	return 0;
+}
+
+static int __netwksta_entry_data(struct ksmbd_dcerpc *dce,
+				 gpointer entry)
+{
+	int ret;
+
+	(void)entry;
+	ret = ndr_write_vstring(dce, __wkssvc_computer_name());
+	if (ret)
+		return ret;
+	ret = ndr_write_vstring(dce, global_conf.work_group);
+	if (ret)
+		return ret;
+	if (dce->wi_req.level >= 101)
+		return ndr_write_vstring(dce, __wkssvc_lanroot());
+	return 0;
+}
+
+static int __wkssvc_level_supported(__u32 level)
+{
+	return level == 100 || level == 101 || level == 102;
+}
+
+static int wkssvc_write_null_info(struct ksmbd_dcerpc *dce)
+{
+	__u32 level = __wkssvc_level_supported(dce->wi_req.level) ?
+		dce->wi_req.level : 100;
+
+	if (ndr_write_int32(dce, level) ||
+	    ndr_write_int32(dce, 0))
+		return KSMBD_RPC_EBAD_DATA;
+	return 0;
 }
 
 static int wkssvc_netwksta_get_info_return(struct ksmbd_rpc_pipe *pipe)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
 
-	if (ndr_write_union_int32(dce, dce->wi_req.level))
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (dce->wi_req.level != 100) {
-		pr_err("Unsupported wksta info level (read): %d\n",
-			dce->wi_req.level);
-		dce->entry_rep = NULL;
+	if (!__wkssvc_level_supported(dce->wi_req.level)) {
+		if (wkssvc_write_null_info(dce))
+			return KSMBD_RPC_EBAD_DATA;
 		return KSMBD_RPC_EINVALID_LEVEL;
 	}
 
-	if (dce->entry_rep(dce, NULL))
+	if (ndr_write_int32(dce, dce->wi_req.level))
 		return KSMBD_RPC_EBAD_DATA;
-
-	if (dce->entry_data(dce, NULL))
+	if (__netwksta_entry_rep(dce, NULL))
 		return KSMBD_RPC_EBAD_DATA;
-
+	if (__netwksta_entry_data(dce, NULL))
+		return KSMBD_RPC_EBAD_DATA;
 	return KSMBD_RPC_OK;
 }
 
 static int wkssvc_netwksta_info_return(struct ksmbd_rpc_pipe *pipe)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
-	int status = KSMBD_RPC_ENOTIMPLEMENTED;
+	int status;
 
-	/*
-	 * Reserve space for response NDR header. We don't know yet if
-	 * the payload buffer is big enough. This will determine if we
-	 * can set DCERPC_PFC_FIRST_FRAG|DCERPC_PFC_LAST_FRAG or if we
-	 * will have a multi-part response.
-	 */
-	dce->offset = sizeof(struct dcerpc_header);
-	dce->offset += sizeof(struct dcerpc_response_header);
-	pipe->num_processed = 0;
+	dce->offset = sizeof(struct dcerpc_header) +
+		sizeof(struct dcerpc_response_header);
 
-	if (dce->wi_req.level == 100) {
-		dce->entry_rep = __netwksta_entry_rep_ctr100;
-		dce->entry_data = __netwksta_entry_data_ctr100;
+	if (rpc_restricted_context(dce->rpc_req)) {
+		status = KSMBD_RPC_EACCESS_DENIED;
+		if (wkssvc_write_null_info(dce))
+			return KSMBD_RPC_EBAD_DATA;
 	} else {
-		pr_err("Unsupported wksta info level (write): %d\n",
-			dce->wi_req.level);
-		rpc_pipe_reset(pipe);
+		status = wkssvc_netwksta_get_info_return(pipe);
 	}
 
-	if (dce->req_hdr.opnum == WKSSVC_NETWKSTA_GET_INFO)
-		status = wkssvc_netwksta_get_info_return(pipe);
-
-	if (rpc_restricted_context(dce->rpc_req))
-		status = KSMBD_RPC_EACCESS_DENIED;
-
-	wkssvc_clear_headers(pipe, status);
-
-	/*
-	 * [out] DWORD Return value/code
-	 */
+	if (status == KSMBD_RPC_EBAD_DATA)
+		return status;
 	if (ndr_write_int32(dce, status))
 		return KSMBD_RPC_EBAD_DATA;
 
+	wkssvc_clear_headers(pipe, status);
 	if (dcerpc_write_headers(dce, status))
 		return KSMBD_RPC_EBAD_DATA;
 
@@ -161,6 +174,8 @@ static int
 wkssvc_netwksta_get_info_invoke(struct ksmbd_rpc_pipe *pipe,
 				struct wkssvc_netwksta_info_request *hdr)
 {
+	(void)pipe;
+	(void)hdr;
 	return KSMBD_RPC_OK;
 }
 
@@ -168,47 +183,43 @@ static int
 wkssvc_parse_netwksta_info_req(struct ksmbd_dcerpc *dce,
 			       struct wkssvc_netwksta_info_request *hdr)
 {
-	int val;
+	__u32 level;
 
 	if (ndr_read_uniq_vstring_ptr(dce, &hdr->server_name))
 		return -EINVAL;
-	if (ndr_read_int32(dce, &val))
+	if (ndr_read_int32(dce, &level))
 		return -EINVAL;
-	hdr->level = val;
+	hdr->level = level;
 	return 0;
 }
 
 static int wkssvc_netwksta_info_invoke(struct ksmbd_rpc_pipe *pipe)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
-	int ret = KSMBD_RPC_ENOTIMPLEMENTED;
 
 	if (wkssvc_parse_netwksta_info_req(dce, &dce->wi_req))
 		return KSMBD_RPC_EBAD_DATA;
+	if (ndr_request_end(dce))
+		return KSMBD_RPC_EINVALID_PARAMETER;
 
 	if (rpc_restricted_context(dce->rpc_req))
 		return KSMBD_RPC_OK;
 
 	if (dce->req_hdr.opnum == WKSSVC_NETWKSTA_GET_INFO)
-		ret = wkssvc_netwksta_get_info_invoke(pipe, &dce->wi_req);
-	return ret;
+		return wkssvc_netwksta_get_info_invoke(pipe, &dce->wi_req);
+	return KSMBD_RPC_OK;
 }
 
 static int wkssvc_invoke(struct ksmbd_rpc_pipe *pipe)
 {
-	int ret = KSMBD_RPC_ENOTIMPLEMENTED;
-
 	switch (pipe->dce->req_hdr.opnum) {
 	case WKSSVC_NETWKSTA_GET_INFO:
-		ret = wkssvc_netwksta_info_invoke(pipe);
-		break;
+		return wkssvc_netwksta_info_invoke(pipe);
 	default:
 		pr_debug("WKSSVC: unsupported INVOKE method %d\n",
-		       pipe->dce->req_hdr.opnum);
-		break;
+			 pipe->dce->req_hdr.opnum);
+		return KSMBD_RPC_OK;
 	}
-
-	return ret;
 }
 
 static int wkssvc_return(struct ksmbd_rpc_pipe *pipe,
@@ -216,21 +227,18 @@ static int wkssvc_return(struct ksmbd_rpc_pipe *pipe,
 			 int max_resp_sz)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
-	int ret;
 
 	switch (dce->req_hdr.opnum) {
 	case WKSSVC_NETWKSTA_GET_INFO:
 		dcerpc_set_ext_payload(dce, resp->payload, max_resp_sz);
-
-		ret = wkssvc_netwksta_info_return(pipe);
-		break;
+		return wkssvc_netwksta_info_return(pipe);
 	default:
-		pr_err("WKSSVC: unsupported RETURN method %d\n",
-			dce->req_hdr.opnum);
-		ret = KSMBD_RPC_EBAD_FUNC;
-		break;
+		dcerpc_set_ext_payload(dce, resp->payload, max_resp_sz);
+		if (dcerpc_write_fault(dce, DCERPC_NCA_S_OP_RNG_ERROR))
+			return KSMBD_RPC_EBAD_DATA;
+		dce->rpc_resp->payload_sz = dce->offset;
+		return KSMBD_RPC_OK;
 	}
-	return ret;
 }
 
 int rpc_wkssvc_read_request(struct ksmbd_rpc_pipe *pipe,

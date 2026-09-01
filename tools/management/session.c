@@ -201,6 +201,19 @@ int sm_handle_tree_disconnect(unsigned long long sess_id,
 	return 0;
 }
 
+unsigned int sm_session_count(void)
+{
+	unsigned int count;
+
+	if (!sessions_table)
+		return 0;
+
+	g_rw_lock_reader_lock(&sessions_table_lock);
+	count = g_hash_table_size(sessions_table);
+	g_rw_lock_reader_unlock(&sessions_table_lock);
+	return count;
+}
+
 void sm_destroy(void)
 {
 	if (sessions_table) {

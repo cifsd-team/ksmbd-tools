@@ -31,6 +31,7 @@ int sm_handle_tree_connect(unsigned long long id,
 			   struct ksmbd_tree_conn *tree_conn);
 int sm_handle_tree_disconnect(unsigned long long sess_id,
 			      unsigned long long tree_conn_id);
+unsigned int sm_session_count(void);
 
 void sm_destroy(void);
 void sm_init(void);
