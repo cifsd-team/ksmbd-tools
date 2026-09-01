@@ -1543,6 +1543,8 @@ static int samr_lookup_names_return(struct ksmbd_rpc_pipe *pipe)
 		ret = mapped ? SAMR_STATUS_SOME_NOT_MAPPED :
 			      SAMR_STATUS_NONE_MAPPED;
 out:
+	if (groups)
+		g_ptr_array_free(groups, 1);
 	samr_free_names(&dce->sm_req);
 	samr_ch_put(ch);
 	return ret;
