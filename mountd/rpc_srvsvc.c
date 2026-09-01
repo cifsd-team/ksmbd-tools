@@ -38,10 +38,20 @@
 
 #define SRVSVC_OPNUM_SHARE_ENUM_ALL	15
 #define SRVSVC_OPNUM_GET_SHARE_INFO	16
+#define SRVSVC_OPNUM_SERVER_GET_INFO	21
 #define SRVSVC_OPNUM_SHARE_ENUM_STICKY	36
 
 #define SRVSVC_NERR_NET_NAME_NOT_FOUND	0x00000906U
 #define SRVSVC_SECURITY_DESCRIPTOR_SIZE	512
+#define SRVSVC_PLATFORM_ID_NT		500
+#define SRVSVC_VERSION_MAJOR		0x2
+#define SRVSVC_VERSION_MINOR		0x1
+#define SRVSVC_SERVER_TYPE_SERVER	0x00000002U
+#define SRVSVC_SERVER_TYPE_NT		0x00001000U
+#define SRVSVC_SERVER_TYPE_SERVER_NT	0x00008000U
+#define SRVSVC_SERVER_TYPE		(SRVSVC_SERVER_TYPE_SERVER | \
+					 SRVSVC_SERVER_TYPE_NT | \
+					 SRVSVC_SERVER_TYPE_SERVER_NT)
 
 static int srvsvc_clear_headers(struct ksmbd_rpc_pipe *pipe,
 				int status);
@@ -49,6 +59,31 @@ static int srvsvc_clear_headers(struct ksmbd_rpc_pipe *pipe,
 static int __share_level_supported(__u32 level)
 {
 	return level == 0 || level == 1 || level == 2 || level == 502;
+}
+
+static int __server_level_supported(__u32 level)
+{
+	return level == 100 || level == 101 || level == 102 || level == 103;
+}
+
+static __u32 __server_output_level(__u32 level)
+{
+	return __server_level_supported(level) ? level : 100;
+}
+
+static const char *__server_name(void)
+{
+	return global_conf.netbios_name ? global_conf.netbios_name : "";
+}
+
+static const char *__server_comment(void)
+{
+	return global_conf.server_string ? global_conf.server_string : "";
+}
+
+static const char *__server_userpath(void)
+{
+	return global_conf.root_dir ? global_conf.root_dir : "";
 }
 
 static int __share_type(struct ksmbd_share *share)
@@ -257,6 +292,121 @@ static int __share_entry_data_ctr502(struct ksmbd_dcerpc *dce,
 	if (ret)
 		return ret;
 	return __share_write_security_descriptor(dce);
+}
+
+static int __server_info_rep_100(struct ksmbd_dcerpc *dce)
+{
+	if (ndr_write_int32(dce, SRVSVC_PLATFORM_ID_NT))
+		return -EINVAL;
+	return __share_write_ref(dce);
+}
+
+static int __server_info_rep_101(struct ksmbd_dcerpc *dce)
+{
+	int ret;
+
+	ret = __server_info_rep_100(dce);
+	if (ret)
+		return ret;
+	if (ndr_write_int32(dce, SRVSVC_VERSION_MAJOR))
+		return -EINVAL;
+	if (ndr_write_int32(dce, SRVSVC_VERSION_MINOR))
+		return -EINVAL;
+	if (ndr_write_int32(dce, SRVSVC_SERVER_TYPE))
+		return -EINVAL;
+	return __share_write_ref(dce);
+}
+
+static int __server_info_rep_102(struct ksmbd_dcerpc *dce)
+{
+	int ret;
+
+	ret = __server_info_rep_101(dce);
+	if (ret)
+		return ret;
+	if (ndr_write_int32(dce, global_conf.max_connections))
+		return -EINVAL;
+	if (ndr_write_int32(dce, global_conf.deadtime))
+		return -EINVAL;
+	if (ndr_write_int32(dce, 0))
+		return -EINVAL;
+	if (ndr_write_int32(dce, 0))
+		return -EINVAL;
+	if (ndr_write_int32(dce, 0))
+		return -EINVAL;
+	if (ndr_write_int32(dce, 0))
+		return -EINVAL;
+	return __share_write_ref(dce);
+}
+
+static int __server_info_rep_103(struct ksmbd_dcerpc *dce)
+{
+	int ret;
+
+	ret = __server_info_rep_102(dce);
+	if (ret)
+		return ret;
+	return ndr_write_int32(dce, 0);
+}
+
+static int __server_info_rep(struct ksmbd_dcerpc *dce, __u32 level)
+{
+	switch (level) {
+	case 100:
+		return __server_info_rep_100(dce);
+	case 101:
+		return __server_info_rep_101(dce);
+	case 102:
+		return __server_info_rep_102(dce);
+	case 103:
+		return __server_info_rep_103(dce);
+	default:
+		break;
+	}
+
+	return -EINVAL;
+}
+
+static int __server_info_data_100(struct ksmbd_dcerpc *dce)
+{
+	return ndr_write_vstring(dce, __server_name());
+}
+
+static int __server_info_data_101(struct ksmbd_dcerpc *dce)
+{
+	int ret;
+
+	ret = __server_info_data_100(dce);
+	if (ret)
+		return ret;
+	return ndr_write_vstring(dce, __server_comment());
+}
+
+static int __server_info_data_102(struct ksmbd_dcerpc *dce)
+{
+	int ret;
+
+	ret = __server_info_data_101(dce);
+	if (ret)
+		return ret;
+	return ndr_write_vstring(dce, __server_userpath());
+}
+
+static int __server_info_data(struct ksmbd_dcerpc *dce, __u32 level)
+{
+	switch (level) {
+	case 100:
+		return __server_info_data_100(dce);
+	case 101:
+		return __server_info_data_101(dce);
+	case 102:
+	case 103:
+		return __server_info_data_102(dce);
+	default:
+		break;
+	}
+
+	return -EINVAL;
 }
 
 static int srvsvc_share_enum_build_response(struct ksmbd_rpc_pipe *pipe)
@@ -735,6 +885,71 @@ static int srvsvc_share_info_return(struct ksmbd_rpc_pipe *pipe)
 	return KSMBD_RPC_OK;
 }
 
+static int srvsvc_parse_server_info_req(struct ksmbd_dcerpc *dce,
+					struct srvsvc_share_info_request *hdr)
+{
+	__u32 level;
+
+	if (ndr_read_uniq_vstring_ptr(dce, &hdr->server_name))
+		return -EINVAL;
+	if (ndr_read_int32(dce, &level))
+		return -EINVAL;
+	hdr->level = level;
+	return 0;
+}
+
+static int srvsvc_server_get_info_invoke(struct ksmbd_rpc_pipe *pipe)
+{
+	struct ksmbd_dcerpc *dce = pipe->dce;
+
+	if (srvsvc_parse_server_info_req(dce, &dce->si_req))
+		return KSMBD_RPC_EBAD_DATA;
+	if (ndr_request_end(dce))
+		return KSMBD_RPC_EINVALID_PARAMETER;
+	if (!__server_level_supported(dce->si_req.level))
+		dce->si_req.operation_status = KSMBD_RPC_EINVALID_LEVEL;
+	return KSMBD_RPC_OK;
+}
+
+static int srvsvc_server_get_info_return(struct ksmbd_rpc_pipe *pipe)
+{
+	struct ksmbd_dcerpc *dce = pipe->dce;
+	__u32 output_level = __server_output_level(dce->si_req.level);
+	int status = dce->si_req.operation_status;
+
+	dce->offset = sizeof(struct dcerpc_header) +
+		sizeof(struct dcerpc_response_header);
+	pipe->num_processed = 0;
+
+	if (rpc_restricted_context(dce->rpc_req) && !status)
+		status = KSMBD_RPC_EACCESS_DENIED;
+
+	if (ndr_write_int32(dce, output_level))
+		return KSMBD_RPC_EBAD_DATA;
+
+	if (status) {
+		if (ndr_write_int32(dce, 0))
+			return KSMBD_RPC_EBAD_DATA;
+	} else {
+		dce->num_pointers++;
+		if (ndr_write_int32(dce, dce->num_pointers))
+			return KSMBD_RPC_EBAD_DATA;
+		if (__server_info_rep(dce, output_level) ||
+		    __server_info_data(dce, output_level))
+			return KSMBD_RPC_EBAD_DATA;
+	}
+
+	if (ndr_write_int32(dce, status))
+		return KSMBD_RPC_EBAD_DATA;
+
+	srvsvc_clear_headers(pipe, status);
+	if (dcerpc_write_headers(dce, status))
+		return KSMBD_RPC_EBAD_DATA;
+
+	dce->rpc_resp->payload_sz = dce->offset;
+	return KSMBD_RPC_OK;
+}
+
 static int srvsvc_invoke(struct ksmbd_rpc_pipe *pipe)
 {
 	switch (pipe->dce->req_hdr.opnum) {
@@ -742,6 +957,8 @@ static int srvsvc_invoke(struct ksmbd_rpc_pipe *pipe)
 	case SRVSVC_OPNUM_SHARE_ENUM_STICKY:
 	case SRVSVC_OPNUM_GET_SHARE_INFO:
 		return srvsvc_share_info_invoke(pipe);
+	case SRVSVC_OPNUM_SERVER_GET_INFO:
+		return srvsvc_server_get_info_invoke(pipe);
 	default:
 		pr_debug("SRVSVC: unsupported INVOKE method %d\n",
 			 pipe->dce->req_hdr.opnum);
@@ -763,6 +980,9 @@ static int srvsvc_return(struct ksmbd_rpc_pipe *pipe,
 	case SRVSVC_OPNUM_GET_SHARE_INFO:
 		dcerpc_set_ext_payload(dce, resp->payload, max_resp_sz);
 		return srvsvc_share_info_return(pipe);
+	case SRVSVC_OPNUM_SERVER_GET_INFO:
+		dcerpc_set_ext_payload(dce, resp->payload, max_resp_sz);
+		return srvsvc_server_get_info_return(pipe);
 	default:
 		dcerpc_set_ext_payload(dce, resp->payload, max_resp_sz);
 		if (dcerpc_write_fault(dce, DCERPC_NCA_S_OP_RNG_ERROR))
