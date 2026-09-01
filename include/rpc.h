@@ -21,6 +21,23 @@
 #define KSMBD_DCERPC_RETURN_READY	(1 << 7)
 
 #define KSMBD_DCERPC_MAX_PREFERRED_SIZE -1
+#define KSMBD_RPC_HANDLE_SIZE		20
+
+/* Wire status values used by SAMR and LSAD (the IPC status values below are
+ * intentionally kept separate from these protocol return codes). */
+#define KSMBD_NT_STATUS_ACCESS_DENIED		0xC0000022U
+#define KSMBD_NT_STATUS_BUFFER_TOO_SMALL	0xC0000023U
+#define KSMBD_NT_STATUS_INSUFFICIENT_RESOURCES	0xC000009AU
+#define KSMBD_NT_STATUS_INVALID_HANDLE		0xC0000008U
+#define KSMBD_NT_STATUS_INVALID_INFO_CLASS	0xC0000003U
+#define KSMBD_NT_STATUS_INVALID_PARAMETER	0xC000000DU
+#define KSMBD_NT_STATUS_MORE_ENTRIES		0x00000105U
+#define KSMBD_NT_STATUS_NONE_MAPPED		0xC0000073U
+#define KSMBD_NT_STATUS_NOT_IMPLEMENTED		0xC0000002U
+#define KSMBD_NT_STATUS_NO_SUCH_DOMAIN		0xC00000DFU
+#define KSMBD_NT_STATUS_NO_SUCH_USER		0xC0000064U
+#define KSMBD_NT_STATUS_SUCCESS			0x00000000U
+#define KSMBD_NT_STATUS_SOME_NOT_MAPPED		0x00000107U
 
 #define DCERPC_PTYPE_RPC_REQUEST	0x00
 #define DCERPC_PTYPE_RPC_PING		0x01
@@ -137,6 +154,12 @@ struct ndr_uniq_char_ptr {
 	char	*ptr;
 };
 
+struct ndr_string_rep {
+	__u16	length;
+	__u16	size;
+	__u32	ref_id;
+};
+
 #define STR_VAL(x)	((x).ptr)
 
 struct srvsvc_share_info_request {
@@ -160,7 +183,21 @@ struct wkssvc_netwksta_info_request {
 struct samr_info_request {
 	int				level;
 	int				client_version;
+	unsigned int			access_mask;
+	unsigned int			supported_features;
+	unsigned int			resume_handle;
+	unsigned int			buf_size;
+	unsigned int			security_secinfo;
+	unsigned int			name_count;
+	unsigned int			lookup_count;
+	unsigned int			lookup_options;
+	unsigned int			client_revision;
+	unsigned int			enum_start;
+	unsigned int			enum_count;
+	unsigned char			sid[68];
 	struct ndr_uniq_char_ptr	name;
+	GPtrArray			*names;
+	int				operation_status;
 	unsigned char handle[20];
 	unsigned int rid;
 };
@@ -168,6 +205,12 @@ struct samr_info_request {
 struct lsarpc_info_request {
 	unsigned char handle[20];
 	unsigned int level;
+	unsigned int access_mask;
+	unsigned int lookup_count;
+	unsigned int lookup_options;
+	unsigned int client_revision;
+	unsigned int			interface_kind;
+	int				operation_status;
 };
 
 struct dcerpc_guid {
@@ -189,6 +232,11 @@ struct dcerpc_context {
 	__u8			num_syntaxes;
 	struct dcerpc_syntax	abstract_syntax;
 	struct dcerpc_syntax    *transfer_syntaxes;
+};
+
+struct dcerpc_context_binding {
+	__u16			id;
+	struct dcerpc_syntax	abstract_syntax;
 };
 
 struct dcerpc_bind_request {
@@ -238,6 +286,7 @@ enum DCERPC_BIND_TIME_OPTIONS {
  */
 
 struct ksmbd_rpc_command;
+struct ksmbd_rpc_pipe;
 
 struct ksmbd_dcerpc {
 	unsigned int		flags;
@@ -251,6 +300,7 @@ struct ksmbd_dcerpc {
 	size_t			response_payload_offset;
 	size_t			response_alloc_hint;
 	size_t			response_limit;
+	int			bind_req_active;
 
 	union {
 		struct dcerpc_header			hdr;
@@ -269,6 +319,7 @@ struct ksmbd_dcerpc {
 
 	struct ksmbd_rpc_command	*rpc_req;
 	struct ksmbd_rpc_command	*rpc_resp;
+	void			(*request_cleanup)(struct ksmbd_rpc_pipe *pipe);
 
 	/*
 	 * Find out the estimated entry size under the given container level
@@ -292,10 +343,14 @@ struct ksmbd_dcerpc {
 
 struct ksmbd_rpc_pipe {
 	unsigned int		id;
+	unsigned int		refcount;
+	int			retired;
+	GMutex			op_lock;
 
 	int			num_entries;
 	int			num_processed;
 	GPtrArray		*entries;
+	GPtrArray		*contexts;
 
 	struct ksmbd_dcerpc	*dce;
 
@@ -321,15 +376,22 @@ int ndr_write_union_int16(struct ksmbd_dcerpc *dce, __u16 value);
 int ndr_write_union_int32(struct ksmbd_dcerpc *dce, __u32 value);
 int ndr_read_union_int32(struct ksmbd_dcerpc *dce, __u32 *value);
 
-int ndr_write_bytes(struct ksmbd_dcerpc *dce, void *value, size_t sz);
+int ndr_write_bytes(struct ksmbd_dcerpc *dce, const void *value, size_t sz);
 int ndr_read_bytes(struct ksmbd_dcerpc *dce, void *value, size_t sz);
 int ndr_write_vstring(struct ksmbd_dcerpc *dce, void *value);
-int ndr_write_string(struct ksmbd_dcerpc *dce, char *str);
-int ndr_write_lsa_string(struct ksmbd_dcerpc *dce, char *str);
+int ndr_write_string(struct ksmbd_dcerpc *dce, const char *str);
+int ndr_write_lsa_string(struct ksmbd_dcerpc *dce, const char *str);
+int ndr_write_string_rep(struct ksmbd_dcerpc *dce, const char *str);
+int ndr_write_lsa_string_rep(struct ksmbd_dcerpc *dce, const char *str);
 char *ndr_read_vstring(struct ksmbd_dcerpc *dce);
+char *ndr_read_vstring_compat(struct ksmbd_dcerpc *dce);
 int ndr_read_vstring_ptr(struct ksmbd_dcerpc *dce, struct ndr_char_ptr *ctr);
 int ndr_read_uniq_vstring_ptr(struct ksmbd_dcerpc *dce,
 			      struct ndr_uniq_char_ptr *ctr);
+int ndr_read_string_rep(struct ksmbd_dcerpc *dce,
+			struct ndr_string_rep *rep);
+char *ndr_read_string_data(struct ksmbd_dcerpc *dce,
+			   const struct ndr_string_rep *rep);
 void ndr_free_vstring_ptr(struct ndr_char_ptr *ctr);
 void ndr_free_uniq_vstring_ptr(struct ndr_uniq_char_ptr *ctr);
 int ndr_read_ptr(struct ksmbd_dcerpc *dce, struct ndr_ptr *ctr);
@@ -344,6 +406,14 @@ int dcerpc_write_headers(struct ksmbd_dcerpc *dce, int method_status);
 void dcerpc_set_ext_payload(struct ksmbd_dcerpc *dce,
 			    void *payload,
 			    size_t sz);
+int ndr_request_end(struct ksmbd_dcerpc *dce);
+guint rpc_handle_hash(gconstpointer key);
+gboolean rpc_handle_equal(gconstpointer a, gconstpointer b);
+int rpc_handle_generate(unsigned char *handle, size_t size,
+			unsigned int pipe_id);
+const struct dcerpc_syntax *rpc_pipe_context_syntax(
+					struct ksmbd_rpc_pipe *pipe,
+					__u16 context_id);
 void rpc_pipe_reset(struct ksmbd_rpc_pipe *pipe);
 
 void rpc_init(void);

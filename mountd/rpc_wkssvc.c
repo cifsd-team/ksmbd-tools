@@ -35,6 +35,12 @@ static int wkssvc_clear_headers(struct ksmbd_rpc_pipe *pipe,
 	return 0;
 }
 
+static void wkssvc_request_cleanup(struct ksmbd_rpc_pipe *pipe)
+{
+	if (pipe && pipe->dce)
+		ndr_free_uniq_vstring_ptr(&pipe->dce->wi_req.server_name);
+}
+
 static int __netwksta_entry_rep_ctr100(struct ksmbd_dcerpc *dce,
 				       gpointer entry)
 {
@@ -236,5 +242,13 @@ int rpc_wkssvc_read_request(struct ksmbd_rpc_pipe *pipe,
 
 int rpc_wkssvc_write_request(struct ksmbd_rpc_pipe *pipe)
 {
-	return wkssvc_invoke(pipe);
+	struct wkssvc_netwksta_info_request *req = &pipe->dce->wi_req;
+	int ret;
+
+	pipe->dce->request_cleanup = wkssvc_request_cleanup;
+	memset(req, 0, sizeof(*req));
+	ret = wkssvc_invoke(pipe);
+	if (ret != KSMBD_RPC_OK)
+		wkssvc_clear_headers(pipe, ret);
+	return ret;
 }

@@ -276,6 +276,8 @@ static int rpc_request(struct ksmbd_ipc_msg *msg)
 		goto out;
 
 	req = (struct ksmbd_rpc_command *)msg->payload;
+	if (req->payload_sz > msg->sz - sizeof(*req))
+		goto out;
 	if (req->flags & KSMBD_RPC_METHOD_RETURN)
 		resp_msg = ipc_msg_alloc(KSMBD_IPC_MAX_MESSAGE_SIZE -
 				sizeof(struct ksmbd_rpc_command));
