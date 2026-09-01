@@ -199,6 +199,43 @@ struct ksmbd_user *usm_lookup_user(char *name)
 	return user;
 }
 
+struct ksmbd_user *usm_lookup_user_casefold(const char *name)
+{
+	struct ksmbd_user *user, *ret = NULL;
+	GHashTableIter iter;
+
+	if (!name)
+		return NULL;
+
+	g_rw_lock_reader_lock(&users_table_lock);
+	g_hash_table_iter_init(&iter, users_table);
+	while (g_hash_table_iter_next(&iter, NULL, (gpointer *)&user)) {
+		if (g_ascii_strcasecmp(user->name, name))
+			continue;
+		ret = get_ksmbd_user(user);
+		break;
+	}
+	g_rw_lock_reader_unlock(&users_table_lock);
+	return ret;
+}
+
+struct ksmbd_user *usm_lookup_uid(uid_t uid)
+{
+	struct ksmbd_user *user, *ret = NULL;
+	GHashTableIter iter;
+
+	g_rw_lock_reader_lock(&users_table_lock);
+	g_hash_table_iter_init(&iter, users_table);
+	while (g_hash_table_iter_next(&iter, NULL, (gpointer *)&user)) {
+		if (user->uid != uid)
+			continue;
+		ret = get_ksmbd_user(user);
+		break;
+	}
+	g_rw_lock_reader_unlock(&users_table_lock);
+	return ret;
+}
+
 int usm_user_name(char *name, char *p)
 {
 	int is_name;

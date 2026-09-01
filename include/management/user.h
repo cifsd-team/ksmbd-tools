@@ -46,6 +46,8 @@ struct ksmbd_user *get_ksmbd_user(struct ksmbd_user *user);
 void put_ksmbd_user(struct ksmbd_user *user);
 
 struct ksmbd_user *usm_lookup_user(char *name);
+struct ksmbd_user *usm_lookup_user_casefold(const char *name);
+struct ksmbd_user *usm_lookup_uid(uid_t uid);
 
 void usm_update_user_password(struct ksmbd_user *user, char *pass);
 

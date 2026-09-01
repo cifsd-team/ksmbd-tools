@@ -39,6 +39,7 @@
 
 #define SID_TYPE_USER		1
 #define SID_TYPE_GROUP		2
+#define SID_TYPE_DOMAIN		3
 #define SID_TYPE_UNKNOWN	8
 
 struct smb_ntsd {
