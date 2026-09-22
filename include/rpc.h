@@ -142,6 +142,9 @@ struct ndr_uniq_char_ptr {
 struct srvsvc_share_info_request {
 	int				level;
 	size_t				max_size;
+	unsigned int			resume_handle;
+	unsigned int			total_entries;
+	int				operation_status;
 
 	struct ndr_uniq_char_ptr	server_name;
 	struct ndr_char_ptr		share_name;
@@ -242,6 +245,12 @@ struct ksmbd_dcerpc {
 	size_t			payload_sz;
 	char			*payload;
 	int			num_pointers;
+	int			response_started;
+	char			*response_payload;
+	size_t			response_payload_sz;
+	size_t			response_payload_offset;
+	size_t			response_alloc_hint;
+	size_t			response_limit;
 
 	union {
 		struct dcerpc_header			hdr;
@@ -325,6 +334,8 @@ void ndr_free_vstring_ptr(struct ndr_char_ptr *ctr);
 void ndr_free_uniq_vstring_ptr(struct ndr_uniq_char_ptr *ctr);
 int ndr_read_ptr(struct ksmbd_dcerpc *dce, struct ndr_ptr *ctr);
 int ndr_read_uniq_ptr(struct ksmbd_dcerpc *dce, struct ndr_uniq_ptr *ctr);
+int ndr_max_entries(struct ksmbd_dcerpc *dce,
+		    struct ksmbd_rpc_pipe *pipe);
 int __ndr_write_array_of_structs(struct ksmbd_rpc_pipe *pipe, int max_entry_nr);
 int ndr_write_array_of_structs(struct ksmbd_rpc_pipe *pipe);
 

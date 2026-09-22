@@ -7,6 +7,7 @@
 
 #include <memory.h>
 #include <endian.h>
+#include <stdint.h>
 #include <glib.h>
 #include <errno.h>
 #include <linux/ksmbd_server.h>
@@ -112,6 +113,7 @@ static void dcerpc_free(struct ksmbd_dcerpc *dce)
 {
 	if (!(dce->flags & KSMBD_DCERPC_EXTERNAL_PAYLOAD))
 		g_free(dce->payload);
+	g_free(dce->response_payload);
 	g_free(dce);
 }
 
@@ -151,6 +153,17 @@ void rpc_pipe_reset(struct ksmbd_rpc_pipe *pipe)
 			pipe->entry_processed(pipe, 0);
 	}
 	pipe->num_entries = 0;
+	pipe->entry_processed = NULL;
+
+	if (!pipe->dce)
+		return;
+
+	pipe->dce->response_started = 0;
+	g_clear_pointer(&pipe->dce->response_payload, g_free);
+	pipe->dce->response_payload_sz = 0;
+	pipe->dce->response_payload_offset = 0;
+	pipe->dce->response_alloc_hint = 0;
+	pipe->dce->response_limit = 0;
 }
 
 static void __rpc_pipe_free(struct ksmbd_rpc_pipe *pipe)
@@ -614,9 +627,10 @@ int ndr_read_uniq_ptr(struct ksmbd_dcerpc *dce, struct ndr_uniq_ptr *ctr)
 	return 0;
 }
 
-static int __max_entries(struct ksmbd_dcerpc *dce, struct ksmbd_rpc_pipe *pipe)
+int ndr_max_entries(struct ksmbd_dcerpc *dce, struct ksmbd_rpc_pipe *pipe)
 {
-	int current_size, i;
+	size_t current_size, limit, threshold;
+	int i;
 
 	if (!(dce->flags & KSMBD_DCERPC_FIXED_PAYLOAD_SZ))
 		return pipe->num_entries;
@@ -626,14 +640,22 @@ static int __max_entries(struct ksmbd_dcerpc *dce, struct ksmbd_rpc_pipe *pipe)
 		return pipe->num_entries;
 	}
 
+	limit = dce->response_limit ? dce->response_limit :
+		dce->payload_sz;
+	threshold = limit - limit / 5;
 	current_size = 0;
 	for (i = 0; i < pipe->num_entries; i++) {
 		void *entry;
+		int entry_size;
 
 		entry = g_ptr_array_index(pipe->entries, i);
-		current_size += dce->entry_size(dce, entry);
+		entry_size = dce->entry_size(dce, entry);
+		if (entry_size < 0 ||
+		    current_size > SIZE_MAX - (size_t)entry_size)
+			return i;
+		current_size += entry_size;
 
-		if (current_size < 4 * dce->payload_sz / 5)
+		if (current_size < threshold)
 			continue;
 		return i;
 	}
@@ -703,7 +725,7 @@ int ndr_write_array_of_structs(struct ksmbd_rpc_pipe *pipe)
 	if (pipe->num_entries == 0)
 		return ndr_write_empty_array_of_struct(pipe);
 
-	max_entry_nr = __max_entries(dce, pipe);
+	max_entry_nr = ndr_max_entries(dce, pipe);
 	if (ndr_write_int32(dce, max_entry_nr))
 		return KSMBD_RPC_EBAD_DATA;
 	/*
@@ -866,29 +888,48 @@ static int dcerpc_request_hdr_read(struct ksmbd_dcerpc *dce,
 
 int dcerpc_write_headers(struct ksmbd_dcerpc *dce, int method_status)
 {
-	int payload_offset, ret;
+	struct dcerpc_header hdr;
+	struct dcerpc_response_header resp_hdr;
+	size_t payload_offset;
+	int continuation;
+	int ret;
 
+	(void)method_status;
 	payload_offset = dce->offset;
+	if (payload_offset < sizeof(struct dcerpc_header) +
+	    sizeof(struct dcerpc_response_header) ||
+	    payload_offset > UINT16_MAX)
+		return -EINVAL;
 	dce->offset = 0;
 
-	dce->hdr.ptype = DCERPC_PTYPE_RPC_RESPONSE;
-	dce->hdr.pfc_flags = DCERPC_PFC_FIRST_FRAG | DCERPC_PFC_LAST_FRAG;
-	dce->hdr.frag_length = payload_offset;
-	if (method_status == KSMBD_RPC_EMORE_DATA)
-		dce->hdr.pfc_flags = 0;
-	ret = dcerpc_hdr_write(dce, &dce->hdr);
+	hdr = dce->hdr;
+	hdr.ptype = DCERPC_PTYPE_RPC_RESPONSE;
+	continuation = !!(dce->flags & KSMBD_DCERPC_RETURN_READY);
+	hdr.pfc_flags = continuation ? 0 : DCERPC_PFC_LAST_FRAG;
+	if (!dce->response_started)
+		hdr.pfc_flags |= DCERPC_PFC_FIRST_FRAG;
+	hdr.frag_length = payload_offset;
+	ret = dcerpc_hdr_write(dce, &hdr);
 	if (ret)
 		return ret;
 
-	/* cast req_hdr to resp_hdr and NULL out lower 2 bytes */
-	dce->req_hdr.opnum = 0;
-	dce->resp_hdr.cancel_count = 0;
-	dce->resp_hdr.alloc_hint = payload_offset;
-	ret = dcerpc_response_hdr_write(dce, &dce->resp_hdr);
+	if (dce->response_alloc_hint) {
+		if (dce->response_alloc_hint > UINT32_MAX)
+			return -EINVAL;
+		resp_hdr.alloc_hint = dce->response_alloc_hint;
+	} else {
+		resp_hdr.alloc_hint = payload_offset -
+			sizeof(struct dcerpc_header) -
+			sizeof(struct dcerpc_response_header);
+	}
+	resp_hdr.context_id = dce->req_hdr.context_id;
+	resp_hdr.cancel_count = 0;
+	ret = dcerpc_response_hdr_write(dce, &resp_hdr);
 	if (ret)
 		return ret;
 
 	dce->offset = payload_offset;
+	dce->response_started = continuation;
 	return 0;
 }
 
@@ -1272,10 +1313,19 @@ int rpc_write_request(struct ksmbd_rpc_command *req,
 	if (pipe->num_entries)
 		pr_err("RPC: A call on unflushed pipe. Pending %d\n",
 			pipe->num_entries);
+	if (pipe->num_entries || pipe->entry_processed ||
+	    pipe->dce->response_payload)
+		rpc_pipe_reset(pipe);
 
 	dce = pipe->dce;
 	dce->rpc_req = req;
 	dce->rpc_resp = resp;
+	dce->response_started = 0;
+	g_clear_pointer(&dce->response_payload, g_free);
+	dce->response_payload_sz = 0;
+	dce->response_payload_offset = 0;
+	dce->response_alloc_hint = 0;
+	dce->response_limit = 0;
 	dcerpc_set_ext_payload(dce, req->payload, req->payload_sz);
 	dce->flags |= KSMBD_DCERPC_RETURN_READY;
 

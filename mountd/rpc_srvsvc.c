@@ -7,6 +7,7 @@
 
 #include <memory.h>
 #include <endian.h>
+#include <stdint.h>
 #include <glib.h>
 #include <errno.h>
 #include <linux/ksmbd_server.h>
@@ -35,6 +36,9 @@
 
 #define SRVSVC_OPNUM_SHARE_ENUM_ALL	15
 #define SRVSVC_OPNUM_GET_SHARE_INFO	16
+
+static int srvsvc_clear_headers(struct ksmbd_rpc_pipe *pipe,
+				int status);
 
 static int __share_type(struct ksmbd_share *share)
 {
@@ -149,6 +153,18 @@ static int __share_entry_processed(struct ksmbd_rpc_pipe *pipe, int i)
 	return 0;
 }
 
+static void __share_entry_discard(struct ksmbd_rpc_pipe *pipe)
+{
+	struct ksmbd_share *share;
+
+	if (!pipe->num_entries)
+		return;
+
+	share = g_ptr_array_remove_index(pipe->entries, 0);
+	pipe->num_entries--;
+	put_ksmbd_share(share);
+}
+
 static void __enum_all_shares(struct ksmbd_share *share,
 			      struct ksmbd_rpc_pipe *pipe)
 {
@@ -171,9 +187,23 @@ static void __enum_all_shares(struct ksmbd_share *share,
 
 static int srvsvc_share_enum_all_invoke(struct ksmbd_rpc_pipe *pipe)
 {
+	struct srvsvc_share_info_request *req = &pipe->dce->si_req;
+	unsigned int i;
+
 	shm_iter_shares((share_cb)__enum_all_shares, pipe);
 	pipe->entry_processed = __share_entry_processed;
-	return 0;
+	req->total_entries = pipe->num_entries;
+	req->resume_handle = req->payload_handle.ptr;
+
+	if (req->resume_handle > (unsigned int)pipe->num_entries) {
+		rpc_pipe_reset(pipe);
+		req->operation_status = KSMBD_RPC_EINVALID_PARAMETER;
+		return KSMBD_RPC_OK;
+	}
+
+	for (i = 0; i < req->resume_handle; i++)
+		__share_entry_discard(pipe);
+	return KSMBD_RPC_OK;
 }
 
 static int srvsvc_share_get_info_invoke(struct ksmbd_rpc_pipe *pipe,
@@ -214,60 +244,184 @@ static int srvsvc_share_get_info_invoke(struct ksmbd_rpc_pipe *pipe,
 	return 0;
 }
 
-static int srvsvc_share_enum_all_return(struct ksmbd_rpc_pipe *pipe)
+static int srvsvc_share_enum_build_response(struct ksmbd_rpc_pipe *pipe)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
-	int status = KSMBD_RPC_OK;
-	int level = dce->si_req.level;
+	struct srvsvc_share_info_request *req = &dce->si_req;
+	char *external_payload = dce->payload;
+	size_t external_payload_sz = dce->payload_sz;
+	unsigned int external_flags = dce->flags;
+	char *response_payload;
+	size_t response_size;
+	unsigned int resume = 0;
+	int (*entry_processed)(struct ksmbd_rpc_pipe *pipe, int i);
+	int response_entries = 0;
+	int response_status;
+	int output_level = req->level;
+	int i;
 
-	if (level != 0 && level != 1) {
-		level = 0;
-		status = KSMBD_RPC_EINVALID_LEVEL;
+	pipe->num_processed = 0;
+	if (output_level != 0 && output_level != 1) {
+		output_level = 0;
+		req->operation_status = KSMBD_RPC_EINVALID_LEVEL;
 	}
+	if (!req->operation_status)
+		response_entries = ndr_max_entries(dce, pipe);
+	/* Always advance the resume position when data remains. */
+	if (!response_entries && pipe->num_entries)
+		response_entries = 1;
 
-	if (ndr_write_union_int32(dce, level))
-		return KSMBD_RPC_EBAD_DATA;
+	response_payload = g_try_malloc0(4096);
+	if (!response_payload)
+		return KSMBD_RPC_ENOMEM;
 
-	if (status == KSMBD_RPC_EINVALID_LEVEL) {
+	dce->payload = response_payload;
+	dce->payload_sz = 4096;
+	dce->flags = external_flags & ~(KSMBD_DCERPC_FIXED_PAYLOAD_SZ |
+					KSMBD_DCERPC_EXTERNAL_PAYLOAD |
+					KSMBD_DCERPC_RETURN_READY);
+	dce->offset = sizeof(struct dcerpc_header) +
+		sizeof(struct dcerpc_response_header);
+	dce->num_pointers = 1;
+	entry_processed = pipe->entry_processed;
+	pipe->entry_processed = NULL;
+
+	if (ndr_write_union_int32(dce, output_level))
+		goto bad_data;
+
+	if (req->operation_status == KSMBD_RPC_EINVALID_LEVEL) {
 		if (ndr_write_int32(dce, 0))
-			return KSMBD_RPC_EBAD_DATA;
+			goto bad_data;
 	} else {
-		status = ndr_write_array_of_structs(pipe);
-		if (status == KSMBD_RPC_EBAD_DATA)
-			return status;
-	}
-
-	/*
-	 * [out] DWORD* TotalEntries
-	 * [out, unique] DWORD* ResumeHandle
-	 */
-	if (ndr_write_int32(dce, status == KSMBD_RPC_EINVALID_LEVEL ? 0 :
-							      pipe->num_processed))
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (!dce->si_req.payload_handle.ref_id) {
-		if (ndr_write_int32(dce, 0))
-			return KSMBD_RPC_EBAD_DATA;
-		return status;
-	}
-
-	if (status == KSMBD_RPC_EMORE_DATA) {
 		dce->num_pointers++;
-		if (ndr_write_int32(dce, dce->num_pointers))
-			return KSMBD_RPC_EBAD_DATA;
-		if (ndr_write_int32(dce, 0x01))
-			return KSMBD_RPC_EBAD_DATA;
-		/* Have pending data, set RETURN_READY again */
+		if (ndr_write_int32(dce, dce->num_pointers) ||
+		    ndr_write_int32(dce, response_entries))
+			goto bad_data;
+
+		if (response_entries) {
+			dce->num_pointers++;
+			if (ndr_write_int32(dce, dce->num_pointers) ||
+			    ndr_write_int32(dce, response_entries) ||
+			    __ndr_write_array_of_structs(pipe,
+							 response_entries))
+				goto bad_data;
+		} else if (ndr_write_int32(dce, 0)) {
+			goto bad_data;
+		}
+	}
+
+	if (req->operation_status)
+		response_status = req->operation_status;
+	else
+		response_status = pipe->num_entries > response_entries ?
+			KSMBD_RPC_EMORE_DATA : KSMBD_RPC_OK;
+	if (response_status == KSMBD_RPC_EMORE_DATA)
+		resume = req->resume_handle + response_entries;
+
+	if (ndr_write_int32(dce,
+			    response_status == KSMBD_RPC_EINVALID_LEVEL ?
+			    0 : req->total_entries))
+		goto bad_data;
+
+	if (req->payload_handle.ref_id) {
+		dce->num_pointers++;
+		if (ndr_write_int32(dce, dce->num_pointers) ||
+		    ndr_write_int32(dce, resume))
+			goto bad_data;
+	} else if (ndr_write_int32(dce, 0)) {
+		goto bad_data;
+	}
+
+	if (ndr_write_int32(dce, response_status))
+		goto bad_data;
+
+	response_size = dce->offset -
+		sizeof(struct dcerpc_header) -
+		sizeof(struct dcerpc_response_header);
+	if (response_size > UINT32_MAX)
+		goto bad_data;
+
+	pipe->entry_processed = entry_processed;
+	if (entry_processed) {
+		for (i = 0; i < response_entries; i++)
+			entry_processed(pipe, 0);
+		if (!pipe->num_entries)
+			pipe->entry_processed = NULL;
+	}
+
+	response_payload = dce->payload;
+	dce->response_payload = response_payload;
+	dce->response_payload_sz = response_size;
+	dce->response_payload_offset = 0;
+	dce->response_alloc_hint = response_size;
+	dce->payload = external_payload;
+	dce->payload_sz = external_payload_sz;
+	dce->flags = external_flags;
+	return KSMBD_RPC_OK;
+
+bad_data:
+	pipe->entry_processed = entry_processed;
+	g_free(dce->payload);
+	dce->payload = external_payload;
+	dce->payload_sz = external_payload_sz;
+	dce->flags = external_flags;
+	return KSMBD_RPC_EBAD_DATA;
+}
+
+static int srvsvc_share_enum_write_fragment(struct ksmbd_rpc_pipe *pipe)
+{
+	struct ksmbd_dcerpc *dce = pipe->dce;
+	size_t response_header_size = sizeof(struct dcerpc_header) +
+		sizeof(struct dcerpc_response_header);
+	size_t remaining;
+	size_t fragment_payload_sz;
+	size_t fragment_size;
+
+	if (!dce->response_payload ||
+	    dce->response_payload_offset > dce->response_payload_sz ||
+	    dce->payload_sz < response_header_size)
+		goto bad_data;
+	if (dce->payload_sz == response_header_size &&
+	    dce->response_payload_offset < dce->response_payload_sz)
+		goto bad_data;
+
+	remaining = dce->response_payload_sz -
+		dce->response_payload_offset;
+	fragment_payload_sz = MIN(dce->payload_sz - response_header_size,
+				  (size_t)UINT16_MAX - response_header_size);
+	if (!fragment_payload_sz && remaining)
+		goto bad_data;
+
+	fragment_size = MIN(remaining, fragment_payload_sz);
+	memcpy(dce->payload + response_header_size,
+	       dce->response_payload + response_header_size +
+	       dce->response_payload_offset, fragment_size);
+	dce->response_payload_offset += fragment_size;
+
+	if (dce->response_payload_offset < dce->response_payload_sz)
 		dce->flags |= KSMBD_DCERPC_RETURN_READY;
-	} else {
-		dce->num_pointers++;
-		if (ndr_write_int32(dce, dce->num_pointers))
-			return KSMBD_RPC_EBAD_DATA;
-		if (ndr_write_int32(dce, 0))
-			return KSMBD_RPC_EBAD_DATA;
+	else
+		dce->flags &= ~KSMBD_DCERPC_RETURN_READY;
+
+	dce->offset = response_header_size + fragment_size;
+	if (dcerpc_write_headers(dce, KSMBD_RPC_OK))
+		goto bad_data;
+	dce->rpc_resp->payload_sz = dce->offset;
+
+	if (dce->flags & KSMBD_DCERPC_RETURN_READY) {
+		srvsvc_clear_headers(pipe, KSMBD_RPC_EMORE_DATA);
+		return KSMBD_RPC_OK;
 	}
 
-	return status;
+	srvsvc_clear_headers(pipe, KSMBD_RPC_OK);
+	rpc_pipe_reset(pipe);
+	return KSMBD_RPC_OK;
+
+bad_data:
+	dce->flags &= ~KSMBD_DCERPC_RETURN_READY;
+	srvsvc_clear_headers(pipe, KSMBD_RPC_OK);
+	rpc_pipe_reset(pipe);
+	return KSMBD_RPC_EBAD_DATA;
 }
 
 static int srvsvc_share_get_info_return(struct ksmbd_rpc_pipe *pipe)
@@ -416,13 +570,23 @@ static int srvsvc_share_info_return(struct ksmbd_rpc_pipe *pipe)
 	} else {
 		pr_err("Unsupported share info level (write): %d\n",
 			dce->si_req.level);
-		rpc_pipe_reset(pipe);
+		dce->entry_size = __share_entry_size_ctr0;
+		dce->entry_rep = __share_entry_rep_ctr0;
+		dce->entry_data = __share_entry_data_ctr0;
+	}
+
+	if (dce->req_hdr.opnum == SRVSVC_OPNUM_SHARE_ENUM_ALL) {
+		if (rpc_restricted_context(dce->rpc_req))
+			dce->si_req.operation_status =
+				KSMBD_RPC_EACCESS_DENIED;
+		if (!dce->response_payload &&
+		    srvsvc_share_enum_build_response(pipe))
+			return KSMBD_RPC_EBAD_DATA;
+		return srvsvc_share_enum_write_fragment(pipe);
 	}
 
 	if (dce->req_hdr.opnum == SRVSVC_OPNUM_GET_SHARE_INFO)
 		status = srvsvc_share_get_info_return(pipe);
-	if (dce->req_hdr.opnum == SRVSVC_OPNUM_SHARE_ENUM_ALL)
-		status = srvsvc_share_enum_all_return(pipe);
 
 	if (rpc_restricted_context(dce->rpc_req))
 		status = KSMBD_RPC_EACCESS_DENIED;
@@ -470,9 +634,11 @@ static int srvsvc_return(struct ksmbd_rpc_pipe *pipe,
 
 	switch (dce->req_hdr.opnum) {
 	case SRVSVC_OPNUM_SHARE_ENUM_ALL:
-		if (dce->si_req.max_size < (unsigned int)max_resp_sz)
-			max_resp_sz = dce->si_req.max_size;
-		/* Fall through */
+		dcerpc_set_ext_payload(dce, resp->payload, max_resp_sz);
+		dce->response_limit = dce->si_req.max_size ?
+			dce->si_req.max_size : SIZE_MAX;
+		ret = srvsvc_share_info_return(pipe);
+		break;
 	case SRVSVC_OPNUM_GET_SHARE_INFO:
 		dcerpc_set_ext_payload(dce, resp->payload, max_resp_sz);
 
@@ -496,5 +662,8 @@ int rpc_srvsvc_read_request(struct ksmbd_rpc_pipe *pipe,
 
 int rpc_srvsvc_write_request(struct ksmbd_rpc_pipe *pipe)
 {
+	struct srvsvc_share_info_request *req = &pipe->dce->si_req;
+
+	memset(req, 0, sizeof(*req));
 	return srvsvc_invoke(pipe);
 }
