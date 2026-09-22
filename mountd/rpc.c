@@ -996,7 +996,8 @@ static int dcerpc_parse_bind_req(struct ksmbd_dcerpc *dce,
 			goto fail;
 		}
 
-		__dcerpc_read_syntax(dce, &ctx->abstract_syntax);
+		if (__dcerpc_read_syntax(dce, &ctx->abstract_syntax))
+			goto fail;
 
 		ctx->transfer_syntaxes = g_try_malloc0_n(ctx->num_syntaxes,
 						sizeof(struct dcerpc_syntax));
@@ -1005,15 +1006,15 @@ static int dcerpc_parse_bind_req(struct ksmbd_dcerpc *dce,
 			goto fail;
 		}
 
-		for (j = 0; j < ctx->num_syntaxes; j++)
-			__dcerpc_read_syntax(dce, &ctx->transfer_syntaxes[j]);
+		for (j = 0; j < ctx->num_syntaxes; j++) {
+			if (__dcerpc_read_syntax(dce, &ctx->transfer_syntaxes[j]))
+				goto fail;
+		}
 	}
 	return KSMBD_RPC_OK;
 
 fail:
-	for (j = 0; j < i; j++)
-		g_free(hdr->list[j].transfer_syntaxes);
-	g_free(hdr->list);
+	dcerpc_bind_req_free(hdr);
 	return ret;
 }
 
@@ -1039,6 +1040,8 @@ static int dcerpc_syntax_cmp(struct dcerpc_syntax *a, struct dcerpc_syntax *b)
 		return -1;
 	if (a->ver_major != b->ver_major)
 		return -1;
+	if (a->ver_minor != b->ver_minor)
+		return -1;
 	return 0;
 }
 
@@ -1049,48 +1052,19 @@ static int dcerpc_syntax_supported(struct dcerpc_syntax *a)
 	for (k = 0; k < ARRAY_SIZE(known_syntaxes); k++) {
 		struct dcerpc_syntax *b = &known_syntaxes[k].syn;
 
-		if (!dcerpc_syntax_cmp(a, b))
-			return known_syntaxes[k].ack_result;
+		if (dcerpc_syntax_cmp(a, b))
+			continue;
+
+		if (known_syntaxes[k].ack_result == DCERPC_BIND_ACK_RES_ACCEPT &&
+		    (memcmp(a->uuid.clock_seq, b->uuid.clock_seq,
+			    sizeof(a->uuid.clock_seq)) ||
+		     memcmp(a->uuid.node, b->uuid.node,
+			    sizeof(a->uuid.node))))
+			continue;
+
+		return known_syntaxes[k].ack_result;
 	}
 	return -1;
-}
-
-static int dcerpc_bind_nack_return(struct ksmbd_rpc_pipe *pipe)
-{
-	struct ksmbd_dcerpc *dce = pipe->dce;
-	int i, payload_offset;
-
-	dce->offset = sizeof(struct dcerpc_header);
-
-	if (ndr_write_int16(dce,
-			    DCERPC_BIND_NAK_RSN_PROTOCOL_VERSION_NOT_SUPPORTED))
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (ndr_write_int8(dce, ARRAY_SIZE(known_syntaxes)))
-		return KSMBD_RPC_EBAD_DATA;
-
-	auto_align_offset(dce);
-
-	for (i = 0; i < ARRAY_SIZE(known_syntaxes); i++) {
-		if (ndr_write_int8(dce, known_syntaxes[i].syn.ver_major))
-			return KSMBD_RPC_EBAD_DATA;
-
-		if (ndr_write_int8(dce, known_syntaxes[i].syn.ver_minor))
-			return KSMBD_RPC_EBAD_DATA;
-	}
-
-	payload_offset = dce->offset;
-	dce->offset = 0;
-
-	dce->hdr.ptype = DCERPC_PTYPE_RPC_BINDNACK;
-	dce->hdr.pfc_flags = DCERPC_PFC_FIRST_FRAG | DCERPC_PFC_LAST_FRAG;
-	dce->hdr.frag_length = payload_offset;
-	if (dcerpc_hdr_write(dce, &dce->hdr))
-		return KSMBD_RPC_EBAD_DATA;
-
-	dce->offset = payload_offset;
-	dce->rpc_resp->payload_sz = dce->offset;
-	return KSMBD_RPC_OK;
 }
 
 static int dcerpc_bind_ack_return(struct ksmbd_rpc_pipe *pipe)
@@ -1134,10 +1108,10 @@ static int dcerpc_bind_ack_return(struct ksmbd_rpc_pipe *pipe)
 		if (ndr_write_int16(dce, 0))
 			return KSMBD_RPC_EBAD_DATA;
 	} else {
-		if (ndr_write_int16(dce, strlen(addr)))
+		if (ndr_write_int16(dce, strlen(addr) + 1))
 			return KSMBD_RPC_EBAD_DATA;
 
-		if (ndr_write_bytes(dce, addr, strlen(addr)))
+		if (ndr_write_bytes(dce, addr, strlen(addr) + 1))
 			return KSMBD_RPC_EBAD_DATA;
 	}
 	align_offset(dce, 4); /* [flag(NDR_ALIGN4)]    DATA_BLOB _pad1; */
@@ -1146,33 +1120,45 @@ static int dcerpc_bind_ack_return(struct ksmbd_rpc_pipe *pipe)
 	if (ndr_write_int8(dce, num_trans))
 		return KSMBD_RPC_EBAD_DATA;
 
-	align_offset(dce, 2);
+	if (ndr_write_int8(dce, 0))
+		return KSMBD_RPC_EBAD_DATA;
+
+	if (ndr_write_int16(dce, 0))
+		return KSMBD_RPC_EBAD_DATA;
 
 	for (i = 0; i < num_trans; i++) {
-		struct dcerpc_syntax *s;
-		__s16 result;
+		struct dcerpc_context *ctx = &dce->bi_req.list[i];
+		struct dcerpc_syntax *s = &ctx->transfer_syntaxes[0];
+		__s16 result = DCERPC_BIND_ACK_RES_PROVIDER_REJECT;
+		__s16 reason = DCERPC_BIND_ACK_RSN_TRANSFER_SYNTAXES_NOT_SUPPORTED;
+		int j;
 
-		s = &dce->bi_req.list[i].transfer_syntaxes[0];
-		result = dcerpc_syntax_supported(s);
+		for (j = 0; j < ctx->num_syntaxes; j++) {
+			struct dcerpc_syntax *candidate = &ctx->transfer_syntaxes[j];
+			int supported = dcerpc_syntax_supported(candidate);
 
-		if (result == -1) {
-			result = DCERPC_BIND_ACK_RES_PROVIDER_REJECT;
-			if (ndr_write_union_int16(dce, result))
-				return KSMBD_RPC_EBAD_DATA;
-		} else {
-			if (result == DCERPC_BIND_ACK_RES_ACCEPT) {
-				if (ndr_write_union_int16(dce, result))
-					return KSMBD_RPC_EBAD_DATA;
+			if (supported == DCERPC_BIND_ACK_RES_ACCEPT) {
+				s = candidate;
+				result = DCERPC_BIND_ACK_RES_ACCEPT;
+				reason = DCERPC_BIND_ACK_RSN_NOT_SPECIFIED;
+				break;
 			}
-			if (result == DCERPC_BIND_ACK_RES_NEGOTIATE_ACK) {
-				if (ndr_write_int16(dce, result))
-					return KSMBD_RPC_EBAD_DATA;
 
-				if (ndr_write_int16(dce, 0x00))
-					return KSMBD_RPC_EBAD_DATA;
+			if (supported == DCERPC_BIND_ACK_RES_NEGOTIATE_ACK &&
+			    ctx->num_syntaxes == 1) {
 				s = &negotiate_ack_PNIO_uuid;
+				result = DCERPC_BIND_ACK_RES_NEGOTIATE_ACK;
+				reason = 0;
+				break;
 			}
 		}
+
+		if (ndr_write_int16(dce, result))
+			return KSMBD_RPC_EBAD_DATA;
+
+		if (ndr_write_int16(dce, reason))
+			return KSMBD_RPC_EBAD_DATA;
+
 		if (__dcerpc_write_syntax(dce, s))
 			return KSMBD_RPC_EBAD_DATA;
 	}
@@ -1197,26 +1183,12 @@ static int dcerpc_bind_ack_return(struct ksmbd_rpc_pipe *pipe)
 static int dcerpc_bind_return(struct ksmbd_rpc_pipe *pipe)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
-	int i, j, ack = 0, ret;
+	int ret;
 
-	for (i = 0; i < dce->bi_req.num_contexts; i++) {
-		for (j = 0; j < dce->bi_req.list[i].num_syntaxes; j++) {
-			struct dcerpc_syntax *a;
-
-			a = &dce->bi_req.list[i].transfer_syntaxes[j];
-			if (dcerpc_syntax_supported(a) != -1) {
-				ack = 1;
-				break;
-			}
-		}
-	}
-
-	if (!ack) {
-		pr_err("Unsupported transfer syntax\n");
-		ret =  dcerpc_bind_nack_return(pipe);
-	} else {
+	if (!dce->bi_req.num_contexts)
+		ret = KSMBD_RPC_EBAD_DATA;
+	else
 		ret = dcerpc_bind_ack_return(pipe);
-	}
 
 	dcerpc_bind_req_free(&dce->bi_req);
 	return ret;
