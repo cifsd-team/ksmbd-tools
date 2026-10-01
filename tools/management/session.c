@@ -11,6 +11,7 @@
 
 #include "linux/ksmbd_server.h"
 #include "management/session.h"
+#include "management/share.h"
 #include "management/tree_conn.h"
 #include "management/user.h"
 #include "tools.h"
@@ -107,6 +108,39 @@ static struct ksmbd_session *sm_lookup_session(unsigned long long id)
 		sess = __get_session(sess);
 	g_rw_lock_reader_unlock(&sessions_table_lock);
 	return sess;
+}
+
+int sm_get_quota_context(unsigned long long sess_id,
+			 unsigned long long tree_id,
+			 struct ksmbd_share **share, uid_t *uid,
+			 unsigned int *flags)
+{
+	struct ksmbd_session *sess;
+	GList *entry;
+	int ret = -ENOENT;
+
+	sess = sm_lookup_session(sess_id);
+	if (!sess)
+		return ret;
+	g_rw_lock_reader_lock(&sess->update_lock);
+	for (entry = sess->tree_conns; entry; entry = entry->next) {
+		struct ksmbd_tree_conn *conn = entry->data;
+
+		if (conn->id != tree_id)
+			continue;
+		*share = get_ksmbd_share(conn->share);
+		if (!*share)
+			break;
+		*flags = conn->flags;
+		g_rw_lock_reader_lock(&sess->user->update_lock);
+		*uid = sess->user->uid;
+		g_rw_lock_reader_unlock(&sess->user->update_lock);
+		ret = 0;
+		break;
+	}
+	g_rw_lock_reader_unlock(&sess->update_lock);
+	__put_session(sess);
+	return ret;
 }
 
 int sm_handle_tree_connect(unsigned long long id,

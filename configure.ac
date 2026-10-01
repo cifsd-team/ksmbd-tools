@@ -173,6 +173,7 @@ AC_CONFIG_FILES([
 	control/Makefile
 	mountd/Makefile
 	tools/Makefile
+	tests/Makefile
 ])
 
 AC_OUTPUT

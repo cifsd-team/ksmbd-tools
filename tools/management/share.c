@@ -64,6 +64,7 @@ const char *KSMBD_SHARE_CONF[KSMBD_SHARE_CONF_MAX] = {
 	"time machine",
 	"allow insecure wide links",
 	"smb3 encryption",
+	"btrfs quota map",
 };
 
 /*
@@ -109,6 +110,7 @@ const char *KSMBD_SHARE_DEFCONF[KSMBD_SHARE_CONF_MAX] = {
 	"no",
 	"no",
 	"auto",
+	"",
 };
 
 static GHashTable	*shares_table;
@@ -191,6 +193,7 @@ static void kill_ksmbd_share(struct ksmbd_share *share)
 
 	g_free(share->name);
 	g_free(share->path);
+	g_free(share->btrfs_quota_map);
 	g_free(share->comment);
 	g_free(share->veto_list);
 	g_free(share->guest_account);
@@ -767,6 +770,9 @@ static int process_share_conf_kv(struct ksmbd_share *share, GHashTable *kv)
 		}
 		cp_group_kv_list_free(objects);
 	}
+
+	if (group_kv_steal(kv, KSMBD_SHARE_CONF_BTRFS_QUOTA_MAP, &k, &v))
+		share->btrfs_quota_map = cp_get_group_kv_string(v);
 
 	if (group_kv_steal(kv, KSMBD_SHARE_CONF_CROSSMNT, &k, &v)) {
 		if (cp_get_group_kv_bool(v))

@@ -134,6 +134,7 @@ static int ipc_ksmbd_starting_up(void)
 	msg->type = KSMBD_EVENT_STARTING_UP;
 
 	ev->flags = global_conf.flags;
+	ev->reserved[0] = KSMBD_IPC_FEATURE_QUOTA;
 	ev->signing = global_conf.server_signing;
 	ev->tcp_port = global_conf.tcp_port;
 	ev->ipc_timeout = global_conf.ipc_timeout;
@@ -311,6 +312,12 @@ static struct nla_policy ksmbd_nl_policy[KSMBD_EVENT_MAX] = {
 	[KSMBD_EVENT_LOGIN_RESPONSE_EXT] = {
 		.minlen = sizeof(struct ksmbd_login_response_ext),
 	},
+	[KSMBD_EVENT_QUOTA_REQUEST] = {
+		.minlen = sizeof(struct ksmbd_quota_request),
+	},
+	[KSMBD_EVENT_QUOTA_RESPONSE] = {
+		.minlen = sizeof(struct ksmbd_quota_response),
+	},
 };
 
 static struct genl_cmd ksmbd_genl_cmds[] = {
@@ -418,6 +425,18 @@ static struct genl_cmd ksmbd_genl_cmds[] = {
 	},
 	{
 		.c_id		= KSMBD_EVENT_LOGIN_RESPONSE_EXT,
+		.c_attr_policy	= ksmbd_nl_policy,
+		.c_msg_parser	= &handle_unsupported_event,
+		.c_maxattr	= KSMBD_EVENT_MAX,
+	},
+	{
+		.c_id		= KSMBD_EVENT_QUOTA_REQUEST,
+		.c_attr_policy	= ksmbd_nl_policy,
+		.c_msg_parser	= &handle_generic_event,
+		.c_maxattr	= KSMBD_EVENT_MAX,
+	},
+	{
+		.c_id		= KSMBD_EVENT_QUOTA_RESPONSE,
 		.c_attr_policy	= ksmbd_nl_policy,
 		.c_msg_parser	= &handle_unsupported_event,
 		.c_maxattr	= KSMBD_EVENT_MAX,

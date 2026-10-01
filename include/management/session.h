@@ -9,8 +9,15 @@
 #define __MANAGEMENT_TCONNECTION_H__
 
 #include <glib.h>
+#include <sys/types.h>
 
 struct ksmbd_user;
+struct ksmbd_share;
+
+int sm_get_quota_context(unsigned long long sess_id,
+			 unsigned long long tree_id,
+			 struct ksmbd_share **share, uid_t *uid,
+			 unsigned int *flags);
 
 struct ksmbd_session {
 	unsigned long long	id;

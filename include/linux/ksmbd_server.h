@@ -13,6 +13,10 @@
 #define KSMBD_GENL_NAME		"SMBD_GENL"
 #define KSMBD_GENL_VERSION		0x01
 
+/* Features advertised in ksmbd_startup_request.reserved[0]. */
+#define KSMBD_IPC_FEATURE_QUOTA		0x01
+#define KSMBD_QUOTA_MAX_PATH		4096
+
 #define KSMBD_REQ_MAX_ACCOUNT_NAME_SZ	48
 #define KSMBD_REQ_MAX_HASH_SZ		18
 #define KSMBD_REQ_MAX_SHARE_NAME	64
@@ -178,6 +182,48 @@ struct ksmbd_spnego_authen_response {
 	__u8	payload[];
 };
 
+enum ksmbd_quota_command {
+	KSMBD_QUOTA_GET = 1,
+	KSMBD_QUOTA_GET_NEXT,
+	KSMBD_QUOTA_SET,
+	KSMBD_QUOTA_PROBE,
+};
+
+/*
+ * Limits are bytes; -1 denotes an unlimited threshold or limit.
+ * Senders zero unused reserved fields; receivers ignore them. Use those fields
+ * for extensions without changing the structure sizes or the path offset.
+ * Extensions that change behavior require capability negotiation.
+ */
+struct ksmbd_quota_request {
+	__u32	handle;
+	__u32	command;
+	__u64	cookie;
+	__u64	session_id;
+	__u64	connect_id;
+	__u64	ino;
+	__s64	threshold;
+	__s64	limit;
+	__u32	uid;
+	__u32	dev_major;
+	__u32	dev_minor;
+	__s32	fsid[2];
+	__u32	reserved[16];
+	__u32	path_len;
+	__s8	path[];
+};
+
+struct ksmbd_quota_response {
+	__u32	handle;
+	__s32	status;
+	__u64	cookie;
+	__u64	used;
+	__s64	threshold;
+	__s64	limit;
+	__u32	uid;
+	__u32	reserved[17];
+};
+
 /*
  * This also used as NETLINK attribute type value.
  *
@@ -213,6 +259,9 @@ enum ksmbd_event {
 
 	KSMBD_EVENT_LOGIN_REQUEST_EXT,
 	KSMBD_EVENT_LOGIN_RESPONSE_EXT,
+
+	KSMBD_EVENT_QUOTA_REQUEST,
+	KSMBD_EVENT_QUOTA_RESPONSE,
 
 	KSMBD_EVENT_MAX
 };

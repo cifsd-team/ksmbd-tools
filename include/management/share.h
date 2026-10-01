@@ -37,6 +37,7 @@ enum share_hosts {
 struct ksmbd_share {
 	char		*name;
 	char		*path;
+	char		*btrfs_quota_map;
 
 	int		max_connections;
 	int		num_connections;
@@ -119,6 +120,7 @@ enum KSMBD_SHARE_CONF {
 	KSMBD_SHARE_CONF_TIME_MACHINE,
 	KSMBD_SHARE_CONF_ALLOW_INSECURE_WIDE_LINKS,
 	KSMBD_SHARE_CONF_SMB3_ENCRYPTION,
+	KSMBD_SHARE_CONF_BTRFS_QUOTA_MAP,
 	KSMBD_SHARE_CONF_MAX
 };
 

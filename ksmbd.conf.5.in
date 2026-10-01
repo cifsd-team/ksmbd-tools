@@ -54,6 +54,31 @@ Only bind to interfaces given with \fBinterfaces\fR.
 
 Default: \fBbind interfaces only = no\fR
 .TP
+\fBbtrfs quota map\fR (S)
+Map Linux user IDs to existing Btrfs qgroups for SMB quota queries and updates.
+Entries have the form \fBUID:LEVEL/ID\fR and are separated by spaces or commas,
+for example \fB1000:0/256 1001:1/1001\fR.
+User IDs and qgroup IDs must be unique within the map.
+This parameter applies to the Btrfs filesystem containing the share root;
+opens on a different filesystem do not use this map.
+Enable Btrfs quotas and create the subvolumes, qgroups and their relationships
+before using the mapping. The mapping associates quota records with users;
+files must be placed in those users' subvolumes by the administrator.
+Both qgroup accounting and simple quotas are supported.
+SMB quota usage and hard limits use the mapped qgroup's referenced-space
+counters and limits. Simple quota mode uses Btrfs extent ownership accounting.
+Other qgroup limits and parent limits continue to apply.
+Btrfs has no quota warning threshold: set the SMB threshold to -1.
+A hard limit of -1 removes the referenced-space limit; zero prohibits further
+referenced-space allocation. Deleting a quota entry is unsupported.
+Queries return an error while Btrfs reports accounting as inconsistent or
+rescanning. Usage is read from the committed quota tree.
+Only root SMB sessions may enumerate quota records or change quotas.
+Updates additionally require a writable share.
+Other authenticated users may query their own quota.
+
+Default: \fBbtrfs quota map = \fR
+.TP
 \fBbrowseable\fR (S)
 Share is seen in a net view and in the browse list.
 

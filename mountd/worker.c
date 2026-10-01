@@ -13,6 +13,7 @@
 #include <worker.h>
 #include <ipc.h>
 #include <rpc.h>
+#include <quota.h>
 
 #include <management/user.h>
 #include <management/share.h>
@@ -21,6 +22,7 @@
 
 #define MAX_WORKER_THREADS	4
 static GThreadPool *pool;
+static GThreadPool *quota_pool;
 
 #define VALID_IPC_MSG(m, t)					\
 	({							\
@@ -317,6 +319,21 @@ out:
 	return 0;
 }
 
+static int quota_request(struct ksmbd_ipc_msg *msg)
+{
+	struct ksmbd_ipc_msg *reply;
+
+	reply = ipc_msg_alloc(sizeof(struct ksmbd_quota_response));
+	if (!reply)
+		return -ENOMEM;
+	reply->type = KSMBD_EVENT_QUOTA_RESPONSE;
+	quota_handle_request((void *)msg->payload, msg->sz,
+			     (void *)reply->payload);
+	ipc_msg_send(reply);
+	ipc_msg_free(reply);
+	return 0;
+}
+
 static void worker_pool_fn(gpointer event, gpointer user_data)
 {
 	struct ksmbd_ipc_msg *msg = event;
@@ -354,6 +371,10 @@ static void worker_pool_fn(gpointer event, gpointer user_data)
 		spnego_authen_request(msg);
 		break;
 
+	case KSMBD_EVENT_QUOTA_REQUEST:
+		quota_request(msg);
+		break;
+
 	case KSMBD_EVENT_LOGIN_REQUEST_EXT:
 		login_request_ext(msg);
 		break;
@@ -368,11 +389,18 @@ static void worker_pool_fn(gpointer event, gpointer user_data)
 
 int wp_ipc_msg_push(struct ksmbd_ipc_msg *msg)
 {
+	/* Quota syscalls can wait for a transaction or a filesystem thaw. */
+	if (msg->type == KSMBD_EVENT_QUOTA_REQUEST)
+		return g_thread_pool_push(quota_pool, msg, NULL);
 	return g_thread_pool_push(pool, msg, NULL);
 }
 
 void wp_destroy(void)
 {
+	if (quota_pool) {
+		g_thread_pool_free(quota_pool, 1, 1);
+		quota_pool = NULL;
+	}
 	if (pool) {
 		g_thread_pool_free(pool, 1, 1);
 		pool = NULL;
@@ -381,6 +409,8 @@ void wp_destroy(void)
 
 void wp_init(void)
 {
+	if (!quota_pool)
+		quota_pool = g_thread_pool_new(worker_pool_fn, NULL, 2, 0, NULL);
 	if (!pool)
 		pool = g_thread_pool_new(
 			worker_pool_fn,
