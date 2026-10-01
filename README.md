@@ -12,6 +12,7 @@ merged to mainline in the Linux 5.15 release.
 
 - [Building and Installing](#building-and-installing)
 - [Usage](#usage)
+- [SMB user quotas](#smb-user-quotas)
 - [Packages](#packages)
 
 ## Building and Installing
@@ -212,6 +213,147 @@ sudo ksmbd.control --shutdown
 # Remove the kernel module.
 sudo modprobe -r ksmbd
 ```
+
+## SMB user quotas
+
+Use kernel and ksmbd-tools builds that both include quota IPC support, then
+start `ksmbd.mountd` as described above. The daemon needs permission to
+administer quotas and access to the same filesystem paths and mounts as the
+kernel server. An older daemon cannot handle these requests.
+
+Authenticated users may query their own quota. Listing all records and
+setting limits require an SMB account mapped to Linux UID 0, and updates
+also require a writable share. Guest sessions cannot query or set quotas.
+The examples use existing Linux users `alice` and `bob`, plus `root` as the
+quota administrator. Add their SMB credentials with:
+
+```sh
+sudo ksmbd.adduser --add alice
+sudo ksmbd.adduser --add bob
+sudo ksmbd.adduser --add root
+```
+
+### Native user quotas
+
+For filesystems such as ext4 and XFS, enable user quota accounting and
+enforcement using the filesystem's local administration tools first. The
+kernel needs `CONFIG_QUOTACTL` and the filesystem's quota support.
+`ksmbd.mountd` uses `quotactl_fd()`. No extra share parameter is needed.
+For example, export an existing directory on a filesystem with user quotas:
+
+```ini
+[QuotaHomes]
+        path = /srv/quota/homes
+        read only = no
+        valid users = root alice bob
+```
+
+Native quotas account for files owned by each Linux UID on the filesystem.
+SMB limits are in bytes. Native soft and hard limits are rounded up to
+1024-byte quota blocks. Use `-1` for an unlimited limit. A zero limit is
+unsupported because the native API uses zero to disable a limit.
+
+### Btrfs qgroups
+
+Btrfs quota records are mapped to qgroups, which account for subvolumes
+rather than Linux file owners. The administrator must arrange for users to
+store files in their corresponding subvolumes.
+
+The following example assumes Btrfs is already mounted at `/srv/storage`
+and the two user subvolumes do not yet exist:
+
+```sh
+sudo btrfs quota enable /srv/storage
+sudo mkdir -p /srv/storage/homes
+sudo chmod 0755 /srv/storage/homes
+sudo btrfs subvolume create /srv/storage/homes/alice
+sudo btrfs subvolume create /srv/storage/homes/bob
+sudo chown alice /srv/storage/homes/alice
+sudo chown bob /srv/storage/homes/bob
+sudo chmod 0700 /srv/storage/homes/alice /srv/storage/homes/bob
+
+# Find the Linux UIDs and the Btrfs subvolume IDs.
+id -u alice
+id -u bob
+sudo btrfs subvolume show /srv/storage/homes/alice
+sudo btrfs subvolume show /srv/storage/homes/bob
+
+# Wait until accounting is consistent, then inspect the qgroups.
+sudo btrfs quota rescan -w /srv/storage
+sudo btrfs qgroup show -r --sync /srv/storage
+```
+
+See [btrfs-quota(8)](https://btrfs.readthedocs.io/en/stable/btrfs-quota.html)
+and [btrfs-qgroup(8)](https://btrfs.readthedocs.io/en/stable/btrfs-qgroup.html)
+for quota preparation. Level 0 qgroups are created for subvolumes. Higher
+level qgroups and simple quotas can also be used with the mapping.
+
+Add this share to `ksmbd.conf`, replacing `1000`, `1001`, `256`, and `257`
+with the UIDs and subvolume IDs reported above:
+
+```ini
+[QuotaHomes]
+        path = /srv/storage/homes
+        read only = no
+        valid users = root alice bob
+        btrfs quota map = 1000:0/256 1001:0/257
+```
+
+Each entry is `UID:LEVEL/ID`. Separate entries with spaces or commas.
+Both UIDs and qgroup IDs must be unique within a share's map. The qgroups
+must exist on the Btrfs filesystem containing the share root. The daemon
+does not create qgroups, enable quotas, or move files. Btrfs quota support
+does not require `CONFIG_QUOTA`.
+
+Btrfs reports the mapped qgroup's referenced-space usage and hard limit.
+It has no soft limit: always set the SMB soft limit to `-1`. A hard limit
+of `-1` removes the referenced-space limit. A zero hard limit blocks further
+allocation.
+Other qgroup limits, including limits on parent qgroups, still apply.
+Deleting quota records through SMB is unsupported. Queries fail while
+accounting is inconsistent or a quota rescan is running. Usage comes from
+the committed quota tree. Use `btrfs qgroup show --sync` to refresh it.
+
+### Querying and setting limits over SMB
+
+After editing `ksmbd.conf` on a running server, reload it and reconnect
+clients so that the new share configuration is used:
+
+```sh
+sudo ksmbd.control --reload
+```
+
+Install Samba's `smbcquotas` on the client. Replace `server` and the example
+UID with your server address and Alice's UID. `S-1-22-1-1000` is the Unix
+user SID for UID 1000. Each command prompts for the SMB account password:
+
+```sh
+# Query Alice's record as Alice.
+smbcquotas //server/QuotaHomes -m SMB3 -U alice -n -u S-1-22-1-1000
+
+# List quota records as the administrator.
+smbcquotas //server/QuotaHomes -m SMB3 -U root -n -L
+
+# Set a 1 GiB hard limit with no soft limit. This also works for Btrfs.
+smbcquotas //server/QuotaHomes -m SMB3 -U root \
+        -S 'UQLIM:S-1-22-1-1000:-1/1073741824'
+
+# Query the resulting limit.
+smbcquotas //server/QuotaHomes -m SMB3 -U root -n -u S-1-22-1-1000
+
+# Remove both limits.
+smbcquotas //server/QuotaHomes -m SMB3 -U root \
+        -S 'UQLIM:S-1-22-1-1000:-1/-1'
+```
+
+For native quotas, a soft limit can also be set, for example
+`UQLIM:S-1-22-1-1000:536870912/1073741824` for 512 MiB soft and 1 GiB hard
+limits. The [smbcquotas(1) manual](https://www.samba.org/samba/docs/current/man-html/smbcquotas.1.html)
+describes the command syntax and byte units.
+
+SMB operations support user quota queries and limit updates. Enable quota
+accounting locally. Filesystem-wide default limits and `FSQFLAGS` updates
+are unsupported. Group and project quotas are not exposed through SMB.
 
 ## Packages
 
