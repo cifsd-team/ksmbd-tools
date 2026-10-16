@@ -41,6 +41,7 @@ struct smbconf_global {
 	char			*server_max_protocol;
 	char			*root_dir;
 	int			server_signing;
+	unsigned int		max_sessions_per_connection;
 	int			sessions_cap;
 	int			restrict_anon;
 	unsigned short		tcp_port;
@@ -79,6 +80,7 @@ extern struct smbconf_global global_conf;
 
 #define KSMBD_CONF_MAX_OPEN_FILES	65536	/* TODO */
 #define KSMBD_CONF_MAX_ACTIVE_SESSIONS	65536	/* TODO */
+#define KSMBD_CONF_DEFAULT_SESSIONS_PER_CONNECTION	64
 #define KSMBD_CONF_MAX_CONNECTIONS	65536
 
 #define PATH_PWDDB		SYSCONFDIR "/ksmbd/ksmbdpwd.db"

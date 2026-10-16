@@ -14,8 +14,9 @@
 	kerberos support = no
 	map to guest = never
 	max active sessions = 1024
-	max connections = 128
-	max ip connections = 8
+	max sessions per connection = 64
+	max connections = 256
+	max ip connections = 32
 	max open files = 10000
 	netbios name = KSMBD SERVER
 	restrict anonymous = 0

@@ -217,12 +217,24 @@ Maximum number of simultaneous sessions to all shares.
 
 Default: \fBmax active sessions = 1024\fR \" KSMBD_CONF_DEFAULT_SESS_CAP
 .TP
+\fBmax sessions per connection\fR (G)
+Maximum number of sessions retained on each transport connection.
+Supporting kernels count authentication in progress and expired sessions,
+including sessions without share connections.
+Binding an existing SMB3 session reserves one slot on the new connection;
+reauthentication and authentication continuation do not reserve extra slots.
+The limit takes effect when the server starts. Older kernels ignore it.
+Values from 1 to 4294967295 are supported. Zero selects the default of 64;
+a value above the supported range selects the maximum.
+
+Default: \fBmax sessions per connection = 64\fR
+.TP
 \fBmax connections\fR (G)
 Maximum number of simultaneous connections to the server.
 With \fBmax connections = 0\fR, the value will be set to the maximum allowed number of 65536. \" KSMBD_CONF_MAX_CONNECTIONS
 Number suffixes are allowed.
 
-Default: \fBmax connections = 128\fR
+Default: \fBmax connections = 256\fR
 .TP
 \fBmax connections\fR (S)
 Maximum number of simultaneous connections to the share.
@@ -236,7 +248,7 @@ Maximum number of connections to the server per IP address.
 With \fBmax ip connections = 0\fR, the value will be set to the maximum allowed number of 65536. \" KSMBD_CONF_MAX_CONNECTIONS
 Number suffixes are allowed.
 
-Default: \fBmax ip connections = 8\fR
+Default: \fBmax ip connections = 32\fR
 .TP
 \fBmax open files\fR (G)
 Maximum number of simultaneous open files for a client.

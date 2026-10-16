@@ -406,6 +406,16 @@ static int process_global_conf_kv(GHashTable *kv)
 				KSMBD_CONF_MAX_ACTIVE_SESSIONS;
 	}
 
+	if (group_kv_steal(kv, "max sessions per connection", &k, &v)) {
+		unsigned long max_sessions = cp_get_group_kv_long(v);
+
+		if (!max_sessions)
+			max_sessions = KSMBD_CONF_DEFAULT_SESSIONS_PER_CONNECTION;
+		if (max_sessions > G_MAXUINT32)
+			max_sessions = G_MAXUINT32;
+		global_conf.max_sessions_per_connection = max_sessions;
+	}
+
 	if (group_kv_steal(kv, "tcp port", &k, &v)) {
 		/* mountd option has precedence */
 		if (!global_conf.tcp_port)
@@ -574,6 +584,8 @@ static void add_group_global_conf(void)
 
 	add_group_key_value("guest account = nobody");
 	add_group_key_value("max active sessions = 1024");
+	add_group_key_value("max sessions per connection = "
+			    STR(KSMBD_CONF_DEFAULT_SESSIONS_PER_CONNECTION));
 	add_group_key_value("max connections = 256");
 	add_group_key_value("max ip connections = 32");
 	add_group_key_value("max open files = 10000");
