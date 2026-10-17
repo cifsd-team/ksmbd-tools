@@ -184,7 +184,7 @@ struct dcerpc_syntax {
 	__u16			ver_minor;
 };
 
-struct dcerpc_context {
+struct ksmbd_dcerpc_context {
 	__u16			id;
 	__u8			num_syntaxes;
 	struct dcerpc_syntax	abstract_syntax;
@@ -197,7 +197,7 @@ struct dcerpc_bind_request {
 	__u16			max_recv_frag_sz;
 	__u32			assoc_group_id;
 	__u8			num_contexts;
-	struct dcerpc_context	*list;
+	struct ksmbd_dcerpc_context	*list;
 };
 
 enum DCERPC_BIND_ACK_RESULT {

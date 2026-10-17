@@ -1021,12 +1021,12 @@ static int dcerpc_parse_bind_req(struct ksmbd_dcerpc *dce,
 	if (!hdr->num_contexts)
 		return 0;
 
-	hdr->list = g_try_malloc0_n(hdr->num_contexts, sizeof(struct dcerpc_context));
+	hdr->list = g_try_malloc0_n(hdr->num_contexts, sizeof(struct ksmbd_dcerpc_context));
 	if (!hdr->list)
 		return -ENOMEM;
 
 	for (i = 0; i < hdr->num_contexts; i++) {
-		struct dcerpc_context *ctx = &hdr->list[i];
+		struct ksmbd_dcerpc_context *ctx = &hdr->list[i];
 
 		if (ndr_read_int16(dce, &ctx->id))
 			goto fail;
@@ -1168,7 +1168,7 @@ static int dcerpc_bind_ack_return(struct ksmbd_rpc_pipe *pipe)
 		return KSMBD_RPC_EBAD_DATA;
 
 	for (i = 0; i < num_trans; i++) {
-		struct dcerpc_context *ctx = &dce->bi_req.list[i];
+		struct ksmbd_dcerpc_context *ctx = &dce->bi_req.list[i];
 		struct dcerpc_syntax *s = &ctx->transfer_syntaxes[0];
 		__s16 result = DCERPC_BIND_ACK_RES_PROVIDER_REJECT;
 		__s16 reason = DCERPC_BIND_ACK_RSN_TRANSFER_SYNTAXES_NOT_SUPPORTED;
