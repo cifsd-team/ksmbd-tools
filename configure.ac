@@ -152,8 +152,25 @@ krb5_error_code krb5_auth_con_getauthenticator(krb5_context, krb5_auth_context, 
 
 AM_CONDITIONAL(HAVE_LIBKRB5, [test "x$enable_krb5" != xno])
 
+dnl libdcerpc, from the libsmb2 submodule: only its coders and server
+dnl runtime (no libsmb2 transport), built in subprojects/ and linked
+dnl statically into mountd. It is not installed.
+libdcerpc_dir=subprojects/libsmb2/libdcerpc
+AS_IF([test ! -f "$srcdir/$libdcerpc_dir/configure.ac"], [
+	AC_MSG_ERROR([$libdcerpc_dir is missing: run "git submodule update --init"])
+])
+ac_configure_args="$ac_configure_args --without-libsmb2 --disable-shared --enable-static --with-pic"
+AC_CONFIG_SUBDIRS([subprojects/libsmb2/libdcerpc])
+LIBDCERPC_CFLAGS="-I\$(top_srcdir)/$libdcerpc_dir/include"
+for iface in srvsvc wkssvc winreg lsa samr dssetup epm; do
+	LIBDCERPC_CFLAGS="$LIBDCERPC_CFLAGS -I\$(top_builddir)/$libdcerpc_dir/$iface"
+done
+AC_SUBST([LIBDCERPC_CFLAGS])
+AC_SUBST([LIBDCERPC_LIBS], ["\$(top_builddir)/$libdcerpc_dir/libdcerpc.la"])
+
 AC_CONFIG_FILES([
 	Makefile
+	subprojects/Makefile
 	addshare/Makefile
 	adduser/Makefile
 	control/Makefile

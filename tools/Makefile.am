@@ -20,4 +20,5 @@ endif
 ksmbd_tools_LDADD = $(top_builddir)/addshare/libaddshare.a \
                     $(top_builddir)/adduser/libadduser.a \
                     $(top_builddir)/control/libcontrol.a \
-                    $(top_builddir)/mountd/libmountd.a
+                    $(top_builddir)/mountd/libmountd.a \
+                    $(LIBDCERPC_LIBS)

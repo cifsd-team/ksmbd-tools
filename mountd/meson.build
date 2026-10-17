@@ -17,6 +17,7 @@ mountd_lib = static_library(
   dependencies: [
     glib_dep,
     libnl_dep,
+    libdcerpc_dep,
   ],
 )
 
