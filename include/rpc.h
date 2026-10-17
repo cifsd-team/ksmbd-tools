@@ -238,6 +238,9 @@ enum DCERPC_BIND_TIME_OPTIONS {
  */
 
 struct ksmbd_rpc_command;
+struct dcerpc_server;
+struct dcerpc_server_pipe;
+struct dcerpc_pdu;
 
 struct ksmbd_dcerpc {
 	unsigned int		flags;
@@ -305,6 +308,16 @@ struct ksmbd_rpc_pipe {
 	 */
 	int			(*entry_processed)(struct ksmbd_rpc_pipe *pipe,
 						   int i);
+
+	/*
+	 * A service on libdcerpc's server runtime: this open's endpoint
+	 * and DCE/RPC pipe, and the flags of the request being handled.
+	 * NULL for the services still served by the code in rpc.c.
+	 */
+	struct dcerpc_server		*srv;
+	struct dcerpc_server_pipe	*rpc;
+	unsigned int			req_flags;
+	GMutex				lock;
 };
 
 int ndr_read_int8(struct ksmbd_dcerpc *dce, __u8 *value);
@@ -350,6 +363,10 @@ void rpc_init(void);
 void rpc_destroy(void);
 
 int rpc_restricted_context(struct ksmbd_rpc_command *req);
+
+/* For libdcerpc stubs: the pipe the call came on, and its restriction */
+struct ksmbd_rpc_pipe *rpc_pipe_of_pdu(struct dcerpc_pdu *pdu);
+int rpc_pipe_restricted(struct ksmbd_rpc_pipe *pipe);
 
 int rpc_ioctl_request(struct ksmbd_rpc_command *req,
 		      struct ksmbd_rpc_command *resp,

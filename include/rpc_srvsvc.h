@@ -8,13 +8,9 @@
 #ifndef __KSMBD_RPC_SRVSVC_H__
 #define __KSMBD_RPC_SRVSVC_H__
 
-struct ksmbd_rpc_command;
-struct ksmbd_rpc_pipe;
+struct dcerpc_server;
 
-int rpc_srvsvc_read_request(struct ksmbd_rpc_pipe *pipe,
-			    struct ksmbd_rpc_command *resp,
-			    int max_resp_sz);
-
-int rpc_srvsvc_write_request(struct ksmbd_rpc_pipe *pipe);
+/* A new endpoint serving srvsvc, for one open of the pipe */
+struct dcerpc_server *rpc_srvsvc_endpoint(void);
 
 #endif /* __KSMBD_RPC_SRVSVC_H__ */
