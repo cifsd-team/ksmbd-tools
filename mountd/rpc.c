@@ -262,6 +262,19 @@ int rpc_pipe_handle_close(struct ksmbd_rpc_pipe *pipe,
 	return 0;
 }
 
+/* libdcerpc's messages about a pipe, at mountd's log levels */
+static void libdcerpc_log(void *private_data, int level, const char *msg)
+{
+	struct ksmbd_rpc_pipe *pipe = private_data;
+
+	if (level == DCERPC_SERVER_LOG_ERROR)
+		pr_err("RPC: pipe %u: %s\n", pipe->id, msg);
+	else if (level == DCERPC_SERVER_LOG_INFO)
+		pr_info("RPC: pipe %u: %s\n", pipe->id, msg);
+	else
+		pr_debug("RPC: pipe %u: %s\n", pipe->id, msg);
+}
+
 /* 1 if flags name a service and the pipe is now its, else 0 */
 static int libdcerpc_pipe_open(struct ksmbd_rpc_pipe *pipe,
 			       unsigned int flags)
@@ -279,6 +292,7 @@ static int libdcerpc_pipe_open(struct ksmbd_rpc_pipe *pipe,
 	if (!pipe->srv ||
 	    dcerpc_server_set_max_xmit_frag(pipe->srv, LIBDCERPC_MAX_FRAG))
 		return -ENOMEM;
+	dcerpc_server_set_log(pipe->srv, libdcerpc_log, pipe);
 	pipe->rpc = dcerpc_server_pipe_create(pipe->srv, pipe);
 	if (!pipe->rpc)
 		return -ENOMEM;
