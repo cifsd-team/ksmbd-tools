@@ -292,7 +292,12 @@ static int libdcerpc_pipe_open(struct ksmbd_rpc_pipe *pipe,
 	if (!pipe->srv ||
 	    dcerpc_server_set_max_xmit_frag(pipe->srv, LIBDCERPC_MAX_FRAG))
 		return -ENOMEM;
-	dcerpc_server_set_log(pipe->srv, libdcerpc_log, pipe);
+	/* the hex dumps and YAML of debug only with -v */
+	dcerpc_server_set_log(pipe->srv,
+			      log_level >= PR_DEBUG ? DCERPC_SERVER_LOG_DEBUG :
+			      log_level >= PR_INFO ? DCERPC_SERVER_LOG_INFO :
+			      DCERPC_SERVER_LOG_ERROR,
+			      libdcerpc_log, pipe);
 	pipe->rpc = dcerpc_server_pipe_create(pipe->srv, pipe);
 	if (!pipe->rpc)
 		return -ENOMEM;
