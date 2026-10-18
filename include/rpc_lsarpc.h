@@ -8,32 +8,13 @@
 #ifndef __KSMBD_RPC_LSARPC_H__
 #define __KSMBD_RPC_LSARPC_H__
 
-#include <smbacl.h>
-
-#define HANDLE_SIZE	20
 #define DOMAIN_STR_SIZE	257
 
-struct ksmbd_rpc_command;
-struct ksmbd_rpc_pipe;
+struct dcerpc_server;
 
-struct policy_handle {
-	unsigned char handle[HANDLE_SIZE];
-	struct ksmbd_user *user;
-};
+/* A new endpoint serving lsarpc and dssetup, for one open of the pipe */
+struct dcerpc_server *rpc_lsarpc_endpoint(void);
 
-struct lsarpc_names_info {
-	unsigned int index;
-	int type;
-	char domain_str[DOMAIN_STR_SIZE];
-	struct smb_sid sid;
-	struct ksmbd_user *user;
-};
-
-int rpc_lsarpc_read_request(struct ksmbd_rpc_pipe *pipe,
-			  struct ksmbd_rpc_command *resp,
-			  int max_resp_sz);
-
-int rpc_lsarpc_write_request(struct ksmbd_rpc_pipe *pipe);
 void rpc_lsarpc_init(void);
 void rpc_lsarpc_destroy(void);
 
