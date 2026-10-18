@@ -180,6 +180,8 @@ static void __rpc_pipe_free(struct ksmbd_rpc_pipe *pipe)
 		dcerpc_server_pipe_destroy(pipe->rpc);
 	if (pipe->srv)
 		dcerpc_server_destroy(pipe->srv);
+	if (pipe->handles)
+		g_hash_table_destroy(pipe->handles);
 	g_mutex_clear(&pipe->lock);
 	g_free(pipe);
 }
@@ -1291,6 +1293,90 @@ int rpc_pipe_restricted(struct ksmbd_rpc_pipe *pipe)
 	return !pipe || pipe->req_flags & KSMBD_RPC_RESTRICTED_CONTEXT;
 }
 
+struct rpc_handle {
+	struct dcerpc_context_handle	handle;
+	void				*data;
+	GDestroyNotify			free_data;
+};
+
+static void rpc_handle_free(struct rpc_handle *h)
+{
+	if (h->free_data)
+		h->free_data(h->data);
+	g_free(h);
+}
+
+int rpc_pipe_handle_open(struct ksmbd_rpc_pipe *pipe, void *data,
+			 GDestroyNotify free_data,
+			 struct dcerpc_context_handle *handle)
+{
+	struct rpc_handle *h;
+	int i;
+
+	if (!pipe->handles)
+		pipe->handles = g_hash_table_new_full(NULL, NULL, NULL,
+				(GDestroyNotify)rpc_handle_free);
+	h = g_try_malloc0(sizeof(*h));
+	if (!h)
+		return -1;
+
+	/* The id, and random bytes so that a handle can't be guessed */
+	h->handle.context_handle_uuid.v1 = ++pipe->next_handle;
+	h->handle.context_handle_uuid.v2 = g_random_int();
+	h->handle.context_handle_uuid.v3 = g_random_int();
+	for (i = 0; i < 8; i++)
+		h->handle.context_handle_uuid.v4[i] = g_random_int();
+	h->data = data;
+	h->free_data = free_data;
+	g_hash_table_insert(pipe->handles,
+			    GUINT_TO_POINTER(h->handle.context_handle_uuid.v1),
+			    h);
+	*handle = h->handle;
+	return 0;
+}
+
+static struct rpc_handle *
+rpc_handle_find(struct ksmbd_rpc_pipe *pipe,
+		const struct dcerpc_context_handle *handle)
+{
+	struct rpc_handle *h;
+
+	if (!pipe || !pipe->handles)
+		return NULL;
+	h = g_hash_table_lookup(pipe->handles,
+			GUINT_TO_POINTER(handle->context_handle_uuid.v1));
+	if (!h || memcmp(&h->handle.context_handle_uuid,
+			 &handle->context_handle_uuid,
+			 sizeof(handle->context_handle_uuid)))
+		return NULL;
+	return h;
+}
+
+int rpc_pipe_handle_lookup(struct ksmbd_rpc_pipe *pipe,
+			   const struct dcerpc_context_handle *handle,
+			   void **data)
+{
+	struct rpc_handle *h = rpc_handle_find(pipe, handle);
+
+	if (!h)
+		return -1;
+	if (data)
+		*data = h->data;
+	return 0;
+}
+
+int rpc_pipe_handle_close(struct ksmbd_rpc_pipe *pipe,
+			  const struct dcerpc_context_handle *handle)
+{
+	struct rpc_handle *h = rpc_handle_find(pipe, handle);
+
+	if (!h)
+		return -1;
+	g_hash_table_remove(pipe->handles,
+			    GUINT_TO_POINTER(handle->context_handle_uuid.v1));
+	return 0;
+}
+
 /* 1 if flags name a libdcerpc service and the pipe is now its, else 0 */
 static int libdcerpc_pipe_open(struct ksmbd_rpc_pipe *pipe,
 			       unsigned int flags)
@@ -1404,6 +1490,7 @@ int rpc_read_request(struct ksmbd_rpc_command *req,
 
 	if (req->flags & KSMBD_RPC_LSARPC_METHOD_INVOKE)
 		return rpc_lsarpc_read_request(pipe, resp, max_resp_sz);
+
 	return ret;
 }
 
@@ -1460,6 +1547,7 @@ int rpc_write_request(struct ksmbd_rpc_command *req,
 
 	if (req->flags & KSMBD_RPC_LSARPC_METHOD_INVOKE)
 		return rpc_lsarpc_write_request(pipe);
+
 	return KSMBD_RPC_ENOTIMPLEMENTED;
 }
 

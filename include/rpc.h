@@ -241,6 +241,7 @@ struct ksmbd_rpc_command;
 struct dcerpc_server;
 struct dcerpc_server_pipe;
 struct dcerpc_pdu;
+struct dcerpc_context_handle;
 
 struct ksmbd_dcerpc {
 	unsigned int		flags;
@@ -318,6 +319,9 @@ struct ksmbd_rpc_pipe {
 	struct dcerpc_server_pipe	*rpc;
 	unsigned int			req_flags;
 	GMutex				lock;
+	/* the context handles its stubs gave out, by id */
+	GHashTable			*handles;
+	unsigned int			next_handle;
 };
 
 int ndr_read_int8(struct ksmbd_dcerpc *dce, __u8 *value);
@@ -367,6 +371,21 @@ int rpc_restricted_context(struct ksmbd_rpc_command *req);
 /* For libdcerpc stubs: the pipe the call came on, and its restriction */
 struct ksmbd_rpc_pipe *rpc_pipe_of_pdu(struct dcerpc_pdu *pdu);
 int rpc_pipe_restricted(struct ksmbd_rpc_pipe *pipe);
+
+/*
+ * Context handles for libdcerpc stubs, valid on the pipe that gave them
+ * out. A handle carries data, freed with free_data (if not NULL) when
+ * the handle is closed or the pipe goes away. All return 0, or -1: out
+ * of memory for open, not an open handle for lookup and close.
+ */
+int rpc_pipe_handle_open(struct ksmbd_rpc_pipe *pipe, void *data,
+			 GDestroyNotify free_data,
+			 struct dcerpc_context_handle *handle);
+int rpc_pipe_handle_lookup(struct ksmbd_rpc_pipe *pipe,
+			   const struct dcerpc_context_handle *handle,
+			   void **data);
+int rpc_pipe_handle_close(struct ksmbd_rpc_pipe *pipe,
+			  const struct dcerpc_context_handle *handle);
 
 int rpc_ioctl_request(struct ksmbd_rpc_command *req,
 		      struct ksmbd_rpc_command *resp,
