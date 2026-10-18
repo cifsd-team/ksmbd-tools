@@ -49,33 +49,6 @@
 
 static gchar *domain_name;
 
-static void sid_from_rpc(struct smb_sid *sid, const RPC_SID *rsid)
-{
-	int i;
-
-	memset(sid, 0, sizeof(*sid));
-	sid->revision = rsid->Revision;
-	sid->num_subauth = MIN(rsid->SubAuthorityCount, MAXSUBAUTH);
-	memcpy(sid->authority, rsid->IdentifierAuthority, NUM_AUTHS);
-	for (i = 0; i < sid->num_subauth; i++)
-		sid->sub_auth[i] = rsid->SubAuthority[i];
-}
-
-static RPC_SID *sid_to_rpc(struct dcerpc_pdu *pdu, const struct smb_sid *sid)
-{
-	RPC_SID *rsid = dcerpc_alloc_data(pdu, sizeof(*rsid));
-	int i;
-
-	if (!rsid)
-		return NULL;
-	rsid->Revision = sid->revision;
-	rsid->SubAuthorityCount = MIN(sid->num_subauth, MAXSUBAUTH);
-	memcpy(rsid->IdentifierAuthority, sid->authority, NUM_AUTHS);
-	for (i = 0; i < rsid->SubAuthorityCount; i++)
-		rsid->SubAuthority[i] = sid->sub_auth[i];
-	return rsid;
-}
-
 /* The status of a lookup that mapped mapped out of count names or SIDs */
 static uint32_t lookup_status(uint32_t mapped, uint32_t count)
 {
@@ -122,7 +95,7 @@ static int ref_domains_add(struct ref_domains *rd, const struct smb_sid *sid,
 
 	d = &rd->list->Domains[i];
 	d->Name = rpc_pdu_strdup(rd->pdu, name);
-	d->Sid = sid_to_rpc(rd->pdu, sid);
+	d->Sid = smb_sid_to_rpc(rd->pdu, sid);
 	if (!d->Name || !d->Sid)
 		return -1;
 	smb_copy_sid(&rd->sids[i], sid);
@@ -150,7 +123,7 @@ static int lookup_sid(struct ref_domains *rd, const RPC_SID *rsid,
 	if (!rsid || !rsid->SubAuthorityCount)
 		return 0;
 
-	sid_from_rpc(&sid, rsid);
+	smb_sid_from_rpc(&sid, rsid);
 	rid = sid.sub_auth[--sid.num_subauth];
 	/* the length of the name, or -ENOENT for a domain it doesn't know */
 	if (set_domain_name(&sid, domain_str, sizeof(domain_str), &type) < 0)
@@ -288,7 +261,7 @@ static int lsa_query_info_policy(struct dcerpc_pdu *pdu,
 		smb_init_domain_sid(&sid);
 		info->PolicyAccountDomainInfo.DomainName =
 			rpc_pdu_strdup(pdu, domain_name);
-		info->PolicyAccountDomainInfo.DomainSid = sid_to_rpc(pdu, &sid);
+		info->PolicyAccountDomainInfo.DomainSid = smb_sid_to_rpc(pdu, &sid);
 		if (!info->PolicyAccountDomainInfo.DomainName ||
 		    !info->PolicyAccountDomainInfo.DomainSid)
 			return -1;
@@ -503,7 +476,7 @@ static int lsa_lookup_names3_stub(struct dcerpc_context *dce,
 		if (ret) {
 			smb_init_domain_sid(&sid);
 			sid.sub_auth[sid.num_subauth++] = rid;
-			sids[i].Sid = sid_to_rpc(pdu, &sid);
+			sids[i].Sid = smb_sid_to_rpc(pdu, &sid);
 			if (!sids[i].Sid)
 				return -1;
 		}

@@ -6,6 +6,9 @@
  *   Author(s): Namjae Jeon (linkinjeon@kernel.org)
  */
 
+#include <dcerpc/dcerpc.h>
+#include <dcerpc/dcerpc-dtyp.h>
+
 #include <smbacl.h>
 #include <tools.h>
 #include <glib.h>
@@ -81,6 +84,33 @@ void smb_copy_sid(struct smb_sid *dst, const struct smb_sid *src)
 		dst->authority[i] = src->authority[i];
 	for (i = 0; i < dst->num_subauth; ++i)
 		dst->sub_auth[i] = src->sub_auth[i];
+}
+
+void smb_sid_from_rpc(struct smb_sid *sid, const RPC_SID *rsid)
+{
+	int i;
+
+	memset(sid, 0, sizeof(*sid));
+	sid->revision = rsid->Revision;
+	sid->num_subauth = MIN(rsid->SubAuthorityCount, MAXSUBAUTH);
+	memcpy(sid->authority, rsid->IdentifierAuthority, NUM_AUTHS);
+	for (i = 0; i < sid->num_subauth; i++)
+		sid->sub_auth[i] = rsid->SubAuthority[i];
+}
+
+RPC_SID *smb_sid_to_rpc(struct dcerpc_pdu *pdu, const struct smb_sid *sid)
+{
+	RPC_SID *rsid = dcerpc_alloc_data(pdu, sizeof(*rsid));
+	int i;
+
+	if (!rsid)
+		return NULL;
+	rsid->Revision = sid->revision;
+	rsid->SubAuthorityCount = MIN(sid->num_subauth, MAXSUBAUTH);
+	memcpy(rsid->IdentifierAuthority, sid->authority, NUM_AUTHS);
+	for (i = 0; i < rsid->SubAuthorityCount; i++)
+		rsid->SubAuthority[i] = sid->sub_auth[i];
+	return rsid;
 }
 
 void smb_init_domain_sid(struct smb_sid *sid)

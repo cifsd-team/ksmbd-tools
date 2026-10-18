@@ -78,4 +78,11 @@ void smb_copy_sid(struct smb_sid *dst, const struct smb_sid *src);
 int smb_compare_sids(const struct smb_sid *ctsid, const struct smb_sid *cwsid);
 int build_sec_desc(struct ksmbd_dcerpc *dce, __u32 *secdesclen, int rid);
 int set_domain_name(struct smb_sid *sid, char *domain, size_t domain_len, int *type);
+
+/* Conversion to and from libdcerpc's RPC_SID; the RPC_SID is the pdu's */
+struct dcerpc_pdu;
+struct RPC_SID;
+struct RPC_SID *smb_sid_to_rpc(struct dcerpc_pdu *pdu,
+			       const struct smb_sid *sid);
+void smb_sid_from_rpc(struct smb_sid *sid, const struct RPC_SID *rsid);
 #endif /* __KSMBD_SMBACL_H__ */
