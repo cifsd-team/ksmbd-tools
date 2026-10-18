@@ -28,20 +28,6 @@
 #define WKSSVC_VERSION_MAJOR		0x2
 #define WKSSVC_VERSION_MINOR		0x1
 
-static char *pdu_strdup(struct dcerpc_pdu *pdu, const char *s)
-{
-	size_t len;
-	char *d;
-
-	if (!s)
-		s = "";
-	len = strlen(s) + 1;
-	d = dcerpc_alloc_data(pdu, len);
-	if (d)
-		memcpy(d, s, len);
-	return d;
-}
-
 /*
  * NetrWkstaGetInfo, level 100 only: 101 and 102 need an administrator
  * on Windows, and nothing asks ksmbd for them.
@@ -72,8 +58,8 @@ static int wkssvc_wksta_get_info_stub(struct dcerpc_context *dce,
 	}
 
 	info->PlatformId = WKSSVC_PLATFORM_ID_NT;
-	info->ComputerName = pdu_strdup(pdu, name);
-	info->LanGroup = pdu_strdup(pdu, global_conf.work_group);
+	info->ComputerName = rpc_pdu_strdup(pdu, name);
+	info->LanGroup = rpc_pdu_strdup(pdu, global_conf.work_group ?: "");
 	info->VerMajor = WKSSVC_VERSION_MAJOR;
 	info->VerMinor = WKSSVC_VERSION_MINOR;
 	if (!info->ComputerName || !info->LanGroup)

@@ -40,20 +40,6 @@ static int __share_type(struct ksmbd_share *share)
 	return SHARE_TYPE_DISKTREE;
 }
 
-static char *pdu_strdup(struct dcerpc_pdu *pdu, const char *s)
-{
-	size_t len;
-	char *d;
-
-	if (!s)
-		s = "";
-	len = strlen(s) + 1;
-	d = dcerpc_alloc_data(pdu, len);
-	if (d)
-		memcpy(d, s, len);
-	return d;
-}
-
 /* Fill a SHARE_INFO_0 or _1; returns -1 if out of memory */
 static int fill_share_info(struct dcerpc_pdu *pdu, struct ksmbd_share *share,
 			   uint32_t level, void *info)
@@ -62,12 +48,12 @@ static int fill_share_info(struct dcerpc_pdu *pdu, struct ksmbd_share *share,
 	struct srvsvc_SHARE_INFO_1 *info1 = info;
 
 	if (level == 0) {
-		info0->NetName = pdu_strdup(pdu, share->name);
+		info0->NetName = rpc_pdu_strdup(pdu, share->name);
 		return info0->NetName ? 0 : -1;
 	}
-	info1->NetName = pdu_strdup(pdu, share->name);
+	info1->NetName = rpc_pdu_strdup(pdu, share->name);
 	info1->Type = __share_type(share);
-	info1->Remark = pdu_strdup(pdu, share->comment);
+	info1->Remark = rpc_pdu_strdup(pdu, share->comment ?: "");
 	return info1->NetName && info1->Remark ? 0 : -1;
 }
 

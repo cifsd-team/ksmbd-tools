@@ -49,20 +49,6 @@
 
 static gchar *domain_name;
 
-static char *pdu_strdup(struct dcerpc_pdu *pdu, const char *s)
-{
-	size_t len;
-	char *d;
-
-	if (!s)
-		return NULL;
-	len = strlen(s) + 1;
-	d = dcerpc_alloc_data(pdu, len);
-	if (d)
-		memcpy(d, s, len);
-	return d;
-}
-
 static void sid_from_rpc(struct smb_sid *sid, const RPC_SID *rsid)
 {
 	int i;
@@ -135,7 +121,7 @@ static int ref_domains_add(struct ref_domains *rd, const struct smb_sid *sid,
 		return -1;
 
 	d = &rd->list->Domains[i];
-	d->Name = pdu_strdup(rd->pdu, name);
+	d->Name = rpc_pdu_strdup(rd->pdu, name);
 	d->Sid = sid_to_rpc(rd->pdu, sid);
 	if (!d->Name || !d->Sid)
 		return -1;
@@ -179,14 +165,14 @@ static int lookup_sid(struct ref_domains *rd, const RPC_SID *rsid,
 
 		if (!gr)
 			return 0;
-		*name = pdu_strdup(rd->pdu, gr->gr_name);
+		*name = rpc_pdu_strdup(rd->pdu, gr->gr_name);
 		*use = LSA_SidTypeGroup;
 	} else {
 		struct passwd *pw = getpwuid(rid);
 
 		if (!pw)
 			return 0;
-		*name = pdu_strdup(rd->pdu, pw->pw_name);
+		*name = rpc_pdu_strdup(rd->pdu, pw->pw_name);
 		*use = LSA_SidTypeUser;
 	}
 	return *name ? 1 : -1;
@@ -301,7 +287,7 @@ static int lsa_query_info_policy(struct dcerpc_pdu *pdu,
 		/* The machine's own account domain */
 		smb_init_domain_sid(&sid);
 		info->PolicyAccountDomainInfo.DomainName =
-			pdu_strdup(pdu, domain_name);
+			rpc_pdu_strdup(pdu, domain_name);
 		info->PolicyAccountDomainInfo.DomainSid = sid_to_rpc(pdu, &sid);
 		if (!info->PolicyAccountDomainInfo.DomainName ||
 		    !info->PolicyAccountDomainInfo.DomainSid)
@@ -310,11 +296,11 @@ static int lsa_query_info_policy(struct dcerpc_pdu *pdu,
 	case LSA_PolicyPrimaryDomainInformation:
 		/* Not in a domain: the workgroup, and no SID */
 		info->PolicyPrimaryDomainInfo.Name =
-			pdu_strdup(pdu, global_conf.work_group);
+			rpc_pdu_strdup(pdu, global_conf.work_group);
 		break;
 	case LSA_PolicyDnsDomainInformation:
 		info->PolicyDnsDomainInfo.Name =
-			pdu_strdup(pdu, global_conf.work_group);
+			rpc_pdu_strdup(pdu, global_conf.work_group);
 		break;
 	default:
 		*status = STATUS_INVALID_PARAMETER;
@@ -552,7 +538,7 @@ static int dssetup_get_primary_domain_info_stub(struct dcerpc_context *dce,
 		info->DomainInfoBasic.MachineRole =
 			DSSETUP_DsRole_RoleStandaloneServer;
 		info->DomainInfoBasic.DomainNameFlat =
-			pdu_strdup(pdu, global_conf.work_group);
+			rpc_pdu_strdup(pdu, global_conf.work_group);
 		if (!info->DomainInfoBasic.DomainNameFlat)
 			return -1;
 		break;

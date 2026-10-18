@@ -368,6 +368,9 @@ void rpc_destroy(void);
 
 int rpc_restricted_context(struct ksmbd_rpc_command *req);
 
+/* A copy of s for a libdcerpc reply, freed with the pdu; NULL stays NULL */
+char *rpc_pdu_strdup(struct dcerpc_pdu *pdu, const char *s);
+
 /* For libdcerpc stubs: the pipe the call came on, and its restriction */
 struct ksmbd_rpc_pipe *rpc_pipe_of_pdu(struct dcerpc_pdu *pdu);
 int rpc_pipe_restricted(struct ksmbd_rpc_pipe *pipe);

@@ -1277,6 +1277,20 @@ static const struct {
  */
 #define LIBDCERPC_MAX_FRAG	4096
 
+char *rpc_pdu_strdup(struct dcerpc_pdu *pdu, const char *s)
+{
+	size_t len;
+	char *d;
+
+	if (!s)
+		return NULL;
+	len = strlen(s) + 1;
+	d = dcerpc_alloc_data(pdu, len);
+	if (d)
+		memcpy(d, s, len);
+	return d;
+}
+
 struct ksmbd_rpc_pipe *rpc_pipe_of_pdu(struct dcerpc_pdu *pdu)
 {
 	struct dcerpc_server_call *call = dcerpc_pdu_server_call(pdu);
