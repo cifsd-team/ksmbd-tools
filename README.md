@@ -29,6 +29,25 @@ Dependencies for RHEL and its derivatives: `git` `gcc` `pkgconf` `autoconf`
 `automake` `libtool` `make` `meson` `ninja-build` `gawk` `libnl3-devel`  
 `glib2-devel`
 
+### Kerberos 5 support
+
+Kerberos 5 support is disabled by default. To enable it, install the
+development files for your Kerberos implementation and make sure `pkg-config`
+can find its `krb5` module. Pass `--enable-krb5` to Autotools `configure` or
+`-Dkrb5=enabled` to Meson. For example:
+
+```sh
+# Autotools
+./configure --enable-krb5 --with-rundir=/run
+
+# Meson, from the build directory
+meson -Dkrb5=enabled -Drundir=/run ..
+```
+
+Continue with `make` and `make install` for Autotools, or `ninja` and
+`ninja install` for Meson. Heimdal's ASN.1 library is detected and linked
+automatically when required.
+
 Example build and install:
 ```sh
 git clone https://github.com/cifsd-team/ksmbd-tools.git
