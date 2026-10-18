@@ -1264,6 +1264,7 @@ static const struct {
 	struct dcerpc_server	*(*endpoint)(void);
 } libdcerpc_services[] = {
 	{ KSMBD_RPC_SRVSVC_METHOD_INVOKE, rpc_srvsvc_endpoint },
+	{ KSMBD_RPC_WKSSVC_METHOD_INVOKE, rpc_wkssvc_endpoint },
 };
 
 /*
@@ -1398,9 +1399,6 @@ int rpc_read_request(struct ksmbd_rpc_command *req,
 	if (dce->hdr.ptype != DCERPC_PTYPE_RPC_REQUEST)
 		return KSMBD_RPC_ENOTIMPLEMENTED;
 
-	if (req->flags & KSMBD_RPC_WKSSVC_METHOD_INVOKE)
-		return rpc_wkssvc_read_request(pipe, resp, max_resp_sz);
-
 	if (req->flags & KSMBD_RPC_SAMR_METHOD_INVOKE)
 		return rpc_samr_read_request(pipe, resp, max_resp_sz);
 
@@ -1456,9 +1454,6 @@ int rpc_write_request(struct ksmbd_rpc_command *req,
 
 	if (dcerpc_request_hdr_read(dce, &dce->req_hdr))
 		return KSMBD_RPC_EBAD_DATA;
-
-	if (req->flags & KSMBD_RPC_WKSSVC_METHOD_INVOKE)
-		return rpc_wkssvc_write_request(pipe);
 
 	if (req->flags & KSMBD_RPC_SAMR_METHOD_INVOKE)
 		return rpc_samr_write_request(pipe);
