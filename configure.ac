@@ -126,6 +126,20 @@ AS_IF([test "x$enable_krb5" != xno], [
 	                [ac_cv_have_krb5_authenticator_client=yes],
 	                [ac_cv_have_krb5_authenticator_client=no],
 	                [[#include <krb5.h>]])
+	AS_IF([test "x$ac_cv_have_krb5_authenticator_client" != xyes], [
+		# The fallback in spnego_krb5.c uses copy_PrincipalName(), which
+		# Heimdal may provide through libasn1 rather than libkrb5.
+		save_LIBS=$LIBS
+		LIBS="$LIBKRB5_LIBS $LIBS"
+		AC_SEARCH_LIBS([copy_PrincipalName], [asn1], [
+			AS_IF([test "x$ac_cv_search_copy_PrincipalName" != "xnone required"], [
+				LIBKRB5_LIBS="$LIBKRB5_LIBS $ac_cv_search_copy_PrincipalName"
+			])
+		], [
+			AC_MSG_ERROR([copy_PrincipalName was not found in the Kerberos libraries or libasn1.])
+		])
+		LIBS=$save_LIBS
+	])
 	AC_CACHE_CHECK([for krb5_authenticator** parameter in krb5_auth_con_getauthenticator],
 	               [ac_cv_have_krb5_auth_con_getauthenticator_double_pointer],
 	               [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
