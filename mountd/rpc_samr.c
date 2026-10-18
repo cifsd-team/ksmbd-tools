@@ -5,1013 +5,566 @@
  *   Author(s): Namjae Jeon (linkinjeon@kernel.org)
  */
 
-#include <memory.h>
-#include <endian.h>
+/*
+ * samr ([MS-SAMR]) on libdcerpc's server runtime. The coders are
+ * libdcerpc's, generated from its samr.idl.
+ *
+ * The SAM of a standalone ksmbd: the account domain, named after the
+ * host and with the SID from ksmbd.subauth, holds the ksmbd users, each
+ * with its uid as RID. Builtin (S-1-5-32) is listed but empty.
+ */
+
 #include <glib.h>
-#include <errno.h>
+#include <limits.h>
+#include <pwd.h>
+#include <string.h>
+#include <unistd.h>
 #include <linux/ksmbd_server.h>
 
+#include <dcerpc/dcerpc.h>
+#include <dcerpc/dcerpc-dtyp.h>
+#include <dcerpc/server.h>
+#include <dcerpc/samr.h>
+
 #include <management/user.h>
+
 #include <rpc.h>
 #include <rpc_samr.h>
 #include <smbacl.h>
 #include <tools.h>
 
-#define SAMR_OPNUM_CONNECT5		64
-#define SAMR_OPNUM_ENUM_DOMAIN		6
-#define SAMR_OPNUM_LOOKUP_DOMAIN	5
-#define SAMR_OPNUM_OPEN_DOMAIN		7
-#define SAMR_OPNUM_LOOKUP_NAMES		17
-#define SAMR_OPNUM_OPEN_USER		34
-#define SAMR_OPNUM_QUERY_USER_INFO	36
-#define SAMR_OPNUM_QUERY_SECURITY	3
-#define SAMR_OPNUM_GET_GROUP_FOR_USER	39
-#define SAMR_OPNUM_GET_ALIAS_MEMBERSHIP	16
-#define SAMR_OPNUM_CLOSE		1
+/* [MS-ERREF] 2.3 */
+#define STATUS_SOME_NOT_MAPPED		0x00000107
+#define STATUS_INVALID_INFO_CLASS	0xC0000003
+#define STATUS_INVALID_HANDLE		0xC0000008
+#define STATUS_NO_SUCH_USER		0xC0000064
+#define STATUS_NONE_MAPPED		0xC0000073
+#define STATUS_NO_SUCH_DOMAIN		0xC00000DF
 
-static GHashTable	*ch_table;
-static GRWLock		ch_table_lock;
-static GPtrArray	*domain_entries;
-static gchar		*domain_name;
-static int		num_domain_entries;
+/* [MS-SAMR] 2.2.1.14: RID of Domain Users */
+#define DOMAIN_GROUP_RID_USERS		513
+/* SE_GROUP_MANDATORY | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_ENABLED */
+#define SE_GROUP_DEFAULT		0x00000007
 
-static void samr_ch_free(struct connect_handle *ch)
+/* S-1-5-32, the Builtin domain */
+static const struct smb_sid sid_builtin = {
+	1, 1, {0, 0, 0, 0, 0, 5}, {32} };
+/* S-1-1-0, Everyone */
+static const struct smb_sid sid_everyone = {
+	1, 1, {0, 0, 0, 0, 0, 1}, {0} };
+
+static gchar *domain_name;
+
+/* What a samr handle is a handle to */
+enum samr_handle_type {
+	SAMR_HANDLE_SERVER,
+	SAMR_HANDLE_DOMAIN,
+	SAMR_HANDLE_BUILTIN,
+	SAMR_HANDLE_USER,
+};
+
+struct samr_handle {
+	enum samr_handle_type	type;
+	/* SAMR_HANDLE_USER */
+	char			*name;
+	uid_t			uid;
+};
+
+static void samr_handle_free(struct samr_handle *h)
 {
-	g_rw_lock_writer_lock(&ch_table_lock);
-	g_hash_table_remove(ch_table, &(ch->handle));
-	g_rw_lock_writer_unlock(&ch_table_lock);
-
-	g_free(ch);
+	g_free(h->name);
+	g_free(h);
 }
 
-static struct connect_handle *samr_ch_lookup(unsigned char *handle)
+static int samr_handle_open(struct dcerpc_pdu *pdu,
+			    enum samr_handle_type type, const char *name,
+			    uid_t uid, struct dcerpc_context_handle *handle)
 {
-	struct connect_handle *ch;
+	struct samr_handle *h = g_try_malloc0(sizeof(*h));
 
-	g_rw_lock_reader_lock(&ch_table_lock);
-	ch = g_hash_table_lookup(ch_table, handle);
-	g_rw_lock_reader_unlock(&ch_table_lock);
-
-	return ch;
-}
-
-static struct connect_handle *samr_ch_alloc(unsigned int id)
-{
-	struct connect_handle *ch;
-	int ret;
-
-	ch = g_try_malloc0(sizeof(struct connect_handle));
-	if (!ch)
-		return NULL;
-
-	id++;
-	memcpy(ch->handle, &id, sizeof(unsigned int));
-	ch->refcount++;
-	g_rw_lock_writer_lock(&ch_table_lock);
-	ret = g_hash_table_insert(ch_table, &(ch->handle), ch);
-	g_rw_lock_writer_unlock(&ch_table_lock);
-
-	if (!ret) {
-		samr_ch_free(ch);
-		ch = NULL;
+	if (!h)
+		return -1;
+	h->type = type;
+	h->uid = uid;
+	if (name) {
+		h->name = g_strdup(name);
+		if (!h->name) {
+			g_free(h);
+			return -1;
+		}
 	}
-
-	return ch;
-}
-
-static int samr_connect5_invoke(struct ksmbd_rpc_pipe *pipe)
-{
-	struct ksmbd_dcerpc *dce = pipe->dce;
-	struct ndr_uniq_char_ptr server_name;
-
-	if (ndr_read_uniq_vstring_ptr(dce, &server_name))
-		return KSMBD_RPC_EINVALID_PARAMETER;
-	ndr_free_uniq_vstring_ptr(&server_name);
-
-	// Access mask
-	if (ndr_read_int32(dce, NULL))
-		return KSMBD_RPC_EINVALID_PARAMETER;
-	// level in
-	if (ndr_read_int32(dce, &dce->sm_req.level))
-		return KSMBD_RPC_EINVALID_PARAMETER;
-	// Info in
-	if (ndr_read_int32(dce, NULL))
-		return KSMBD_RPC_EINVALID_PARAMETER;
-	if (ndr_read_int32(dce, &dce->sm_req.client_version))
-		return KSMBD_RPC_EINVALID_PARAMETER;
+	if (rpc_pipe_handle_open(rpc_pipe_of_pdu(pdu), h,
+				 (GDestroyNotify)samr_handle_free, handle)) {
+		samr_handle_free(h);
+		return -1;
+	}
 	return 0;
 }
 
-static int samr_connect5_return(struct ksmbd_rpc_pipe *pipe)
+/* The open handle, if it is one of type (or any type if type is -1) */
+static struct samr_handle *
+samr_handle_get(struct dcerpc_pdu *pdu,
+		const struct dcerpc_context_handle *handle, int type)
 {
-	struct ksmbd_dcerpc *dce = pipe->dce;
-	struct connect_handle *ch;
+	void *data;
+	struct samr_handle *h;
 
-	if (ndr_write_union_int32(dce, dce->sm_req.level)) //level out
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (ndr_write_int32(dce, dce->sm_req.client_version)) //client version
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (ndr_write_int32(dce, 0)) //reserved
-		return KSMBD_RPC_EBAD_DATA;
-
-	ch = samr_ch_alloc(pipe->id);
-	if (!ch)
-		return KSMBD_RPC_ENOMEM;
-
-	/* write connect handle */
-	if (ndr_write_bytes(dce, ch->handle, HANDLE_SIZE))
-		return KSMBD_RPC_EBAD_DATA;
-
-	return KSMBD_RPC_OK;
+	if (rpc_pipe_handle_lookup(rpc_pipe_of_pdu(pdu), handle, &data))
+		return NULL;
+	h = data;
+	if (type >= 0 && h->type != (enum samr_handle_type)type)
+		return NULL;
+	return h;
 }
 
-static int samr_enum_domain_invoke(struct ksmbd_rpc_pipe *pipe)
+/* A ksmbd user by RID; its name is the caller's to free */
+static char *samr_user_name(uint32_t rid)
 {
-	struct ksmbd_dcerpc *dce = pipe->dce;
+	struct ksmbd_user *user;
+	struct passwd *pw;
+	char *name;
 
-	if (ndr_read_bytes(dce, dce->sm_req.handle, HANDLE_SIZE))
-		return KSMBD_RPC_EINVALID_PARAMETER;
-
-	return KSMBD_RPC_OK;
+	pw = getpwuid(rid);
+	if (!pw)
+		return NULL;
+	user = usm_lookup_user(pw->pw_name);
+	if (!user)
+		return NULL;
+	name = g_strdup(user->name);
+	put_ksmbd_user(user);
+	return name;
 }
 
-int samr_ndr_write_domain_array(struct ksmbd_rpc_pipe *pipe)
+/* ------------------------------------------------------------------ */
+/* Server                                                              */
+/* ------------------------------------------------------------------ */
+
+static int samr_connect2_stub(struct dcerpc_context *dce,
+			      struct dcerpc_pdu *pdu,
+			      void *reqv, void *repv)
 {
-	struct ksmbd_dcerpc *dce = pipe->dce;
-	int i, ret = 0;
+	struct samr_Connect2_rep *rep = repv;
 
-	for (i = 0; i < num_domain_entries; i++) {
-		char *entry;
-		size_t name_len;
-
-		ret = ndr_write_int32(dce, i);
-		if (ret)
-			return ret;
-		entry = g_ptr_array_index(domain_entries, i);
-		name_len = strlen(entry);
-		ret = ndr_write_int16(dce, name_len*2);
-		if (ret)
-			return ret;
-
-		ret = ndr_write_int16(dce, name_len*2);
-		if (ret)
-			return ret;
-
-		/* ref pointer for name entry */
-		dce->num_pointers++;
-		ret = ndr_write_int32(dce, dce->num_pointers);
-		if (ret)
-			return ret;
-	}
-
-	for (i = 0; i < num_domain_entries; i++) {
-		char *entry;
-
-		entry = g_ptr_array_index(domain_entries, i);
-		ret = ndr_write_string(dce, entry);
-		if (ret)
-			return ret;
-	}
-
-	return ret;
+	if (samr_handle_open(pdu, SAMR_HANDLE_SERVER, NULL, 0,
+			     &rep->ServerHandle))
+		return -1;
+	rep->status = KSMBD_RPC_OK;
+	return 0;
 }
 
-static int samr_enum_domain_return(struct ksmbd_rpc_pipe *pipe)
+static int samr_connect5_stub(struct dcerpc_context *dce,
+			      struct dcerpc_pdu *pdu,
+			      void *reqv, void *repv)
 {
-	struct ksmbd_dcerpc *dce = pipe->dce;
-	struct connect_handle *ch;
+	struct samr_Connect5_rep *rep = repv;
 
-	ch = samr_ch_lookup(dce->sm_req.handle);
-	if (!ch)
-		return KSMBD_RPC_EBAD_FID;
-	/* Resume Handle */
-	if (ndr_write_int32(dce, 0))
-		return KSMBD_RPC_EBAD_DATA;
-
-	dce->num_pointers++;
-	if (ndr_write_int32(dce, dce->num_pointers)) // ref pointer
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (ndr_write_int32(dce, num_domain_entries)) // Sam entry count
-		return KSMBD_RPC_EBAD_DATA;
-
-	dce->num_pointers++;
-
-	if (ndr_write_int32(dce, dce->num_pointers)) // ref pointer
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (ndr_write_int32(dce, num_domain_entries)) // Sam max entry count
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (samr_ndr_write_domain_array(pipe))
-		return KSMBD_RPC_EBAD_DATA;
-
-	/* [out] DWORD* Num Entries */
-	if (ndr_write_int32(dce, num_domain_entries))
-		return KSMBD_RPC_EBAD_DATA;
-
-	return KSMBD_RPC_OK;
+	if (samr_handle_open(pdu, SAMR_HANDLE_SERVER, NULL, 0,
+			     &rep->ServerHandle))
+		return -1;
+	/* [MS-SAMR] 3.1.5.1.1: version 1, revision 3, no extra features */
+	rep->OutVersion = 1;
+	rep->OutRevisionInfo.V1.Revision = 3;
+	rep->status = KSMBD_RPC_OK;
+	return 0;
 }
 
-static int samr_lookup_domain_invoke(struct ksmbd_rpc_pipe *pipe)
+/* The handle in the reply stays zeroed, as a closed handle is */
+static int samr_close_handle_stub(struct dcerpc_context *dce,
+				  struct dcerpc_pdu *pdu,
+				  void *reqv, void *repv)
 {
-	struct ksmbd_dcerpc *dce = pipe->dce;
-
-	if (ndr_read_bytes(dce, dce->sm_req.handle, HANDLE_SIZE))
-		return KSMBD_RPC_EINVALID_PARAMETER;
-	// name len
-	if (ndr_read_int16(dce, NULL))
-		return KSMBD_RPC_EINVALID_PARAMETER;
-	// name size
-	if (ndr_read_int16(dce, NULL))
-		return KSMBD_RPC_EINVALID_PARAMETER;
-	// domain name
-	if (ndr_read_uniq_vstring_ptr(dce, &dce->sm_req.name))
-		return KSMBD_RPC_EINVALID_PARAMETER;
-
-	return KSMBD_RPC_OK;
-}
-
-static int samr_lookup_domain_return(struct ksmbd_rpc_pipe *pipe)
-{
-	struct ksmbd_dcerpc *dce = pipe->dce;
-	struct connect_handle *ch;
-	struct smb_sid sid = {0};
-	int i;
-
-	ch = samr_ch_lookup(dce->sm_req.handle);
-	if (!ch)
-		return KSMBD_RPC_EBAD_FID;
-
-	dce->num_pointers++;
-	if (ndr_write_int32(dce, dce->num_pointers))
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (ndr_write_int32(dce, 4))
-		return KSMBD_RPC_EBAD_DATA;
-
-	for (i = 0; i < num_domain_entries; i++) {
-		char *entry;
-
-		entry = g_ptr_array_index(domain_entries, i);
-		if (!strcmp(STR_VAL(dce->sm_req.name), entry)) {
-			smb_init_domain_sid(&sid);
-			if (smb_write_sid(dce, &sid))
-				return KSMBD_RPC_EBAD_DATA;
-		}
-	}
-	ndr_free_uniq_vstring_ptr(&dce->sm_req.name);
-
-	return KSMBD_RPC_OK;
-}
-
-static int samr_open_domain_invoke(struct ksmbd_rpc_pipe *pipe)
-{
-	struct ksmbd_dcerpc *dce = pipe->dce;
-
-	if (ndr_read_bytes(dce, dce->sm_req.handle, HANDLE_SIZE))
-		return KSMBD_RPC_EINVALID_PARAMETER;
-
-	return KSMBD_RPC_OK;
-}
-
-static int samr_open_domain_return(struct ksmbd_rpc_pipe *pipe)
-{
-	struct ksmbd_dcerpc *dce = pipe->dce;
-	struct connect_handle *ch;
-
-	ch = samr_ch_lookup(dce->sm_req.handle);
-	if (!ch)
-		return KSMBD_RPC_EBAD_FID;
-	ch->refcount++;
-	if (ndr_write_bytes(dce, ch->handle, HANDLE_SIZE))
-		return KSMBD_RPC_EBAD_DATA;
-
-	return KSMBD_RPC_OK;
-}
-
-static int samr_lookup_names_invoke(struct ksmbd_rpc_pipe *pipe)
-{
-	struct ksmbd_dcerpc *dce = pipe->dce;
-	int user_num;
-
-	if (ndr_read_bytes(dce, dce->sm_req.handle, HANDLE_SIZE))
-		return KSMBD_RPC_EINVALID_PARAMETER;
-
-	if (ndr_read_int32(dce, &user_num))
-		return KSMBD_RPC_EINVALID_PARAMETER;
-	// max count
-	if (ndr_read_int32(dce, NULL))
-		return KSMBD_RPC_EINVALID_PARAMETER;
-	// offset
-	if (ndr_read_int32(dce, NULL))
-		return KSMBD_RPC_EINVALID_PARAMETER;
-	// actual count
-	if (ndr_read_int32(dce, NULL))
-		return KSMBD_RPC_EINVALID_PARAMETER;
-	// name len
-	if (ndr_read_int16(dce, NULL))
-		return KSMBD_RPC_EINVALID_PARAMETER;
-	// name size
-	if (ndr_read_int16(dce, NULL))
-		return KSMBD_RPC_EINVALID_PARAMETER;
-
-	// names
-	if (ndr_read_uniq_vstring_ptr(dce, &dce->sm_req.name))
-		return KSMBD_RPC_EINVALID_PARAMETER;
-
-	return KSMBD_RPC_OK;
-}
-
-static int samr_lookup_names_return(struct ksmbd_rpc_pipe *pipe)
-{
-	struct ksmbd_dcerpc *dce = pipe->dce;
-	struct connect_handle *ch;
-
-	ch = samr_ch_lookup(dce->sm_req.handle);
-	if (!ch)
-		return KSMBD_RPC_EBAD_FID;
-
-	ch->user = usm_lookup_user(STR_VAL(dce->sm_req.name));
-	if (!ch->user)
-		return KSMBD_RPC_EACCESS_DENIED;
-
-	if (ndr_write_int32(dce, 1)) // count
-		return KSMBD_RPC_EBAD_DATA;
-
-	dce->num_pointers++;
-	if (ndr_write_int32(dce, dce->num_pointers)) // ref pointer
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (ndr_write_int32(dce, 1)) // count
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (ndr_write_int32(dce, ch->user->uid)) // RID
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (ndr_write_int32(dce, 1))
-		return KSMBD_RPC_EBAD_DATA;
-
-	dce->num_pointers++;
-	if (ndr_write_int32(dce, dce->num_pointers))
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (ndr_write_int32(dce, 1))
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (ndr_write_int32(dce, 1))
-		return KSMBD_RPC_EBAD_DATA;
-
-	return KSMBD_RPC_OK;
-}
-
-static int samr_open_user_invoke(struct ksmbd_rpc_pipe *pipe)
-{
-	struct ksmbd_dcerpc *dce = pipe->dce;
-
-	if (ndr_read_bytes(dce, dce->sm_req.handle, HANDLE_SIZE))
-		return KSMBD_RPC_EINVALID_PARAMETER;
-
-	if (ndr_read_int32(dce, NULL))
-		return KSMBD_RPC_EINVALID_PARAMETER;
-	// RID
-	if (ndr_read_int32(dce, &dce->sm_req.rid))
-		return KSMBD_RPC_EINVALID_PARAMETER;
-
-	return KSMBD_RPC_OK;
-}
-
-static int samr_open_user_return(struct ksmbd_rpc_pipe *pipe)
-{
-	struct ksmbd_dcerpc *dce = pipe->dce;
-	struct connect_handle *ch;
-
-	ch = samr_ch_lookup(dce->sm_req.handle);
-	if (!ch)
-		return KSMBD_RPC_EBAD_FID;
-	ch->refcount++;
-
-	if (!ch->user)
-		return KSMBD_RPC_EBAD_FID;
-
-	if (dce->sm_req.rid != ch->user->uid)
-		return KSMBD_RPC_EBAD_FID;
-
-	if (ndr_write_bytes(dce, ch->handle, HANDLE_SIZE))
-		return KSMBD_RPC_EBAD_DATA;
-
-	return KSMBD_RPC_OK;
-}
-
-static int samr_query_user_info_invoke(struct ksmbd_rpc_pipe *pipe)
-{
-	struct ksmbd_dcerpc *dce = pipe->dce;
-
-	if (ndr_read_bytes(dce, dce->sm_req.handle, HANDLE_SIZE))
-		return KSMBD_RPC_EINVALID_PARAMETER;
-
-	return KSMBD_RPC_OK;
-}
-
-static int samr_query_user_info_return(struct ksmbd_rpc_pipe *pipe)
-{
-	struct ksmbd_dcerpc *dce = pipe->dce;
-	struct connect_handle *ch;
-	char *home_dir;
-	g_autofree char *profile_path = NULL;
-	char hostname[NAME_MAX];
-	int home_dir_len, i, ret;
-
-	ch = samr_ch_lookup(dce->sm_req.handle);
-	if (!ch)
-		return KSMBD_RPC_EBAD_FID;
-
-	if (gethostname(hostname, NAME_MAX))
-		return KSMBD_RPC_ENOMEM;
-
-	home_dir_len = 2 + strlen(hostname) + 1 + strlen(ch->user->name) + 1;
-
-	home_dir = g_try_malloc0(home_dir_len);
-	if (!home_dir)
-		return KSMBD_RPC_ENOMEM;
-
-	/* Make Home dir string */
-	strcpy(home_dir, "\\\\");
-	strcat(home_dir, hostname);
-	strcat(home_dir, "\\");
-	strcat(home_dir, ch->user->name);
-
-	profile_path = g_try_malloc0(home_dir_len + strlen("profile"));
-	if (!profile_path) {
-		g_free(home_dir);
-		return KSMBD_RPC_ENOMEM;
-	}
-
-	/* Make Profile path string */
-	strcat(profile_path, "\\\\");
-	strcat(profile_path, hostname);
-	strcat(profile_path, "\\");
-	strcat(profile_path, ch->user->name);
-	strcat(profile_path, "\\");
-	strcat(profile_path, "profile");
-
-	dce->num_pointers++;
-	ret = ndr_write_int32(dce, dce->num_pointers); // ref pointer
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int16(dce, 0x15); // info
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int16(dce, 0);
-	if (ret)
-		goto out;
-
-	/*
-	 * Last Logon/Logoff/Password change, Acct Expiry,
-	 * Allow Passworkd Change, Force Password Change.
-	 */
-	for (i = 0; i < 6; i++) {
-		ret = ndr_write_int64(dce, 0);
-		if (ret)
-			goto out;
-	}
-
-	ret = ndr_write_int16(dce, strlen(ch->user->name)*2); // account name length
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int16(dce, strlen(ch->user->name)*2);
-	if (ret)
-		goto out;
-
-	dce->num_pointers++;
-	ret = ndr_write_int32(dce, dce->num_pointers); // ref pointer
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int16(dce, strlen(ch->user->name)*2); // full name length
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int16(dce, strlen(ch->user->name)*2);
-	if (ret)
-		goto out;
-
-
-	dce->num_pointers++;
-	ret = ndr_write_int32(dce, dce->num_pointers); // ref pointer
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int16(dce, strlen(home_dir)*2); // home directory length
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int16(dce, strlen(home_dir)*2);
-	if (ret)
-		goto out;
-
-	/* Home Drive, Logon Script */
-	for (i = 0; i < 2; i++) {
-		dce->num_pointers++;
-		ret = ndr_write_int32(dce, dce->num_pointers); // ref pointer
-		if (ret)
-			goto out;
-
-		ret = ndr_write_int16(dce, 0);
-		if (ret)
-			goto out;
-
-		ret = ndr_write_int16(dce, 0);
-		if (ret)
-			goto out;
-	}
-
-	dce->num_pointers++;
-	ret = ndr_write_int32(dce, dce->num_pointers); // ref pointer
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int16(dce, strlen(profile_path)*2); //profile path length
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int16(dce, strlen(profile_path)*2);
-	if (ret)
-		goto out;
-
-
-	/* Description, Workstations, Comments, Parameters */
-	for (i = 0; i < 4; i++) {
-		dce->num_pointers++;
-		ret = ndr_write_int32(dce, dce->num_pointers); // ref pointer
-		if (ret)
-			goto out;
-
-		ret = ndr_write_int16(dce, 0);
-		if (ret)
-			goto out;
-
-		ret = ndr_write_int16(dce, 0);
-		if (ret)
-			goto out;
-	}
-
-	dce->num_pointers++;
-	ret = ndr_write_int32(dce, dce->num_pointers);
-	if (ret)
-		goto out;
-
-	/* Lm, Nt, Password and Private*/
-	for (i = 0; i < 3; i++) {
-		ret = ndr_write_int16(dce, 0);
-		if (ret)
-			goto out;
-
-		ret = ndr_write_int16(dce, 0);
-		if (ret)
-			goto out;
-
-		ret = ndr_write_int32(dce, 0);
-		if (ret)
-			goto out;
-	}
-
-	ret = ndr_write_int32(dce, 0); // buf count
-	if (ret)
-		goto out;
-
-	/* Pointer to Buffer */
-	ret = ndr_write_int32(dce, 0);
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int32(dce, ch->user->uid); // rid
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int32(dce, 513); // primary gid
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int32(dce, 0x00000010); // Acct Flags : Acb Normal
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int32(dce, 0x00FFFFFF); // Fields Present
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int16(dce, 168); // logon hours
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int16(dce, 0);
-	if (ret)
-		goto out;
-
-	/* Pointers to Bits */
-	dce->num_pointers++;
-	ret = ndr_write_int32(dce, dce->num_pointers); //ref pointer
-	if (ret)
-		goto out;
-
-	/* Bad Password/Logon Count/Country Code/Code Page */
-	for (i = 0; i < 4; i++) {
-		ret = ndr_write_int16(dce, 0);
-		if (ret)
-			goto out;
-	}
-
-
-	/* Lm/Nt Password Set, Password Expired/etc */
-	ret = ndr_write_int8(dce, 0);
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int8(dce, 0);
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int8(dce, 0);
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int8(dce, 0);
-	if (ret)
-		goto out;
-
-
-	ret = ndr_write_string(dce, ch->user->name);
-	if (ret)
-		goto out;
-
-	ret = ndr_write_string(dce, ch->user->name);
-	if (ret)
-		goto out;
-
-	ret = ndr_write_string(dce, home_dir);
-	if (ret)
-		goto out;
-
-
-	/* Home Drive, Logon Script */
-	for (i = 0; i < 2; i++) {
-		ret = ndr_write_int32(dce, 0);
-		if (ret)
-			goto out;
-
-		ret = ndr_write_int32(dce, 0);
-		if (ret)
-			goto out;
-
-		ret = ndr_write_int32(dce, 0);
-		if (ret)
-			goto out;
-	}
-
-	ret = ndr_write_string(dce, profile_path);
-	if (ret)
-		goto out;
-
-	/* Description, Workstations, Comments, Parameters */
-	for (i = 0; i < 4; i++) {
-		ret = ndr_write_int32(dce, 0);
-		if (ret)
-			goto out;
-
-		ret = ndr_write_int32(dce, 0);
-		if (ret)
-			goto out;
-
-		ret = ndr_write_int32(dce, 0);
-		if (ret)
-			goto out;
-	}
-
-	/* Logon Hours */
-	ret = ndr_write_int32(dce, 1260);
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int32(dce, 0);
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int32(dce, 21);
-	if (ret)
-		goto out;
-
-	for (i = 0; i < 21; i++) {
-		ret = ndr_write_int8(dce, 0xff);
-		if (ret)
-			break;
-	}
-
-out:
-	g_free(home_dir);
-	return ret ? KSMBD_RPC_EBAD_DATA: KSMBD_RPC_OK;
-}
-
-static int samr_query_security_invoke(struct ksmbd_rpc_pipe *pipe)
-{
-	struct ksmbd_dcerpc *dce = pipe->dce;
-
-	if (ndr_read_bytes(dce, dce->sm_req.handle, HANDLE_SIZE))
-		return KSMBD_RPC_EINVALID_PARAMETER;
-
-	return KSMBD_RPC_OK;
-}
-
-static int samr_query_security_return(struct ksmbd_rpc_pipe *pipe)
-{
-	struct ksmbd_dcerpc *dce = pipe->dce;
-	struct connect_handle *ch;
-	int sec_desc_len, curr_offset, payload_offset;
-
-	ch = samr_ch_lookup(dce->sm_req.handle);
-	if (!ch)
-		return KSMBD_RPC_EBAD_FID;
-
-	if (!ch->user)
-		return KSMBD_RPC_EBAD_FID;
-
-	curr_offset = dce->offset;
-	dce->offset += 16;
-	if (build_sec_desc(dce, &sec_desc_len, ch->user->uid))
-		return KSMBD_RPC_EBAD_DATA;
-
-	payload_offset = dce->offset;
-
-	dce->offset = curr_offset;
-	dce->num_pointers++;
-	if (ndr_write_int32(dce, dce->num_pointers))
-		return KSMBD_RPC_EBAD_DATA;
-	if (ndr_write_int32(dce, sec_desc_len))
-		return KSMBD_RPC_EBAD_DATA;
-
-	dce->num_pointers++;
-	if (ndr_write_int32(dce, dce->num_pointers))
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (ndr_write_int32(dce, sec_desc_len))
-		return KSMBD_RPC_EBAD_DATA;
-
-	dce->offset = payload_offset;
-
-	return KSMBD_RPC_OK;
-}
-
-static int samr_get_group_for_user_invoke(struct ksmbd_rpc_pipe *pipe)
-{
-	struct ksmbd_dcerpc *dce = pipe->dce;
-
-	if (ndr_read_bytes(dce, dce->sm_req.handle, HANDLE_SIZE))
-		return KSMBD_RPC_EINVALID_PARAMETER;
-
-	return KSMBD_RPC_OK;
-}
-
-static int samr_get_group_for_user_return(struct ksmbd_rpc_pipe *pipe)
-{
-	struct ksmbd_dcerpc *dce = pipe->dce;
-	struct connect_handle *ch;
-
-	ch = samr_ch_lookup(dce->sm_req.handle);
-	if (!ch)
-		return KSMBD_RPC_EBAD_FID;
-
-	dce->num_pointers++;
-	if (ndr_write_int32(dce, dce->num_pointers)) // ref pointer
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (ndr_write_int32(dce, 1)) // count
-		return KSMBD_RPC_EBAD_DATA;
-
-	dce->num_pointers++;
-	if (ndr_write_int32(dce, dce->num_pointers)) // ref pointer
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (ndr_write_int32(dce, 1)) // max count
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (ndr_write_int32(dce, 513)) // group rid
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (ndr_write_int32(dce, 0x00000007)) // attributes
-		return KSMBD_RPC_EBAD_DATA;
-
-	return KSMBD_RPC_OK;
-}
-
-static int samr_get_alias_membership_invoke(struct ksmbd_rpc_pipe *pipe)
-{
-	struct ksmbd_dcerpc *dce = pipe->dce;
-
-	if (ndr_read_bytes(dce, dce->sm_req.handle, HANDLE_SIZE))
-		return KSMBD_RPC_EACCESS_DENIED;
-
-	return KSMBD_RPC_OK;
-}
-
-static int samr_get_alias_membership_return(struct ksmbd_rpc_pipe *pipe)
-{
-	struct ksmbd_dcerpc *dce = pipe->dce;
-	struct connect_handle *ch;
-
-	ch = samr_ch_lookup(dce->sm_req.handle);
-	if (!ch)
-		return KSMBD_RPC_EBAD_FID;
-
-	if (ndr_write_int32(dce, 0)) // count
-		return KSMBD_RPC_EBAD_DATA;
-
-	dce->num_pointers++;
-	if (ndr_write_int32(dce, dce->num_pointers)) // ref pointer
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (ndr_write_int32(dce, 0)) // max count
-		return KSMBD_RPC_EBAD_DATA;
-
-	return KSMBD_RPC_OK;
-}
-
-static int samr_close_invoke(struct ksmbd_rpc_pipe *pipe)
-{
-	struct ksmbd_dcerpc *dce = pipe->dce;
-
-	if (ndr_read_bytes(dce, dce->sm_req.handle, HANDLE_SIZE))
-		return KSMBD_RPC_EACCESS_DENIED;
-
-	return KSMBD_RPC_OK;
-}
-
-static int samr_close_return(struct ksmbd_rpc_pipe *pipe)
-{
-	struct ksmbd_dcerpc *dce = pipe->dce;
-	struct connect_handle *ch;
-
-	ch = samr_ch_lookup(dce->sm_req.handle);
-	if (!ch)
-		return KSMBD_RPC_EBAD_FID;
-	if (ch->refcount > 1)
-		ch->refcount--;
+	struct samr_CloseHandle_req *req = reqv;
+	struct samr_CloseHandle_rep *rep = repv;
+
+	if (rpc_pipe_handle_close(rpc_pipe_of_pdu(pdu), &req->SamHandle))
+		rep->status = STATUS_INVALID_HANDLE;
 	else
-		samr_ch_free(ch);
-
-	/* write connect handle */
-	if (ndr_write_int64(dce, 0))
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (ndr_write_int64(dce, 0))
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (ndr_write_int32(dce, 0))
-		return KSMBD_RPC_EBAD_DATA;
-
-	return KSMBD_RPC_OK;
+		rep->status = KSMBD_RPC_OK;
+	return 0;
 }
 
-static int samr_invoke(struct ksmbd_rpc_pipe *pipe)
+static int samr_enum_domains_stub(struct dcerpc_context *dce,
+				  struct dcerpc_pdu *pdu,
+				  void *reqv, void *repv)
 {
-	int ret = KSMBD_RPC_ENOTIMPLEMENTED;
+	struct samr_EnumerateDomainsInSamServer_req *req = reqv;
+	struct samr_EnumerateDomainsInSamServer_rep *rep = repv;
+	struct samr_SAMPR_RID_ENUMERATION *e;
 
-	switch (pipe->dce->req_hdr.opnum) {
-	case SAMR_OPNUM_CONNECT5:
-		ret = samr_connect5_invoke(pipe);
-		break;
-	case SAMR_OPNUM_ENUM_DOMAIN:
-		ret = samr_enum_domain_invoke(pipe);
-		break;
-	case SAMR_OPNUM_LOOKUP_DOMAIN:
-		ret = samr_lookup_domain_invoke(pipe);
-		break;
-	case SAMR_OPNUM_OPEN_DOMAIN:
-		ret = samr_open_domain_invoke(pipe);
-		break;
-	case SAMR_OPNUM_LOOKUP_NAMES:
-		ret = samr_lookup_names_invoke(pipe);
-		break;
-	case SAMR_OPNUM_OPEN_USER:
-		ret = samr_open_user_invoke(pipe);
-		break;
-	case SAMR_OPNUM_QUERY_USER_INFO:
-		ret = samr_query_user_info_invoke(pipe);
-		break;
-	case SAMR_OPNUM_QUERY_SECURITY:
-		ret = samr_query_security_invoke(pipe);
-		break;
-	case SAMR_OPNUM_GET_GROUP_FOR_USER:
-		ret = samr_get_group_for_user_invoke(pipe);
-		break;
-	case SAMR_OPNUM_GET_ALIAS_MEMBERSHIP:
-		ret = samr_get_alias_membership_invoke(pipe);
-		break;
-	case SAMR_OPNUM_CLOSE:
-		ret = samr_close_invoke(pipe);
-		break;
-	default:
-		pr_err("SAMR: unsupported INVOKE method %d\n",
-		       pipe->dce->req_hdr.opnum);
-		break;
+	if (!samr_handle_get(pdu, &req->ServerHandle, SAMR_HANDLE_SERVER)) {
+		rep->status = STATUS_INVALID_HANDLE;
+		return 0;
 	}
-
-	return ret;
+	e = dcerpc_alloc_data(pdu, 2 * sizeof(*e));
+	if (!e)
+		return -1;
+	e[0].RelativeId = 0;
+	e[0].Name = rpc_pdu_strdup(pdu, domain_name);
+	e[1].RelativeId = 1;
+	e[1].Name = rpc_pdu_strdup(pdu, "Builtin");
+	if (!e[0].Name || !e[1].Name)
+		return -1;
+	rep->Buffer.EntriesRead = 2;
+	rep->Buffer.Buffer = e;
+	rep->CountReturned = 2;
+	rep->status = KSMBD_RPC_OK;
+	return 0;
 }
 
-static int samr_return(struct ksmbd_rpc_pipe *pipe,
-			 struct ksmbd_rpc_command *resp,
-			 int max_resp_sz)
+static int samr_lookup_domain_stub(struct dcerpc_context *dce,
+				   struct dcerpc_pdu *pdu,
+				   void *reqv, void *repv)
 {
-	struct ksmbd_dcerpc *dce = pipe->dce;
-	int status;
+	struct samr_LookupDomainInSamServer_req *req = reqv;
+	struct samr_LookupDomainInSamServer_rep *rep = repv;
+	struct smb_sid sid;
 
-	/*
-	 * Reserve space for response NDR header. We don't know yet if
-	 * the payload buffer is big enough. This will determine if we
-	 * can set DCERPC_PFC_FIRST_FRAG|DCERPC_PFC_LAST_FRAG or if we
-	 * will have a multi-part response.
-	 */
-	dce->offset = sizeof(struct dcerpc_header);
-	dce->offset += sizeof(struct dcerpc_response_header);
-
-	switch (dce->req_hdr.opnum) {
-	case SAMR_OPNUM_CONNECT5:
-		status = samr_connect5_return(pipe);
-		break;
-	case SAMR_OPNUM_ENUM_DOMAIN:
-		status = samr_enum_domain_return(pipe);
-		break;
-	case SAMR_OPNUM_LOOKUP_DOMAIN:
-		status = samr_lookup_domain_return(pipe);
-		break;
-	case SAMR_OPNUM_OPEN_DOMAIN:
-		status = samr_open_domain_return(pipe);
-		break;
-	case SAMR_OPNUM_LOOKUP_NAMES:
-		status = samr_lookup_names_return(pipe);
-		break;
-	case SAMR_OPNUM_OPEN_USER:
-		status = samr_open_user_return(pipe);
-		break;
-	case SAMR_OPNUM_QUERY_USER_INFO:
-		status = samr_query_user_info_return(pipe);
-		break;
-	case SAMR_OPNUM_QUERY_SECURITY:
-		status = samr_query_security_return(pipe);
-		break;
-	case SAMR_OPNUM_GET_GROUP_FOR_USER:
-		status = samr_get_group_for_user_return(pipe);
-		break;
-	case SAMR_OPNUM_GET_ALIAS_MEMBERSHIP:
-		status = samr_get_alias_membership_return(pipe);
-		break;
-	case SAMR_OPNUM_CLOSE:
-		status = samr_close_return(pipe);
-		break;
-	default:
-		pr_err("SAMR: unsupported RETURN method %d\n",
-			dce->req_hdr.opnum);
-		status = KSMBD_RPC_EBAD_FUNC;
-		break;
+	if (!samr_handle_get(pdu, &req->ServerHandle, SAMR_HANDLE_SERVER)) {
+		rep->status = STATUS_INVALID_HANDLE;
+		return 0;
 	}
-
-	if (rpc_restricted_context(dce->rpc_req))
-		status = KSMBD_RPC_EACCESS_DENIED;
-
-	/*
-	 * [out] DWORD Return value/code
-	 */
-	if (ndr_write_int32(dce, status))
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (dcerpc_write_headers(dce, status))
-		return KSMBD_RPC_EBAD_DATA;
-
-	dce->rpc_resp->payload_sz = dce->offset;
-	return status;
+	if (req->Name && !g_ascii_strcasecmp(req->Name, domain_name)) {
+		smb_init_domain_sid(&sid);
+	} else if (req->Name && !g_ascii_strcasecmp(req->Name, "Builtin")) {
+		smb_copy_sid(&sid, &sid_builtin);
+	} else {
+		rep->status = STATUS_NO_SUCH_DOMAIN;
+		return 0;
+	}
+	rep->DomainId = smb_sid_to_rpc(pdu, &sid);
+	if (!rep->DomainId)
+		return -1;
+	rep->status = KSMBD_RPC_OK;
+	return 0;
 }
 
-int rpc_samr_read_request(struct ksmbd_rpc_pipe *pipe,
-			    struct ksmbd_rpc_command *resp,
-			    int max_resp_sz)
+/* ------------------------------------------------------------------ */
+/* Domains                                                             */
+/* ------------------------------------------------------------------ */
+
+static int samr_open_domain_stub(struct dcerpc_context *dce,
+				 struct dcerpc_pdu *pdu,
+				 void *reqv, void *repv)
 {
-	return samr_return(pipe, resp, max_resp_sz);
+	struct samr_OpenDomain_req *req = reqv;
+	struct samr_OpenDomain_rep *rep = repv;
+	struct smb_sid sid, domain_sid;
+	enum samr_handle_type type;
+
+	if (!samr_handle_get(pdu, &req->ServerHandle, SAMR_HANDLE_SERVER)) {
+		rep->status = STATUS_INVALID_HANDLE;
+		return 0;
+	}
+	smb_sid_from_rpc(&sid, &req->DomainId);
+	smb_init_domain_sid(&domain_sid);
+	if (sid.num_subauth == domain_sid.num_subauth &&
+	    !smb_compare_sids(&sid, &domain_sid)) {
+		type = SAMR_HANDLE_DOMAIN;
+	} else if (sid.num_subauth == sid_builtin.num_subauth &&
+		   !smb_compare_sids(&sid, &sid_builtin)) {
+		type = SAMR_HANDLE_BUILTIN;
+	} else {
+		rep->status = STATUS_NO_SUCH_DOMAIN;
+		return 0;
+	}
+	if (samr_handle_open(pdu, type, NULL, 0, &rep->DomainHandle))
+		return -1;
+	rep->status = KSMBD_RPC_OK;
+	return 0;
 }
 
-int rpc_samr_write_request(struct ksmbd_rpc_pipe *pipe)
+/*
+ * Names of ksmbd users to their RIDs. Nothing maps in Builtin, which
+ * has no members here.
+ */
+static int samr_lookup_names_stub(struct dcerpc_context *dce,
+				  struct dcerpc_pdu *pdu,
+				  void *reqv, void *repv)
 {
-	return samr_invoke(pipe);
+	struct samr_LookupNamesInDomain_req *req = reqv;
+	struct samr_LookupNamesInDomain_rep *rep = repv;
+	struct samr_handle *h;
+	uint32_t *rids, *uses, i, mapped = 0;
+
+	h = samr_handle_get(pdu, &req->DomainHandle, -1);
+	if (!h || (h->type != SAMR_HANDLE_DOMAIN &&
+		   h->type != SAMR_HANDLE_BUILTIN)) {
+		rep->status = STATUS_INVALID_HANDLE;
+		return 0;
+	}
+	rids = dcerpc_alloc_data(pdu, MAX(req->Count, 1) * sizeof(*rids));
+	uses = dcerpc_alloc_data(pdu, MAX(req->Count, 1) * sizeof(*uses));
+	if (!rids || !uses)
+		return -1;
+
+	for (i = 0; i < req->Count; i++) {
+		struct ksmbd_user *user = NULL;
+
+		uses[i] = SID_TYPE_UNKNOWN;
+		if (h->type == SAMR_HANDLE_DOMAIN && req->Names[i])
+			user = usm_lookup_user(req->Names[i]);
+		if (!user)
+			continue;
+		rids[i] = user->uid;
+		uses[i] = SID_TYPE_USER;
+		mapped++;
+		put_ksmbd_user(user);
+	}
+	rep->RelativeIds.Count = req->Count;
+	rep->RelativeIds.Element = rids;
+	rep->Use.Count = req->Count;
+	rep->Use.Element = uses;
+	if (mapped == req->Count)
+		rep->status = KSMBD_RPC_OK;
+	else
+		rep->status = mapped ? STATUS_SOME_NOT_MAPPED :
+				       STATUS_NONE_MAPPED;
+	return 0;
 }
 
-static void rpc_samr_add_domain_entry(char *name)
+/* The domain's aliases the SIDs are members of: none */
+static int samr_get_alias_membership_stub(struct dcerpc_context *dce,
+					  struct dcerpc_pdu *pdu,
+					  void *reqv, void *repv)
 {
-	g_ptr_array_add(domain_entries, g_strdup(name));
-	num_domain_entries++;
+	struct samr_GetAliasMembership_req *req = reqv;
+	struct samr_GetAliasMembership_rep *rep = repv;
+	struct samr_handle *h;
+
+	h = samr_handle_get(pdu, &req->DomainHandle, -1);
+	if (!h || (h->type != SAMR_HANDLE_DOMAIN &&
+		   h->type != SAMR_HANDLE_BUILTIN)) {
+		rep->status = STATUS_INVALID_HANDLE;
+		return 0;
+	}
+	rep->status = KSMBD_RPC_OK;
+	return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Users                                                               */
+/* ------------------------------------------------------------------ */
+
+static int samr_open_user_stub(struct dcerpc_context *dce,
+			       struct dcerpc_pdu *pdu,
+			       void *reqv, void *repv)
+{
+	struct samr_OpenUser_req *req = reqv;
+	struct samr_OpenUser_rep *rep = repv;
+	g_autofree char *name = NULL;
+
+	if (!samr_handle_get(pdu, &req->DomainHandle, SAMR_HANDLE_DOMAIN)) {
+		rep->status = STATUS_INVALID_HANDLE;
+		return 0;
+	}
+	name = samr_user_name(req->UserId);
+	if (!name) {
+		rep->status = STATUS_NO_SUCH_USER;
+		return 0;
+	}
+	if (samr_handle_open(pdu, SAMR_HANDLE_USER, name, req->UserId,
+			     &rep->UserHandle))
+		return -1;
+	rep->status = KSMBD_RPC_OK;
+	return 0;
+}
+
+/* UserAllInformation, the level Windows asks for */
+static int samr_user_all_info(struct dcerpc_pdu *pdu, struct samr_handle *h,
+			      struct samr_SAMPR_USER_ALL_INFORMATION *all)
+{
+	char hostname[NAME_MAX];
+	uint8_t *hours;
+
+	if (gethostname(hostname, sizeof(hostname)))
+		return -1;
+	hostname[sizeof(hostname) - 1] = '\0';
+
+	all->UserName = rpc_pdu_strdup(pdu, h->name);
+	all->FullName = rpc_pdu_strdup(pdu, h->name);
+	all->HomeDirectory = dcerpc_alloc_data(pdu, strlen(hostname) +
+					       strlen(h->name) + 4);
+	all->ProfilePath = dcerpc_alloc_data(pdu, strlen(hostname) +
+					     strlen(h->name) + 12);
+	hours = dcerpc_alloc_data(pdu, 21);
+	if (!all->UserName || !all->FullName || !all->HomeDirectory ||
+	    !all->ProfilePath || !hours)
+		return -1;
+	sprintf(all->HomeDirectory, "\\\\%s\\%s", hostname, h->name);
+	sprintf(all->ProfilePath, "\\\\%s\\%s\\profile", hostname, h->name);
+	all->HomeDirectoryDrive = rpc_pdu_strdup(pdu, "");
+	all->ScriptPath = rpc_pdu_strdup(pdu, "");
+	all->AdminComment = rpc_pdu_strdup(pdu, "");
+	all->WorkStations = rpc_pdu_strdup(pdu, "");
+	all->UserComment = rpc_pdu_strdup(pdu, "");
+	all->Parameters = rpc_pdu_strdup(pdu, "");
+
+	all->UserId = h->uid;
+	all->PrimaryGroupId = DOMAIN_GROUP_RID_USERS;
+	all->UserAccountControl = SAMR_USER_NORMAL_ACCOUNT;
+	all->WhichFields = 0x00FFFFFF;
+
+	/* may log on at any hour of the week */
+	memset(hours, 0xff, 21);
+	all->LogonHours.UnitsPerWeek = 168;
+	all->LogonHours.LogonHours.max_count = 1260;
+	all->LogonHours.LogonHours.len = 21;
+	all->LogonHours.LogonHours.data = hours;
+	return 0;
+}
+
+static int samr_query_user_info_stub(struct dcerpc_context *dce,
+				     struct dcerpc_pdu *pdu,
+				     void *reqv, void *repv)
+{
+	struct samr_QueryInformationUser_req *req = reqv;
+	struct samr_QueryInformationUser_rep *rep = repv;
+	union samr_SAMPR_USER_INFO_BUFFER *info;
+	struct samr_handle *h;
+
+	h = samr_handle_get(pdu, &req->UserHandle, SAMR_HANDLE_USER);
+	if (!h) {
+		rep->status = STATUS_INVALID_HANDLE;
+		return 0;
+	}
+	if (req->UserInformationClass != SAMR_UserAllInformation) {
+		rep->status = STATUS_INVALID_INFO_CLASS;
+		return 0;
+	}
+	info = dcerpc_alloc_data(pdu, sizeof(*info));
+	if (!info || samr_user_all_info(pdu, h, &info->All))
+		return -1;
+	rep->Buffer = info;
+	rep->status = KSMBD_RPC_OK;
+	return 0;
+}
+
+/* Domain Users, the primary group of every user */
+static int samr_get_groups_for_user_stub(struct dcerpc_context *dce,
+					 struct dcerpc_pdu *pdu,
+					 void *reqv, void *repv)
+{
+	struct samr_GetGroupsForUser_req *req = reqv;
+	struct samr_GetGroupsForUser_rep *rep = repv;
+	struct samr_GROUP_MEMBERSHIP *g;
+
+	if (!samr_handle_get(pdu, &req->UserHandle, SAMR_HANDLE_USER)) {
+		rep->status = STATUS_INVALID_HANDLE;
+		return 0;
+	}
+	g = dcerpc_alloc_data(pdu, sizeof(*g));
+	if (!g)
+		return -1;
+	g->RelativeId = DOMAIN_GROUP_RID_USERS;
+	g->Attributes = SE_GROUP_DEFAULT;
+	rep->Groups.MembershipCount = 1;
+	rep->Groups.Groups = g;
+	rep->status = KSMBD_RPC_OK;
+	return 0;
+}
+
+static int set_ace(struct dcerpc_pdu *pdu, ACCESS_ALLOWED_ACE *ace,
+		   ACCESS_MASK mask, const struct smb_sid *domain,
+		   uint32_t rid)
+{
+	struct smb_sid sid;
+	RPC_SID *rsid;
+
+	smb_copy_sid(&sid, domain);
+	if (rid)
+		sid.sub_auth[sid.num_subauth++] = rid;
+	rsid = smb_sid_to_rpc(pdu, &sid);
+	if (!rsid)
+		return -1;
+	ace->Header.AceType = ACCESS_ALLOWED_ACE_TYPE;
+	ace->Mask = mask;
+	ace->Sid = *rsid;
+	return 0;
+}
+
+/*
+ * The security descriptor of an object, as Windows gives one for a user:
+ * read for everyone, full control for Administrators and Account
+ * Operators, and for a user object read and change password for the
+ * user.
+ */
+static int samr_query_security_stub(struct dcerpc_context *dce,
+				    struct dcerpc_pdu *pdu,
+				    void *reqv, void *repv)
+{
+	struct samr_QuerySecurityObject_req *req = reqv;
+	struct samr_QuerySecurityObject_rep *rep = repv;
+	struct samr_handle *h;
+	struct smb_sid domain;
+	SECURITY_DESCRIPTOR *sd;
+	ACL *dacl;
+
+	h = samr_handle_get(pdu, &req->ObjectHandle, -1);
+	if (!h) {
+		rep->status = STATUS_INVALID_HANDLE;
+		return 0;
+	}
+	sd = dcerpc_alloc_data(pdu, sizeof(*sd));
+	dacl = dcerpc_alloc_data(pdu, sizeof(*dacl));
+	if (!sd || !dacl)
+		return -1;
+	dacl->AclRevision = 2;
+	dacl->AceCount = h->type == SAMR_HANDLE_USER ? 4 : 3;
+	dacl->Aces = dcerpc_alloc_data(pdu, 4 * sizeof(*dacl->Aces));
+	if (!dacl->Aces)
+		return -1;
+
+	smb_init_domain_sid(&domain);
+	if (set_ace(pdu, &dacl->Aces[0], 0x0002035b, &sid_everyone, 0) ||
+	    set_ace(pdu, &dacl->Aces[1], 0x000f07ff, &sid_builtin, 544) ||
+	    set_ace(pdu, &dacl->Aces[2], 0x000f07ff, &sid_builtin, 548))
+		return -1;
+	if (h->type == SAMR_HANDLE_USER &&
+	    set_ace(pdu, &dacl->Aces[3], 0x00020044, &domain, h->uid))
+		return -1;
+
+	sd->Revision = 1;
+	sd->Control = SE_SELF_RELATIVE | SE_DACL_PRESENT;
+	sd->Dacl = dacl;
+	rep->SecurityDescriptor.SecurityDescriptor = sd;
+	rep->status = KSMBD_RPC_OK;
+	return 0;
+}
+
+static const struct dcerpc_stub samr_stubs[] = {
+	{ SAMR_CLOSEHANDLE, "CloseHandle", samr_close_handle_stub },
+	{ SAMR_QUERYSECURITYOBJECT, "QuerySecurityObject",
+	  samr_query_security_stub },
+	{ SAMR_LOOKUPDOMAININSAMSERVER, "LookupDomainInSamServer",
+	  samr_lookup_domain_stub },
+	{ SAMR_ENUMERATEDOMAINSINSAMSERVER, "EnumerateDomainsInSamServer",
+	  samr_enum_domains_stub },
+	{ SAMR_OPENDOMAIN, "OpenDomain", samr_open_domain_stub },
+	{ SAMR_GETALIASMEMBERSHIP, "GetAliasMembership",
+	  samr_get_alias_membership_stub },
+	{ SAMR_LOOKUPNAMESINDOMAIN, "LookupNamesInDomain",
+	  samr_lookup_names_stub },
+	{ SAMR_OPENUSER, "OpenUser", samr_open_user_stub },
+	{ SAMR_QUERYINFORMATIONUSER, "QueryInformationUser",
+	  samr_query_user_info_stub },
+	{ SAMR_GETGROUPSFORUSER, "GetGroupsForUser",
+	  samr_get_groups_for_user_stub },
+	{ SAMR_CONNECT2, "Connect2", samr_connect2_stub },
+	{ SAMR_CONNECT5, "Connect5", samr_connect5_stub },
+	{ -1, NULL, NULL }
+};
+
+struct dcerpc_server *rpc_samr_endpoint(void)
+{
+	struct dcerpc_server *srv = dcerpc_server_create("samr");
+
+	if (srv && dcerpc_server_add_interface(srv, &samr_interface,
+					       samr_procs, samr_stubs,
+					       DCERPC_SERVER_ALL_NDR)) {
+		dcerpc_server_destroy(srv);
+		srv = NULL;
+	}
+	return srv;
 }
 
 void rpc_samr_init(void)
@@ -1028,43 +581,10 @@ void rpc_samr_init(void)
 
 		domain_name = g_ascii_strup(hostname, -1);
 	}
-
-	if (!domain_entries) {
-		domain_entries = g_ptr_array_new_with_free_func(g_free);
-		rpc_samr_add_domain_entry(domain_name);
-		rpc_samr_add_domain_entry("Builtin");
-	}
-
-	if (!ch_table)
-		ch_table = g_hash_table_new(g_str_hash, g_str_equal);
-}
-
-static void samr_ch_clear_table(void)
-{
-	struct connect_handle *ch;
-	GHashTableIter iter;
-
-	g_rw_lock_writer_lock(&ch_table_lock);
-	ghash_for_each_remove(ch, ch_table, iter)
-		g_free(ch);
-	g_rw_lock_writer_unlock(&ch_table_lock);
 }
 
 void rpc_samr_destroy(void)
 {
-	if (ch_table) {
-		samr_ch_clear_table();
-		g_hash_table_destroy(ch_table);
-		ch_table = NULL;
-	}
-
-	if (domain_entries) {
-		g_ptr_array_free(domain_entries, 1);
-		domain_entries = NULL;
-	}
-
-	num_domain_entries = 0;
-
 	g_free(domain_name);
 	domain_name = NULL;
 }
