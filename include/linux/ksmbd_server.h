@@ -80,7 +80,9 @@ struct ksmbd_login_response {
 	__u16	status;
 	__u16	hash_sz;
 	__s8	hash[KSMBD_REQ_MAX_HASH_SZ];
-	__u32	reserved[16];			/* Reserved room */
+	__u32	session_expiry_lo;	/* Kerberos ticket expiry, SPNEGO only */
+	__u32	session_expiry_hi;
+	__u32	reserved[14];			/* Reserved room */
 };
 
 /*
@@ -173,7 +175,6 @@ struct ksmbd_spnego_authen_response {
 	struct ksmbd_login_response	login_response;
 	__u16	session_key_len;
 	__u16	spnego_blob_len;
-	__u64	session_expiry;
 	__u8	payload[];
 };
 
