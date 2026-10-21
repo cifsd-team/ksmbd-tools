@@ -442,6 +442,76 @@ static int lsarpc_get_primary_domain_info_return(struct ksmbd_rpc_pipe *pipe)
 	return KSMBD_RPC_OK;
 }
 
+static int lsarpc_skip_bytes(struct ksmbd_dcerpc *dce, size_t count)
+{
+	if (dce->offset > dce->payload_sz ||
+	    count > dce->payload_sz - dce->offset)
+		return -EINVAL;
+	dce->offset += count;
+	return 0;
+}
+
+static int lsarpc_read_attribute_name(struct ksmbd_dcerpc *dce)
+{
+	__u16 length, size;
+	__u32 ref, max_count, offset, actual;
+
+	/* ObjectName points to an ANSI STRING, as defined by MS-LSAD. */
+	if (ndr_read_int16(dce, &length) || ndr_read_int16(dce, &size) ||
+	    ndr_read_int32(dce, &ref) || length > size)
+		return -EINVAL;
+	if (!ref)
+		return length ? -EINVAL : 0;
+	if (ndr_read_int32(dce, &max_count) ||
+	    ndr_read_int32(dce, &offset) ||
+	    ndr_read_int32(dce, &actual) ||
+	    max_count != size || offset || actual != length)
+		return -EINVAL;
+	return lsarpc_skip_bytes(dce, actual);
+}
+
+static int lsarpc_read_attribute_acl(struct ksmbd_dcerpc *dce)
+{
+	__u32 count;
+	__u16 size;
+
+	if (ndr_read_int32(dce, &count) ||
+	    ndr_read_int8(dce, NULL) || ndr_read_int8(dce, NULL) ||
+	    ndr_read_int16(dce, &size) || size < 4 || count != size - 4)
+		return -EINVAL;
+	return lsarpc_skip_bytes(dce, count);
+}
+
+static int lsarpc_read_attribute_security(struct ksmbd_dcerpc *dce)
+{
+	__u32 refs[4];
+	unsigned int i;
+
+	auto_align_offset(dce);
+	if (ndr_read_int8(dce, NULL) || ndr_read_int8(dce, NULL) ||
+	    ndr_read_int16(dce, NULL))
+		return -EINVAL;
+	for (i = 0; i < G_N_ELEMENTS(refs); i++) {
+		if (ndr_read_int32(dce, &refs[i]))
+			return -EINVAL;
+	}
+	for (i = 0; i < 2; i++) {
+		struct smb_sid sid;
+		__u32 count;
+
+		if (!refs[i])
+			continue;
+		if (ndr_read_int32(dce, &count) || smb_read_sid(dce, &sid) ||
+		    count != sid.num_subauth)
+			return -EINVAL;
+	}
+	for (; i < G_N_ELEMENTS(refs); i++) {
+		if (refs[i] && lsarpc_read_attribute_acl(dce))
+			return -EINVAL;
+	}
+	return 0;
+}
+
 static int lsarpc_read_policy_attributes(struct ksmbd_dcerpc *dce,
 					 __u32 *desired_access)
 {
@@ -455,17 +525,16 @@ static int lsarpc_read_policy_attributes(struct ksmbd_dcerpc *dce,
 	    ndr_read_int32(dce, &security_ref) ||
 	    ndr_read_int32(dce, &qos_ref))
 		return -EINVAL;
-	if (attributes_length &&
-	    attributes_length < sizeof(__u32) * 6)
+	/* MS-LSAD uses only RootDirectory, which must be NULL. */
+	if (root_ref)
 		return -EINVAL;
-	/*
-	 * These optional OBJECT_ATTRIBUTES members are not implemented.
-	 * Return an error without consuming an assumed wire representation:
-	 * RootDirectory is a pointer to an opaque object, ObjectName is an
-	 * LSAPR_UNICODE_STRING, and the remaining pointers have their own
-	 * deferred structures.
-	 */
-	if (root_ref || object_ref || security_ref || qos_ref)
+	if (object_ref && lsarpc_read_attribute_name(dce))
+		return -EINVAL;
+	if (security_ref && lsarpc_read_attribute_security(dce))
+		return -EINVAL;
+	if (qos_ref && (ndr_read_int32(dce, NULL) ||
+		       ndr_read_int16(dce, NULL) ||
+		       ndr_read_int8(dce, NULL) || ndr_read_int8(dce, NULL)))
 		return -EINVAL;
 	if (ndr_read_int32(dce, desired_access))
 		return -EINVAL;
@@ -657,7 +726,7 @@ static void lsarpc_request_cleanup(struct ksmbd_rpc_pipe *pipe)
 		return;
 
 	while (pipe->entries->len) {
-		ni = g_ptr_array_remove_index(pipe->entries, 0);
+		ni = g_ptr_array_remove_index(pipe->entries, pipe->entries->len - 1);
 		lsarpc_name_info_free(ni);
 	}
 	pipe->num_entries = 0;
@@ -905,7 +974,7 @@ fail:
 		rpc_pipe_reset(pipe);
 	else {
 		while (pipe->entries->len) {
-			ni = g_ptr_array_remove_index(pipe->entries, 0);
+			ni = g_ptr_array_remove_index(pipe->entries, pipe->entries->len - 1);
 			lsarpc_name_info_free(ni);
 		}
 		pipe->num_entries = 0;
@@ -980,7 +1049,7 @@ fail:
 		rpc_pipe_reset(pipe);
 	else {
 		while (pipe->entries->len) {
-			ni = g_ptr_array_remove_index(pipe->entries, 0);
+			ni = g_ptr_array_remove_index(pipe->entries, pipe->entries->len - 1);
 			lsarpc_name_info_free(ni);
 		}
 		pipe->num_entries = 0;
@@ -1433,7 +1502,7 @@ fail:
 		rpc_pipe_reset(pipe);
 	else {
 		while (pipe->entries->len) {
-			ni = g_ptr_array_remove_index(pipe->entries, 0);
+			ni = g_ptr_array_remove_index(pipe->entries, pipe->entries->len - 1);
 			lsarpc_name_info_free(ni);
 		}
 		pipe->num_entries = 0;
@@ -1538,7 +1607,7 @@ fail:
 		rpc_pipe_reset(pipe);
 	else {
 		while (pipe->entries->len) {
-			ni = g_ptr_array_remove_index(pipe->entries, 0);
+			ni = g_ptr_array_remove_index(pipe->entries, pipe->entries->len - 1);
 			lsarpc_name_info_free(ni);
 		}
 		pipe->num_entries = 0;

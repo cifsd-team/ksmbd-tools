@@ -22,6 +22,8 @@
 
 #define KSMBD_DCERPC_MAX_PREFERRED_SIZE -1
 #define KSMBD_RPC_HANDLE_SIZE		20
+#define KSMBD_RPC_MAX_FRAGMENT_SIZE	4096
+#define KSMBD_RPC_MAX_REQUEST_SIZE	(4 * 1024 * 1024)
 
 /* Wire status values used by SAMR and LSAD (the IPC status values below are
  * intentionally kept separate from these protocol return codes). */
@@ -341,12 +343,25 @@ struct ksmbd_dcerpc {
 					      gpointer entry);
 };
 
+struct rpc_input_buffer {
+	char *data;
+	size_t size;
+	size_t capacity;
+};
+
 struct ksmbd_rpc_pipe {
 	unsigned int		id;
 	unsigned int		refcount;
 	int			retired;
 	__u16			max_xmit_frag_sz;
+	__u16			max_recv_frag_sz;
 	GMutex			op_lock;
+	struct rpc_input_buffer	fragment;
+	struct rpc_input_buffer	request;
+	struct dcerpc_header	request_header;
+	struct dcerpc_request_header request_method;
+	unsigned int		request_flags;
+	int			request_in_progress;
 
 	int			num_entries;
 	int			num_processed;

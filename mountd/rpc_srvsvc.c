@@ -409,6 +409,45 @@ static int __server_info_data(struct ksmbd_dcerpc *dce, __u32 level)
 	return -EINVAL;
 }
 
+static int srvsvc_share_enum_count(struct ksmbd_rpc_pipe *pipe, int *count)
+{
+	struct ksmbd_dcerpc *dce = pipe->dce;
+	struct ksmbd_dcerpc measure = { 0 };
+	size_t total = 3 * sizeof(__u32);
+	int i, ret = KSMBD_RPC_OK;
+
+	*count = 0;
+	if (dce->si_req.max_size == UINT32_MAX) {
+		*count = pipe->num_entries;
+		return KSMBD_RPC_OK;
+	}
+	if (dce->si_req.max_size < total)
+		return KSMBD_RPC_OK;
+	measure.flags = dce->flags & (KSMBD_DCERPC_LITTLE_ENDIAN |
+				     KSMBD_DCERPC_ALIGN4);
+	measure.payload = g_try_malloc0(4096);
+	if (!measure.payload)
+		return KSMBD_RPC_ENOMEM;
+	measure.payload_sz = 4096;
+	for (i = 0; i < pipe->num_entries; i++) {
+		void *entry = g_ptr_array_index(pipe->entries, i);
+
+		measure.offset = 0;
+		measure.num_pointers = 1;
+		if (dce->entry_rep(&measure, entry) ||
+		    dce->entry_data(&measure, entry)) {
+			ret = KSMBD_RPC_EBAD_DATA;
+			break;
+		}
+		if (measure.offset > dce->si_req.max_size - total)
+			break;
+		total += measure.offset;
+		(*count)++;
+	}
+	g_free(measure.payload);
+	return ret;
+}
+
 static int srvsvc_share_enum_build_response(struct ksmbd_rpc_pipe *pipe)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
@@ -429,11 +468,11 @@ static int srvsvc_share_enum_build_response(struct ksmbd_rpc_pipe *pipe)
 	pipe->num_processed = 0;
 	output_level = __share_level_supported(req->level) ?
 		req->level : 0;
-	if (!req->operation_status)
-		response_entries = ndr_max_entries(dce, pipe);
-	/* Always advance the resume position when data remains. */
-	if (!req->operation_status && !response_entries && pipe->num_entries)
-		response_entries = 1;
+	if (!req->operation_status) {
+		ret = srvsvc_share_enum_count(pipe, &response_entries);
+		if (ret)
+			return ret;
+	}
 
 	response_payload = g_try_malloc0(4096);
 	if (!response_payload)
@@ -583,17 +622,11 @@ static int srvsvc_share_enum_all_invoke(struct ksmbd_rpc_pipe *pipe)
 
 	shm_iter_shares((share_cb)__enum_all_shares, pipe);
 	pipe->entry_processed = __share_entry_processed;
-	req->total_entries = pipe->num_entries;
 	req->resume_handle = req->payload_handle.ptr;
 
-	if (req->resume_handle > (unsigned int)pipe->num_entries) {
-		rpc_pipe_reset(pipe);
-		req->operation_status = KSMBD_RPC_EINVALID_PARAMETER;
-		return KSMBD_RPC_OK;
-	}
-
-	for (i = 0; i < req->resume_handle; i++)
+	for (i = 0; i < req->resume_handle && pipe->num_entries; i++)
 		__share_entry_discard(pipe);
+	req->total_entries = pipe->num_entries;
 	return KSMBD_RPC_OK;
 }
 
@@ -792,8 +825,6 @@ static int srvsvc_share_info_return(struct ksmbd_rpc_pipe *pipe)
 
 	if (dce->req_hdr.opnum != SRVSVC_OPNUM_GET_SHARE_INFO) {
 		if (!dce->response_payload) {
-			dce->response_limit = dce->si_req.max_size ?
-				dce->si_req.max_size : SIZE_MAX;
 			if (rpc_restricted_context(dce->rpc_req)) {
 				if (pipe->num_entries)
 					rpc_pipe_reset(pipe);
