@@ -5,7 +5,7 @@ quota_test = executable(
   include_directories: include_dirs,
   dependencies: glib_dep,
   link_args: [
-    '-Wl,--wrap=open,--wrap=open64,--wrap=close,--wrap=fstat,--wrap=fstat64,--wrap=fstatfs,--wrap=fstatfs64,--wrap=syscall,--wrap=ioctl',
+    '-Wl,--wrap=open,--wrap=open64,--wrap=close,--wrap=fstat,--wrap=fstat64,--wrap=__fxstat,--wrap=__fxstat64,--wrap=fstatfs,--wrap=fstatfs64,--wrap=syscall,--wrap=ioctl',
   ],
 )
 test('quota', quota_test)

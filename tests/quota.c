@@ -113,6 +113,19 @@ int __wrap_fstat64(int fd, struct stat64 *st)
 	return 0;
 }
 
+/* Older glibc headers inline fstat() to these entry points at -O2. */
+int __wrap___fxstat(int version, int fd, struct stat *st)
+{
+	(void)version;
+	return __wrap_fstat(fd, st);
+}
+
+int __wrap___fxstat64(int version, int fd, struct stat64 *st)
+{
+	(void)version;
+	return __wrap_fstat64(fd, st);
+}
+
 int __wrap_fstatfs64(int fd, struct statfs64 *st)
 {
 	memset(st, 0, sizeof(*st));
