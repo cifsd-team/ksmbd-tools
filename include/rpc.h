@@ -345,6 +345,7 @@ struct ksmbd_rpc_pipe {
 	unsigned int		id;
 	unsigned int		refcount;
 	int			retired;
+	__u16			max_xmit_frag_sz;
 	GMutex			op_lock;
 
 	int			num_entries;
@@ -420,6 +421,9 @@ const struct dcerpc_syntax *rpc_pipe_context_syntax(
 					struct ksmbd_rpc_pipe *pipe,
 					__u16 context_id);
 void rpc_pipe_reset(struct ksmbd_rpc_pipe *pipe);
+int rpc_build_response(struct ksmbd_rpc_pipe *pipe,
+		       int (*build)(struct ksmbd_rpc_pipe *pipe));
+int rpc_write_response_fragment(struct ksmbd_rpc_pipe *pipe);
 
 void rpc_init(void);
 void rpc_destroy(void);

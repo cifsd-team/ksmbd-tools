@@ -537,60 +537,6 @@ bad_data:
 	return KSMBD_RPC_EBAD_DATA;
 }
 
-static int srvsvc_share_enum_write_fragment(struct ksmbd_rpc_pipe *pipe)
-{
-	struct ksmbd_dcerpc *dce = pipe->dce;
-	size_t response_header_size = sizeof(struct dcerpc_header) +
-		sizeof(struct dcerpc_response_header);
-	size_t remaining;
-	size_t fragment_payload_sz;
-	size_t fragment_size;
-
-	if (!dce->response_payload ||
-	    dce->response_payload_offset > dce->response_payload_sz ||
-	    dce->payload_sz < response_header_size)
-		goto bad_data;
-	if (dce->payload_sz == response_header_size &&
-	    dce->response_payload_offset < dce->response_payload_sz)
-		goto bad_data;
-
-	remaining = dce->response_payload_sz -
-		dce->response_payload_offset;
-	fragment_payload_sz = MIN(dce->payload_sz - response_header_size,
-				  (size_t)UINT16_MAX - response_header_size);
-	if (!fragment_payload_sz && remaining)
-		goto bad_data;
-	fragment_size = MIN(remaining, fragment_payload_sz);
-	memcpy(dce->payload + response_header_size,
-	       dce->response_payload + response_header_size +
-	       dce->response_payload_offset, fragment_size);
-	dce->response_payload_offset += fragment_size;
-
-	if (dce->response_payload_offset < dce->response_payload_sz)
-		dce->flags |= KSMBD_DCERPC_RETURN_READY;
-	else
-		dce->flags &= ~KSMBD_DCERPC_RETURN_READY;
-	dce->offset = response_header_size + fragment_size;
-	if (dcerpc_write_headers(dce, KSMBD_RPC_OK))
-		goto bad_data;
-	dce->rpc_resp->payload_sz = dce->offset;
-
-	if (dce->flags & KSMBD_DCERPC_RETURN_READY) {
-		srvsvc_clear_headers(pipe, KSMBD_RPC_EMORE_DATA);
-		return KSMBD_RPC_OK;
-	}
-
-	srvsvc_clear_headers(pipe, KSMBD_RPC_OK);
-	rpc_pipe_reset(pipe);
-	return KSMBD_RPC_OK;
-
-bad_data:
-	dce->flags &= ~KSMBD_DCERPC_RETURN_READY;
-	srvsvc_clear_headers(pipe, KSMBD_RPC_OK);
-	rpc_pipe_reset(pipe);
-	return KSMBD_RPC_EBAD_DATA;
-}
-
 static int __share_entry_processed(struct ksmbd_rpc_pipe *pipe, int i)
 {
 	struct ksmbd_share *share;
@@ -857,7 +803,7 @@ static int srvsvc_share_info_return(struct ksmbd_rpc_pipe *pipe)
 			if (srvsvc_share_enum_build_response(pipe))
 				return KSMBD_RPC_EBAD_DATA;
 		}
-		return srvsvc_share_enum_write_fragment(pipe);
+		return rpc_write_response_fragment(pipe);
 	}
 
 	dce->offset = sizeof(struct dcerpc_header) +

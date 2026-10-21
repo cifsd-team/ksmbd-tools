@@ -219,24 +219,6 @@ static int lsarpc_syntax_interface(struct ksmbd_rpc_pipe *pipe,
 	return -1;
 }
 
-static int lsarpc_ipc_status(int status)
-{
-	switch (status) {
-	case LSARPC_STATUS_INVALID_HANDLE:
-		return KSMBD_RPC_EBAD_FID;
-	case LSARPC_STATUS_INVALID_PARAMETER:
-		return KSMBD_RPC_EINVALID_PARAMETER;
-	case LSARPC_STATUS_INVALID_INFO_CLASS:
-		return KSMBD_RPC_EINVALID_LEVEL;
-	case LSARPC_STATUS_NONE_MAPPED:
-		return KSMBD_RPC_NONE_MAPPED;
-	case LSARPC_STATUS_SOME_NOT_MAPPED:
-		return KSMBD_RPC_SOME_NOT_MAPPED;
-	default:
-		return status;
-	}
-}
-
 static int lsarpc_policy_access(const struct policy_handle *ph,
 				unsigned int required)
 {
@@ -264,21 +246,6 @@ static int lsarpc_policy_access(const struct policy_handle *ph,
 		return KSMBD_RPC_OK;
 
 	return KSMBD_RPC_EACCESS_DENIED;
-}
-
-static int lsarpc_is_local_system_name(const char *name)
-{
-	const char *local_name;
-
-	if (!name || !name[0])
-		return 1;
-
-	local_name = name;
-	while (*local_name == '\\')
-		local_name++;
-
-	return !g_ascii_strcasecmp(local_name, domain_name) ||
-	       !g_ascii_strcasecmp(local_name, "localhost");
 }
 
 static __u32 lsarpc_wire_status(int status, int interface_kind)
@@ -536,7 +503,6 @@ static int lsarpc_open_policy2_invoke(struct ksmbd_rpc_pipe *pipe)
 	struct ksmbd_dcerpc *dce = pipe->dce;
 	__u32 system_ref, desired_access;
 	char *system_name = NULL;
-	int ret = KSMBD_RPC_OK;
 
 	if (lsarpc_syntax_interface(pipe, dce->req_hdr.context_id) !=
 	    LSARPC_INTERFACE_LSAD)
@@ -552,15 +518,12 @@ static int lsarpc_open_policy2_invoke(struct ksmbd_rpc_pipe *pipe)
 	    ndr_request_end(dce))
 		goto fail;
 
-	/* The standalone implementation only serves its local policy. */
-	if (system_name && system_name[0] &&
-	    !lsarpc_is_local_system_name(system_name))
-		ret = KSMBD_RPC_EACCESS_DENIED;
+	/* MS-LSAD requires SystemName to be ignored after unmarshalling. */
 	dce->lr_req.access_mask = desired_access;
 	dce->lr_req.interface_kind = LSARPC_INTERFACE_LSAD;
 
 	g_free(system_name);
-	return ret;
+	return KSMBD_RPC_OK;
 fail:
 	g_free(system_name);
 	return KSMBD_RPC_EINVALID_PARAMETER;
@@ -1982,13 +1945,10 @@ static int lsarpc_invoke(struct ksmbd_rpc_pipe *pipe)
 	return ret;
 }
 
-static int lsarpc_return(struct ksmbd_rpc_pipe *pipe,
-			 struct ksmbd_rpc_command *resp,
-			 int max_resp_sz)
+static int lsarpc_return(struct ksmbd_rpc_pipe *pipe)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
 	size_t payload_start;
-	int ipc_status;
 	int status = KSMBD_RPC_ENOTIMPLEMENTED;
 
 	dce->offset = sizeof(struct dcerpc_header);
@@ -2067,19 +2027,20 @@ static int lsarpc_return(struct ksmbd_rpc_pipe *pipe,
 				     pipe, dce->req_hdr.context_id))))
 		return KSMBD_RPC_EBAD_DATA;
 
-	ipc_status = lsarpc_ipc_status(status);
-	if (dcerpc_write_headers(dce, ipc_status))
-		return KSMBD_RPC_EBAD_DATA;
-
-	dce->rpc_resp->payload_sz = dce->offset;
-	return ipc_status;
+	return KSMBD_RPC_OK;
 }
 
 int rpc_lsarpc_read_request(struct ksmbd_rpc_pipe *pipe,
 			    struct ksmbd_rpc_command *resp,
 			    int max_resp_sz)
 {
-	return lsarpc_return(pipe, resp, max_resp_sz);
+	int ret;
+
+	dcerpc_set_ext_payload(pipe->dce, resp->payload, max_resp_sz);
+	ret = rpc_build_response(pipe, lsarpc_return);
+	if (ret)
+		return ret;
+	return rpc_write_response_fragment(pipe);
 }
 
 int rpc_lsarpc_write_request(struct ksmbd_rpc_pipe *pipe)

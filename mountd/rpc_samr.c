@@ -393,27 +393,6 @@ static unsigned int samr_generic_execute_access(enum samr_handle_type type)
 	}
 }
 
-static int samr_ipc_status(int status)
-{
-	switch (status) {
-	case SAMR_STATUS_INVALID_HANDLE:
-		return KSMBD_RPC_EBAD_FID;
-	case SAMR_STATUS_NO_SUCH_DOMAIN:
-	case SAMR_STATUS_NO_SUCH_USER:
-		return KSMBD_RPC_EINVALID_PARAMETER;
-	case SAMR_STATUS_INVALID_INFO_CLASS:
-		return KSMBD_RPC_EINVALID_LEVEL;
-	case SAMR_STATUS_BUFFER_TOO_SMALL:
-		return KSMBD_RPC_EINVALID_PARAMETER;
-	case SAMR_STATUS_NONE_MAPPED:
-		return KSMBD_RPC_NONE_MAPPED;
-	case SAMR_STATUS_SOME_NOT_MAPPED:
-		return KSMBD_RPC_SOME_NOT_MAPPED;
-	default:
-		return status;
-	}
-}
-
 static void samr_free_names(struct samr_info_request *req)
 {
 	if (req->names) {
@@ -2748,14 +2727,11 @@ static int samr_invoke(struct ksmbd_rpc_pipe *pipe)
 	return ret;
 }
 
-static int samr_return(struct ksmbd_rpc_pipe *pipe,
-			 struct ksmbd_rpc_command *resp,
-			 int max_resp_sz)
+static int samr_return(struct ksmbd_rpc_pipe *pipe)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
 	size_t payload_start;
 	__u32 wire_status;
-	int ipc_status;
 	int status;
 
 	/*
@@ -2861,19 +2837,20 @@ static int samr_return(struct ksmbd_rpc_pipe *pipe,
 	if (ndr_write_int32(dce, wire_status))
 		return KSMBD_RPC_EBAD_DATA;
 
-	ipc_status = samr_ipc_status(status);
-	if (dcerpc_write_headers(dce, ipc_status))
-		return KSMBD_RPC_EBAD_DATA;
-
-	dce->rpc_resp->payload_sz = dce->offset;
-	return ipc_status;
+	return KSMBD_RPC_OK;
 }
 
 int rpc_samr_read_request(struct ksmbd_rpc_pipe *pipe,
 			    struct ksmbd_rpc_command *resp,
 			    int max_resp_sz)
 {
-	return samr_return(pipe, resp, max_resp_sz);
+	int ret;
+
+	dcerpc_set_ext_payload(pipe->dce, resp->payload, max_resp_sz);
+	ret = rpc_build_response(pipe, samr_return);
+	if (ret)
+		return ret;
+	return rpc_write_response_fragment(pipe);
 }
 
 int rpc_samr_write_request(struct ksmbd_rpc_pipe *pipe)

@@ -297,12 +297,14 @@ static int rpc_request(struct ksmbd_ipc_msg *msg)
 		ret = rpc_open_request(req, resp);
 	} else if (req->flags & KSMBD_RPC_CLOSE_METHOD) {
 		ret = rpc_close_request(req, resp);
-	} else if (req->flags & KSMBD_RPC_IOCTL_METHOD) {
-		ret = rpc_ioctl_request(req, resp, resp_msg->sz);
+	} else if ((req->flags & KSMBD_RPC_IOCTL_METHOD) ==
+		   KSMBD_RPC_IOCTL_METHOD) {
+		ret = rpc_ioctl_request(req, resp, resp_msg->sz - sizeof(*resp));
 	} else if (req->flags & KSMBD_RPC_WRITE_METHOD) {
 		ret = rpc_write_request(req, resp);
-	} else if (req->flags & KSMBD_RPC_READ_METHOD) {
-		ret = rpc_read_request(req, resp, resp_msg->sz);
+	} else if ((req->flags & KSMBD_RPC_READ_METHOD) ==
+		   KSMBD_RPC_READ_METHOD) {
+		ret = rpc_read_request(req, resp, resp_msg->sz - sizeof(*resp));
 	} else {
 		pr_err("Unknown RPC method: %x\n", req->flags);
 		ret = KSMBD_RPC_ENOTIMPLEMENTED;

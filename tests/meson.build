@@ -9,3 +9,12 @@ quota_test = executable(
   ],
 )
 test('quota', quota_test)
+
+rpc_test = executable(
+  'rpc-test',
+  'rpc.c',
+  include_directories: include_dirs,
+  dependencies: glib_dep,
+  link_with: mountd_lib,
+)
+test('rpc', rpc_test)
