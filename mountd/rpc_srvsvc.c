@@ -214,12 +214,22 @@ static int __share_entry_rep_ctr502(struct ksmbd_dcerpc *dce,
 				    gpointer entry)
 {
 	struct ksmbd_share *share = entry;
+	struct ksmbd_dcerpc descriptor = {
+		.flags = dce->flags & (KSMBD_DCERPC_LITTLE_ENDIAN |
+				       KSMBD_DCERPC_ALIGN4),
+	};
+	__u32 sec_desc_len;
 	int ret;
 
+	/* shi502_reserved and the deferred array count describe the same blob. */
+	ret = build_sec_desc(&descriptor, &sec_desc_len, 0);
+	g_free(descriptor.payload);
+	if (ret)
+		return ret;
 	ret = __share_entry_rep_ctr2(dce, share);
 	if (ret)
 		return ret;
-	if (ndr_write_int32(dce, 0))
+	if (ndr_write_int32(dce, sec_desc_len))
 		return -EINVAL;
 	return __share_write_ref(dce);
 }

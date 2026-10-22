@@ -1063,6 +1063,22 @@ static char *wire_string(struct wire_reader *wire)
 	return value;
 }
 
+static void put_string(GByteArray *stub, const char *value, int terminate)
+{
+	glong length;
+	gunichar2 *utf16 = g_utf8_to_utf16(value, -1, NULL, &length, NULL);
+	unsigned int i;
+
+	g_assert_nonnull(utf16);
+	put32(stub, length + terminate);
+	put32(stub, 0);
+	put32(stub, length + terminate);
+	for (i = 0; i < length + terminate; i++)
+		put16(stub, utf16[i]);
+	pad_buffer(stub, 4);
+	g_free(utf16);
+}
+
 static GByteArray *samr_connect_handle(void)
 {
 	GByteArray *stub = connect_stub();
@@ -1173,6 +1189,75 @@ static void test_user_all_information(void)
 	fixture_destroy();
 }
 
+static GByteArray *share_get_info(unsigned int level, size_t capacity)
+{
+	GByteArray *stub = g_byte_array_new(), *result;
+
+	put32(stub, 0);
+	put_string(stub, "share0", 1);
+	put32(stub, level);
+	result = exchange(1, KSMBD_RPC_SRVSVC_METHOD_INVOKE, 16, stub, capacity);
+	g_byte_array_unref(stub);
+	return result;
+}
+
+static void check_share_descriptor(struct wire_reader *wire, unsigned int size)
+{
+	unsigned int i;
+
+	for (i = 0; i < 4; i++) {
+		g_autofree char *value = wire_string(wire);
+	}
+	g_assert_cmpuint(size, >, 20);
+	g_assert_cmpuint(wire32(wire), ==, size);
+	wire_skip(wire, size);
+	g_assert_cmpuint(wire->data[wire->offset - size], ==, 1);
+	wire_align(wire, 4);
+}
+
+static void test_share_security_descriptor(void)
+{
+	GByteArray *result;
+	struct wire_reader wire;
+	unsigned int size, sizes[3], i;
+
+	fixture_init();
+	open_pipe(1, KSMBD_RPC_SRVSVC_METHOD_INVOKE, 0, 3);
+	result = share_get_info(502, 4096);
+	wire = (struct wire_reader){ .data = result->data, .size = result->len };
+	g_assert_cmpuint(wire32(&wire), ==, 502);
+	g_assert_cmpuint(wire32(&wire), !=, 0);
+	wire_skip(&wire, 8 * 4);
+	size = wire32(&wire);
+	g_assert_cmpuint(wire32(&wire), !=, 0);
+	check_share_descriptor(&wire, size);
+	g_assert_cmpuint(wire32(&wire), ==, 0);
+	g_assert_cmpuint(wire.offset, ==, wire.size);
+	g_byte_array_unref(result);
+	result = share_enum(502, UINT32_MAX, 0);
+	wire = (struct wire_reader){ .data = result->data, .size = result->len };
+	g_assert_cmpuint(wire32(&wire), ==, 502);
+	g_assert_cmpuint(wire32(&wire), ==, 502);
+	g_assert_cmpuint(wire32(&wire), !=, 0);
+	g_assert_cmpuint(wire32(&wire), ==, 3);
+	g_assert_cmpuint(wire32(&wire), !=, 0);
+	g_assert_cmpuint(wire32(&wire), ==, 3);
+	for (i = 0; i < 3; i++) {
+		wire_skip(&wire, 8 * 4);
+		sizes[i] = wire32(&wire);
+		g_assert_cmpuint(wire32(&wire), !=, 0);
+	}
+	for (i = 0; i < 3; i++)
+		check_share_descriptor(&wire, sizes[i]);
+	g_assert_cmpuint(wire32(&wire), ==, 3);
+	g_assert_cmpuint(wire32(&wire), !=, 0);
+	g_assert_cmpuint(wire32(&wire), ==, 0);
+	g_assert_cmpuint(wire32(&wire), ==, 0);
+	g_assert_cmpuint(wire.offset, ==, wire.size);
+	g_byte_array_unref(result);
+	fixture_destroy();
+}
+
 int main(int argc, char **argv)
 {
 	g_test_init(&argc, &argv, NULL);
@@ -1191,5 +1276,6 @@ int main(int argc, char **argv)
 	g_test_add_func("/rpc/input/bounds", test_request_bounds);
 	g_test_add_func("/rpc/lsarpc/full-sid-range", test_full_sid_range);
 	g_test_add_func("/rpc/samr/user-all-information", test_user_all_information);
+	g_test_add_func("/rpc/srvsvc/security-descriptor", test_share_security_descriptor);
 	return g_test_run();
 }
