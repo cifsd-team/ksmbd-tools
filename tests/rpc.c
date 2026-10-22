@@ -1570,7 +1570,7 @@ static void check_lsa_name(GByteArray *result, unsigned int version,
 
 static void test_lsa_account_names(void)
 {
-	const char *prefixes[] = { "", NULL, "OTHER\\", "SERVER-extra\\" };
+	const char *prefixes[] = { "", "sErVeR\\", NULL, "OTHER\\", "SERVER-extra\\" };
 	char hostname[256] = { 0 };
 	g_autofree char *host_prefix = NULL;
 	GByteArray *policy, *result;
@@ -1579,7 +1579,7 @@ static void test_lsa_account_names(void)
 
 	g_assert_cmpint(gethostname(hostname, sizeof(hostname) - 1), ==, 0);
 	host_prefix = g_strdup_printf("%s\\", hostname);
-	prefixes[1] = host_prefix;
+	prefixes[2] = host_prefix;
 	fixture_init();
 	user = users->pdata[0];
 	g_free(user->name);
@@ -1591,7 +1591,7 @@ static void test_lsa_account_names(void)
 			g_autofree char *name = g_strconcat(prefixes[i], "test-group", NULL);
 
 			result = lsa_lookup_name(policy, name, version);
-			check_lsa_name(result, version, i < 2 ? 1 : 8,
+			check_lsa_name(result, version, i < 3 ? 1 : 8,
 					local_domain_sid, sizeof(local_domain_sid));
 			g_byte_array_unref(result);
 		}

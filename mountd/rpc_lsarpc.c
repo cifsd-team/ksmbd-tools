@@ -850,8 +850,11 @@ static int lsarpc_extract_account_name(const char *input, char **name,
 	if (prefix_len == strlen(SMB_UNIX_GROUP_DOMAIN) &&
 	    !g_ascii_strncasecmp(input, SMB_UNIX_GROUP_DOMAIN, prefix_len)) {
 		*type = SID_TYPE_GROUP;
-	} else if (prefix_len != strlen(domain_name) ||
-		   g_ascii_strncasecmp(input, domain_name, prefix_len)) {
+	} else if ((prefix_len != strlen(domain_name) ||
+		    g_ascii_strncasecmp(input, domain_name, prefix_len)) &&
+		   (!global_conf.netbios_name ||
+		    prefix_len != strlen(global_conf.netbios_name) ||
+		    g_ascii_strncasecmp(input, global_conf.netbios_name, prefix_len))) {
 		return -ENOENT;
 	} else {
 		*type = SID_TYPE_USER;

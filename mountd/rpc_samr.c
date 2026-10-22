@@ -524,7 +524,9 @@ static int samr_lookup_domain_sid(const char *name, struct smb_sid *sid)
 	if (!name || !sid)
 		return -EINVAL;
 
-	if (!g_ascii_strcasecmp(name, domain_name)) {
+	if (!g_ascii_strcasecmp(name, domain_name) ||
+	    (global_conf.netbios_name &&
+	     !g_ascii_strcasecmp(name, global_conf.netbios_name))) {
 		smb_init_domain_sid(sid);
 		return 0;
 	}
