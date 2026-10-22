@@ -99,6 +99,7 @@ struct samr_account_entry {
 enum samr_domain_kind {
 	SAMR_DOMAIN_KIND_LOCAL = 0,
 	SAMR_DOMAIN_KIND_BUILTIN,
+	SAMR_DOMAIN_KIND_UNIX_GROUP,
 	SAMR_DOMAIN_KIND_OTHER,
 };
 
@@ -141,6 +142,9 @@ static enum samr_domain_kind samr_get_domain_kind(const struct smb_sid *sid)
 	samr_init_builtin_sid(&builtin_sid);
 	if (!smb_compare_sids(sid, &builtin_sid))
 		return SAMR_DOMAIN_KIND_BUILTIN;
+	smb_init_unix_group_sid(&builtin_sid);
+	if (!smb_compare_sids(sid, &builtin_sid))
+		return SAMR_DOMAIN_KIND_UNIX_GROUP;
 	return SAMR_DOMAIN_KIND_OTHER;
 }
 
@@ -526,6 +530,10 @@ static int samr_lookup_domain_sid(const char *name, struct smb_sid *sid)
 	}
 	if (!g_ascii_strcasecmp(name, "Builtin")) {
 		samr_init_builtin_sid(sid);
+		return 0;
+	}
+	if (!g_ascii_strcasecmp(name, SMB_UNIX_GROUP_DOMAIN)) {
+		smb_init_unix_group_sid(sid);
 		return 0;
 	}
 	return -ENOENT;
@@ -1178,7 +1186,7 @@ static int samr_enum_groups_return(struct ksmbd_rpc_pipe *pipe)
 	if (ret)
 		goto out;
 
-	if (samr_get_domain_kind(&ch->domain_sid) == SAMR_DOMAIN_KIND_LOCAL) {
+	if (samr_get_domain_kind(&ch->domain_sid) == SAMR_DOMAIN_KIND_UNIX_GROUP) {
 		entries = samr_collect_group_entries();
 		if (!entries) {
 			ret = KSMBD_RPC_ENOMEM;
@@ -1306,7 +1314,6 @@ static int samr_open_domain_return(struct ksmbd_rpc_pipe *pipe)
 	struct connect_handle *ch;
 	struct connect_handle *domain;
 	struct smb_sid sid;
-	struct smb_sid builtin_sid;
 	int ret;
 
 	ch = samr_ch_lookup(pipe, dce->sm_req.handle);
@@ -1316,16 +1323,9 @@ static int samr_open_domain_return(struct ksmbd_rpc_pipe *pipe)
 		goto fail;
 
 	memcpy(&sid, dce->sm_req.sid, sizeof(sid));
-	samr_init_builtin_sid(&builtin_sid);
-	{
-		struct smb_sid local_sid;
-
-		smb_init_domain_sid(&local_sid);
-		if (smb_compare_sids(&sid, &builtin_sid) &&
-		    smb_compare_sids(&sid, &local_sid)) {
-			ret = SAMR_STATUS_NO_SUCH_DOMAIN;
-			goto fail;
-		}
+	if (samr_get_domain_kind(&sid) == SAMR_DOMAIN_KIND_OTHER) {
+		ret = SAMR_STATUS_NO_SUCH_DOMAIN;
+		goto fail;
 	}
 
 	domain = samr_ch_alloc(pipe, SAMR_HANDLE_DOMAIN,
@@ -1454,7 +1454,7 @@ static int samr_lookup_names_return(struct ksmbd_rpc_pipe *pipe)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
 	struct connect_handle *ch;
-	struct smb_sid local_sid;
+	enum samr_domain_kind kind;
 	GPtrArray *groups = NULL;
 	g_autofree __u32 *rids = NULL;
 	g_autofree __u32 *types = NULL;
@@ -1474,8 +1474,8 @@ static int samr_lookup_names_return(struct ksmbd_rpc_pipe *pipe)
 		goto out;
 	}
 
-	smb_init_domain_sid(&local_sid);
-	if (!smb_compare_sids(&ch->domain_sid, &local_sid)) {
+	kind = samr_get_domain_kind(&ch->domain_sid);
+	if (kind == SAMR_DOMAIN_KIND_UNIX_GROUP) {
 		groups = samr_collect_group_entries();
 		if (!groups) {
 			ret = KSMBD_RPC_ENOMEM;
@@ -1490,9 +1490,8 @@ static int samr_lookup_names_return(struct ksmbd_rpc_pipe *pipe)
 		struct ksmbd_user *user;
 		char *name = g_ptr_array_index(dce->sm_req.names, i);
 
-		if (smb_compare_sids(&ch->domain_sid, &local_sid))
-			continue;
-		user = usm_lookup_user_casefold(name);
+		user = kind == SAMR_DOMAIN_KIND_LOCAL ?
+			usm_lookup_user_casefold(name) : NULL;
 		if (user) {
 			rids[i] = user->uid;
 			types[i] = SID_TYPE_USER;
@@ -1604,6 +1603,7 @@ static int samr_lookup_ids_return(struct ksmbd_rpc_pipe *pipe)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
 	struct connect_handle *ch;
+	enum samr_domain_kind kind;
 	GPtrArray *groups = NULL;
 	char **names = NULL;
 	__u32 *types = NULL;
@@ -1616,7 +1616,8 @@ static int samr_lookup_ids_return(struct ksmbd_rpc_pipe *pipe)
 	if (ret)
 		goto out;
 
-	if (samr_get_domain_kind(&ch->domain_sid) == SAMR_DOMAIN_KIND_LOCAL) {
+	kind = samr_get_domain_kind(&ch->domain_sid);
+	if (kind == SAMR_DOMAIN_KIND_UNIX_GROUP) {
 		groups = samr_collect_group_entries();
 		if (!groups) {
 			ret = KSMBD_RPC_ENOMEM;
@@ -1639,11 +1640,10 @@ static int samr_lookup_ids_return(struct ksmbd_rpc_pipe *pipe)
 
 		rid = g_ptr_array_index(dce->sm_req.names, i);
 		types[i] = SID_TYPE_UNKNOWN;
-		if (!rid ||
-		    samr_get_domain_kind(&ch->domain_sid) != SAMR_DOMAIN_KIND_LOCAL)
+		if (!rid)
 			continue;
 
-		user = usm_lookup_uid(*rid);
+		user = kind == SAMR_DOMAIN_KIND_LOCAL ? usm_lookup_uid(*rid) : NULL;
 		if (user) {
 			names[i] = g_strdup(user->name);
 			put_ksmbd_user(user);
@@ -1790,7 +1790,7 @@ static int samr_open_account_handle_return(struct ksmbd_rpc_pipe *pipe,
 	if (ret)
 		goto fail;
 
-	if (samr_get_domain_kind(&ch->domain_sid) != SAMR_DOMAIN_KIND_LOCAL) {
+	if (samr_get_domain_kind(&ch->domain_sid) != SAMR_DOMAIN_KIND_UNIX_GROUP) {
 		ret = KSMBD_RPC_EINVALID_PARAMETER;
 		goto fail;
 	}
@@ -2892,6 +2892,8 @@ void rpc_samr_init(void)
 		domain_entries = g_ptr_array_new_with_free_func(g_free);
 		rpc_samr_add_domain_entry(domain_name);
 		rpc_samr_add_domain_entry("Builtin");
+		/* Keep raw GIDs in the same SID namespace used by the kernel ACLs. */
+		rpc_samr_add_domain_entry(SMB_UNIX_GROUP_DOMAIN);
 	}
 
 	if (!ch_table)

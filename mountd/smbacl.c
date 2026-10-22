@@ -101,6 +101,12 @@ void smb_init_domain_sid(struct smb_sid *sid)
 		sid->sub_auth[i+1] = global_conf.gen_subauth[i];
 }
 
+void smb_init_unix_group_sid(struct smb_sid *sid)
+{
+	memset(sid, 0, sizeof(*sid));
+	smb_copy_sid(sid, &sid_unix_groups);
+}
+
 int smb_compare_sids(const struct smb_sid *ctsid, const struct smb_sid *cwsid)
 {
 	int i;
@@ -231,16 +237,18 @@ int set_domain_name(struct smb_sid *sid, char *domain, size_t domain_len,
 		return 0;
 	}
 
-	if (sid->num_subauth == sid_unix_groups.num_subauth + 1 &&
+	if ((sid->num_subauth == sid_unix_groups.num_subauth ||
+	     sid->num_subauth == sid_unix_groups.num_subauth + 1) &&
 	    !memcmp(sid->authority, sid_unix_groups.authority,
 		    sizeof(sid->authority)) &&
 	    !memcmp(sid->sub_auth, sid_unix_groups.sub_auth,
 		    sizeof(__u32) * sid_unix_groups.num_subauth)) {
-		ret = snprintf(domain, domain_len, "Unix Group");
+		ret = snprintf(domain, domain_len, SMB_UNIX_GROUP_DOMAIN);
 		if (ret < 0 || ret >= domain_len)
 			return -ENOMEM;
 
-		*type = SID_TYPE_GROUP;
+		*type = sid->num_subauth == sid_unix_groups.num_subauth ?
+			SID_TYPE_DOMAIN : SID_TYPE_GROUP;
 		return 0;
 	}
 

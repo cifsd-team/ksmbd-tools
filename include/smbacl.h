@@ -42,6 +42,8 @@
 #define SID_TYPE_DOMAIN		3
 #define SID_TYPE_UNKNOWN	8
 
+#define SMB_UNIX_GROUP_DOMAIN	"Unix Group"
+
 struct smb_ntsd {
 	__u16 revision; /* revision level */
 	__u16 type;
@@ -73,6 +75,7 @@ struct smb_ace {
 };
 
 void smb_init_domain_sid(struct smb_sid *sid);
+void smb_init_unix_group_sid(struct smb_sid *sid);
 int smb_read_sid(struct ksmbd_dcerpc *dce, struct smb_sid *sid);
 int smb_write_sid(struct ksmbd_dcerpc *dce, const struct smb_sid *src);
 void smb_copy_sid(struct smb_sid *dst, const struct smb_sid *src);

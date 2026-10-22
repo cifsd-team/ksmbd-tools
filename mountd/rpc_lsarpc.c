@@ -10,6 +10,7 @@
 #include <glib.h>
 #include <grp.h>
 #include <pwd.h>
+#include <unistd.h>
 #include <errno.h>
 #include <linux/ksmbd_server.h>
 
@@ -743,9 +744,39 @@ static void lsarpc_init_unix_domain_sid(struct smb_sid *sid, __u32 rid)
 	sid->sub_auth[0] = rid;
 }
 
+static int lsarpc_lookup_group(const char *name, __u32 *gid, char **resolved)
+{
+	struct group group, *result;
+	size_t size;
+	long suggested = sysconf(_SC_GETGR_R_SIZE_MAX);
+	int ret;
+
+	size = suggested > 1024 ? suggested : 1024;
+	for (;;) {
+		g_autofree char *buf = g_try_malloc(size);
+
+		if (!buf)
+			return -ENOMEM;
+		if (name)
+			ret = getgrnam_r(name, &group, buf, size, &result);
+		else
+			ret = getgrgid_r(*gid, &group, buf, size, &result);
+		if (ret == ERANGE) {
+			if (size > G_MAXSIZE / 2)
+				return -ENOMEM;
+			size *= 2;
+			continue;
+		}
+		if (ret || !result)
+			return ret ? -ret : -ENOENT;
+		*gid = result->gr_gid;
+		*resolved = g_strdup(result->gr_name);
+		return *resolved ? 0 : -ENOMEM;
+	}
+}
+
 static int lsarpc_resolve_sid(struct lsarpc_names_info *ni)
 {
-	struct group *group;
 	int ret;
 	__u32 rid;
 
@@ -783,9 +814,9 @@ static int lsarpc_resolve_sid(struct lsarpc_names_info *ni)
 			return 0;
 		rid = ni->sid.sub_auth[ni->sid.num_subauth - 1];
 		lsarpc_init_unix_domain_sid(&ni->domain_sid, 2);
-		group = getgrgid(rid);
-		if (group)
-			ni->resolved_name = g_strdup(group->gr_name);
+		ret = lsarpc_lookup_group(NULL, &rid, &ni->resolved_name);
+		if (ret == -ENOMEM)
+			return ret;
 		break;
 	default:
 		return 0;
@@ -797,7 +828,8 @@ static int lsarpc_resolve_sid(struct lsarpc_names_info *ni)
 	return 0;
 }
 
-static int lsarpc_extract_account_name(const char *input, char **name)
+static int lsarpc_extract_account_name(const char *input, char **name,
+				       int *type)
 {
 	const char *separator;
 	size_t prefix_len;
@@ -805,6 +837,7 @@ static int lsarpc_extract_account_name(const char *input, char **name)
 	if (!input || !name || !input[0])
 		return -EINVAL;
 
+	*type = SID_TYPE_UNKNOWN;
 	separator = strrchr(input, '\\');
 	if (!separator) {
 		*name = g_strdup(input);
@@ -814,12 +847,52 @@ static int lsarpc_extract_account_name(const char *input, char **name)
 		return -EINVAL;
 
 	prefix_len = separator - input;
-	if (prefix_len != strlen(domain_name) ||
-	    g_ascii_strncasecmp(input, domain_name, prefix_len))
+	if (prefix_len == strlen(SMB_UNIX_GROUP_DOMAIN) &&
+	    !g_ascii_strncasecmp(input, SMB_UNIX_GROUP_DOMAIN, prefix_len)) {
+		*type = SID_TYPE_GROUP;
+	} else if (prefix_len != strlen(domain_name) ||
+		   g_ascii_strncasecmp(input, domain_name, prefix_len)) {
 		return -ENOENT;
+	} else {
+		*type = SID_TYPE_USER;
+	}
 
 	*name = g_strdup(separator + 1);
 	return *name ? 0 : -ENOMEM;
+}
+
+static int lsarpc_resolve_name(struct lsarpc_names_info *ni, const char *input)
+{
+	g_autofree char *name = NULL;
+	__u32 rid = 0;
+	int type, ret;
+
+	ret = lsarpc_extract_account_name(input, &name, &type);
+	if (ret)
+		return ret;
+	if (type != SID_TYPE_GROUP)
+		ni->user = usm_lookup_user_casefold(name);
+	if (ni->user) {
+		smb_init_domain_sid(&ni->domain_sid);
+		rid = ni->user->uid;
+		g_strlcpy(ni->domain_str, domain_name, sizeof(ni->domain_str));
+		ni->type = SID_TYPE_USER;
+		ni->resolved_name = g_strdup(ni->user->name);
+	} else if (type != SID_TYPE_USER) {
+		ret = lsarpc_lookup_group(name, &rid, &ni->resolved_name);
+		if (ret)
+			return ret;
+		smb_init_unix_group_sid(&ni->domain_sid);
+		g_strlcpy(ni->domain_str, SMB_UNIX_GROUP_DOMAIN,
+			  sizeof(ni->domain_str));
+		ni->type = SID_TYPE_GROUP;
+	}
+	if (!ni->resolved_name)
+		return ni->user ? -ENOMEM : 0;
+	smb_copy_sid(&ni->sid, &ni->domain_sid);
+	ni->sid.sub_auth[ni->sid.num_subauth++] = rid;
+	ni->mapped = 1;
+	return 0;
 }
 
 static int lsarpc_sid_relative_id(const struct lsarpc_names_info *ni, __u32 *rid)
@@ -1449,8 +1522,6 @@ static int lsarpc_lookup_names3_invoke(struct ksmbd_rpc_pipe *pipe)
 		struct ndr_string_rep *rep;
 
 		g_autofree char *input_name = NULL;
-		g_autofree char *account_name = NULL;
-
 		int ret;
 
 		rep = g_ptr_array_index(reps, i);
@@ -1463,25 +1534,9 @@ static int lsarpc_lookup_names3_invoke(struct ksmbd_rpc_pipe *pipe)
 			goto names_fail;
 		ni->index = -1;
 		ni->type = SID_TYPE_UNKNOWN;
-		ret = input_name ?
-			lsarpc_extract_account_name(input_name, &account_name) :
-			-EINVAL;
-		if (!ret) {
-			ni->user = usm_lookup_user_casefold(account_name);
-			if (ni->user) {
-				smb_init_domain_sid(&ni->sid);
-				smb_copy_sid(&ni->domain_sid, &ni->sid);
-				ni->sid.sub_auth[ni->sid.num_subauth++] =
-					ni->user->uid;
-				g_strlcpy(ni->domain_str, domain_name,
-					  sizeof(ni->domain_str));
-				ni->type = SID_TYPE_USER;
-				ni->resolved_name = g_strdup(ni->user->name);
-				ni->mapped = ni->resolved_name != NULL;
-			}
-		} else if (ret == -ENOMEM) {
+		ret = input_name ? lsarpc_resolve_name(ni, input_name) : -EINVAL;
+		if (ret == -ENOMEM)
 			goto names_fail;
-		}
 		g_ptr_array_add(pipe->entries, ni);
 		ni = NULL;
 		pipe->num_entries++;
@@ -1557,7 +1612,6 @@ static int lsarpc_lookup_names_invoke(struct ksmbd_rpc_pipe *pipe)
 		struct ndr_string_rep *rep;
 
 		g_autofree char *input_name = NULL;
-		g_autofree char *account_name = NULL;
 		int ret;
 
 		rep = g_ptr_array_index(reps, i);
@@ -1570,25 +1624,9 @@ static int lsarpc_lookup_names_invoke(struct ksmbd_rpc_pipe *pipe)
 			goto names_fail;
 		ni->index = -1;
 		ni->type = SID_TYPE_UNKNOWN;
-		ret = input_name ?
-			lsarpc_extract_account_name(input_name, &account_name) :
-			-EINVAL;
-		if (!ret) {
-			ni->user = usm_lookup_user_casefold(account_name);
-			if (ni->user) {
-				smb_init_domain_sid(&ni->sid);
-				smb_copy_sid(&ni->domain_sid, &ni->sid);
-				ni->sid.sub_auth[ni->sid.num_subauth++] =
-					ni->user->uid;
-				g_strlcpy(ni->domain_str, domain_name,
-					  sizeof(ni->domain_str));
-				ni->type = SID_TYPE_USER;
-				ni->resolved_name = g_strdup(ni->user->name);
-				ni->mapped = ni->resolved_name != NULL;
-			}
-		} else if (ret == -ENOMEM) {
+		ret = input_name ? lsarpc_resolve_name(ni, input_name) : -EINVAL;
+		if (ret == -ENOMEM)
 			goto names_fail;
-		}
 		g_ptr_array_add(pipe->entries, ni);
 		ni = NULL;
 		pipe->num_entries++;
