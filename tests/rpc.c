@@ -1010,6 +1010,169 @@ static void test_request_bounds(void)
 	fixture_destroy();
 }
 
+/* Independent readers for the response types exercised below. */
+struct wire_reader {
+	const guint8 *data;
+	size_t size;
+	size_t offset;
+};
+
+static void wire_skip(struct wire_reader *wire, size_t size)
+{
+	g_assert_cmpuint(wire->offset, <=, wire->size);
+	g_assert_cmpuint(size, <=, wire->size - wire->offset);
+	wire->offset += size;
+}
+
+static void wire_align(struct wire_reader *wire, unsigned int alignment)
+{
+	wire_skip(wire, (alignment - wire->offset % alignment) % alignment);
+}
+
+static unsigned int wire16(struct wire_reader *wire)
+{
+	__u16 value;
+
+	wire_align(wire, 2);
+	wire_skip(wire, 2);
+	memcpy(&value, wire->data + wire->offset - 2, 2);
+	return le16toh(value);
+}
+
+static unsigned int wire32(struct wire_reader *wire)
+{
+	wire_align(wire, 4);
+	wire_skip(wire, 4);
+	return get32(wire->data + wire->offset - 4);
+}
+
+static char *wire_string(struct wire_reader *wire)
+{
+	unsigned int max = wire32(wire);
+	unsigned int offset = wire32(wire);
+	unsigned int actual = wire32(wire);
+	char *value;
+
+	g_assert_cmpuint(offset, ==, 0);
+	g_assert_cmpuint(actual, <=, max);
+	wire_skip(wire, (size_t)actual * 2);
+	value = g_convert((const char *)wire->data + wire->offset - actual * 2,
+			  actual * 2, "UTF-8", "UTF-16LE", NULL, NULL, NULL);
+	g_assert_nonnull(value);
+	wire_align(wire, 4);
+	return value;
+}
+
+static GByteArray *samr_connect_handle(void)
+{
+	GByteArray *stub = connect_stub();
+	GByteArray *result, *handle = g_byte_array_new();
+
+	result = exchange(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 64, stub, 128);
+	g_assert_cmpuint(get32(result->data + result->len - 4), ==, 0);
+	g_byte_array_append(handle, result->data + 16, 20);
+	g_byte_array_unref(result);
+	g_byte_array_unref(stub);
+	return handle;
+}
+
+static GByteArray *samr_open_domain(GByteArray *server, const guint8 *sid,
+				    unsigned int length)
+{
+	GByteArray *stub = g_byte_array_new();
+	GByteArray *result;
+
+	g_byte_array_append(stub, server->data, 20);
+	put32(stub, 0x02000000);
+	put32(stub, sid[1]);
+	g_byte_array_append(stub, sid, length);
+	result = exchange(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 7, stub, 128);
+	g_assert_cmpuint(get32(result->data + 20), ==, 0);
+	g_byte_array_unref(stub);
+	return result;
+}
+
+static GByteArray *samr_open_account(GByteArray *domain, unsigned int opnum,
+				     unsigned int rid)
+{
+	GByteArray *stub = g_byte_array_new();
+	GByteArray *result;
+
+	g_byte_array_append(stub, domain->data, 20);
+	put32(stub, 0x02000000);
+	put32(stub, rid);
+	result = exchange(1, KSMBD_RPC_SAMR_METHOD_INVOKE, opnum, stub, 128);
+	g_byte_array_unref(stub);
+	return result;
+}
+
+static const guint8 local_domain_sid[] = {
+	1, 4, 0, 0, 0, 0, 0, 5, 21, 0, 0, 0,
+	1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0
+};
+static void test_user_all_information(void)
+{
+	GByteArray *server, *domain, *user, *result, *stub = g_byte_array_new();
+	struct wire_reader wire;
+	unsigned int refs[13], lengths[13], sizes[13], i;
+
+	fixture_init();
+	receive_limit = 257;
+	open_pipe(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 0xac, 1);
+	server = samr_connect_handle();
+	domain = samr_open_domain(server, local_domain_sid, sizeof(local_domain_sid));
+	user = samr_open_account(domain, 34, 1000);
+	g_assert_cmpuint(get32(user->data + 20), ==, 0);
+	g_byte_array_append(stub, user->data, 20);
+	put16(stub, 21);
+	result = exchange(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 36, stub, 128);
+	wire = (struct wire_reader){ .data = result->data, .size = result->len };
+	g_assert_cmpuint(wire32(&wire), !=, 0);
+	g_assert_cmpuint(wire16(&wire), ==, 21);
+	wire_align(&wire, 8);
+	wire_skip(&wire, 6 * 8);
+	for (i = 0; i < 13; i++) {
+		lengths[i] = wire16(&wire);
+		sizes[i] = wire16(&wire);
+		refs[i] = wire32(&wire);
+	}
+	wire_skip(&wire, 8); /* SecurityDescriptor */
+	g_assert_cmpuint(wire32(&wire), ==, 1000);
+	wire_skip(&wire, 3 * 4); /* PrimaryGroupId, UserAccountControl, WhichFields */
+	g_assert_cmpuint(wire16(&wire), ==, 168);
+	g_assert_cmpuint(wire32(&wire), !=, 0); /* LogonHours pointer */
+	wire_skip(&wire, 4 * 2 + 4);
+	for (i = 0; i < 13; i++) {
+		g_autofree char *value = NULL;
+
+		if (!refs[i]) {
+			g_assert_cmpuint(lengths[i], ==, 0);
+			continue;
+		}
+		g_assert_cmpuint(get32(wire.data + wire.offset), ==, sizes[i] / 2);
+		g_assert_cmpuint(get32(wire.data + wire.offset + 8), ==, lengths[i] / 2);
+		value = wire_string(&wire);
+		if (i < 2)
+			g_assert_cmpstr(value, ==, ((struct ksmbd_user *)users->pdata[0])->name);
+	}
+	/* The maximum count is fixed by the IDL, independently of actual_count. */
+	g_assert_cmpuint(wire32(&wire), ==, 1260);
+	g_assert_cmpuint(wire32(&wire), ==, 0);
+	g_assert_cmpuint(wire32(&wire), ==, 21);
+	for (i = 0; i < 21; i++) {
+		wire_skip(&wire, 1);
+		g_assert_cmpuint(wire.data[wire.offset - 1], ==, 0xff);
+	}
+	g_assert_cmpuint(wire32(&wire), ==, 0);
+	g_assert_cmpuint(wire.offset, ==, wire.size);
+	g_byte_array_unref(stub);
+	g_byte_array_unref(result);
+	g_byte_array_unref(user);
+	g_byte_array_unref(domain);
+	g_byte_array_unref(server);
+	fixture_destroy();
+}
+
 int main(int argc, char **argv)
 {
 	g_test_init(&argc, &argv, NULL);
@@ -1027,5 +1190,6 @@ int main(int argc, char **argv)
 	g_test_add_func("/rpc/input/size-limit", test_request_size_limit);
 	g_test_add_func("/rpc/input/bounds", test_request_bounds);
 	g_test_add_func("/rpc/lsarpc/full-sid-range", test_full_sid_range);
+	g_test_add_func("/rpc/samr/user-all-information", test_user_all_information);
 	return g_test_run();
 }

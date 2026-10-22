@@ -2379,7 +2379,8 @@ static int samr_query_user_info_return(struct ksmbd_rpc_pipe *pipe)
 		goto out;
 
 	/* Logon Hours */
-	ret = ndr_write_int32(dce, 21);
+	/* size_is(1260), length_is((UnitsPerWeek + 7) / 8) */
+	ret = ndr_write_int32(dce, 1260);
 	if (ret)
 		goto out;
 
