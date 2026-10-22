@@ -218,6 +218,13 @@ static void open_pipe(unsigned int id, unsigned int flags, unsigned int last,
 		};
 
 		memcpy(syntax, srvsvc, sizeof(syntax));
+	} else if (flags & KSMBD_RPC_WKSSVC_METHOD_INVOKE) {
+		const guint8 wkssvc[] = {
+			0x98, 0xd0, 0xff, 0x6b, 0x12, 0xa1, 0x10, 0x36,
+			0x98, 0x33, 0x46, 0xc3, 0xf8, 0x7e, 0x34, 0x5a, 1, 0, 0, 0
+		};
+
+		memcpy(syntax, wkssvc, sizeof(syntax));
 	}
 	g_byte_array_append(stub, syntax, sizeof(syntax));
 	g_byte_array_append(stub, ndr_syntax, sizeof(ndr_syntax));
@@ -1258,6 +1265,59 @@ static void test_share_security_descriptor(void)
 	fixture_destroy();
 }
 
+static void test_info_fragmentation(void)
+{
+	const unsigned int capacities[] = { 80, 301, 4096, 16360 };
+	const unsigned int levels[] = { 2, 502 };
+	GByteArray *stub, *result, *expected;
+	g_autofree char *path = g_strnfill(3000, 'a');
+	struct ksmbd_share *share;
+	unsigned int i, j, flags;
+
+	/* A valid long path, with individual components below NAME_MAX. */
+	for (i = 0; i < 3000; i += 2)
+		path[i] = '/';
+	fixture_init();
+	receive_limit = 257;
+	open_pipe(1, KSMBD_RPC_SRVSVC_METHOD_INVOKE, 0, 3);
+	share = shares->pdata[0];
+	g_free(share->path);
+	share->path = g_strdup(path);
+	for (i = 0; i < G_N_ELEMENTS(levels); i++) {
+		expected = share_get_info(levels[i], 4096);
+		g_assert_cmpuint(expected->len, >, 4096);
+		g_assert_cmpuint(get32(expected->data + expected->len - 4), ==, 0);
+		for (j = 0; j < G_N_ELEMENTS(capacities); j++) {
+			result = share_get_info(levels[i], capacities[j]);
+			g_assert_cmpmem(result->data, result->len, expected->data, expected->len);
+			g_byte_array_unref(result);
+		}
+		g_byte_array_unref(expected);
+	}
+	fixture_destroy();
+	for (i = 0; i < 2; i++) {
+		flags = i ? KSMBD_RPC_WKSSVC_METHOD_INVOKE : KSMBD_RPC_SRVSVC_METHOD_INVOKE;
+		fixture_init();
+		receive_limit = 257;
+		global_conf.root_dir = path;
+		open_pipe(1, flags, 0, 0);
+		stub = g_byte_array_new();
+		put32(stub, 0);
+		put32(stub, 102);
+		expected = exchange(1, flags, i ? 0 : 21, stub, 4096);
+		g_assert_cmpuint(expected->len, >, 4096);
+		g_assert_cmpuint(get32(expected->data + expected->len - 4), ==, 0);
+		for (j = 0; j < G_N_ELEMENTS(capacities); j++) {
+			result = exchange(1, flags, i ? 0 : 21, stub, capacities[j]);
+			g_assert_cmpmem(result->data, result->len, expected->data, expected->len);
+			g_byte_array_unref(result);
+		}
+		g_byte_array_unref(expected);
+		g_byte_array_unref(stub);
+		fixture_destroy();
+	}
+}
+
 int main(int argc, char **argv)
 {
 	g_test_init(&argc, &argv, NULL);
@@ -1277,5 +1337,6 @@ int main(int argc, char **argv)
 	g_test_add_func("/rpc/lsarpc/full-sid-range", test_full_sid_range);
 	g_test_add_func("/rpc/samr/user-all-information", test_user_all_information);
 	g_test_add_func("/rpc/srvsvc/security-descriptor", test_share_security_descriptor);
+	g_test_add_func("/rpc/info-fragmentation", test_info_fragmentation);
 	return g_test_run();
 }

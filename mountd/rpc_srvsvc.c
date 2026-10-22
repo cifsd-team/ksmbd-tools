@@ -800,10 +800,26 @@ static void srvsvc_request_cleanup(struct ksmbd_rpc_pipe *pipe)
 	ndr_free_vstring_ptr(&pipe->dce->si_req.share_name);
 }
 
-static int srvsvc_share_info_return(struct ksmbd_rpc_pipe *pipe)
+static int srvsvc_share_get_info_build_response(struct ksmbd_rpc_pipe *pipe)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
 	int status;
+
+	if (rpc_restricted_context(dce->rpc_req)) {
+		if (pipe->num_entries)
+			rpc_pipe_reset(pipe);
+		dce->si_req.operation_status = KSMBD_RPC_EACCESS_DENIED;
+	}
+	status = srvsvc_share_get_info_return(pipe);
+	if (status == KSMBD_RPC_EBAD_DATA || ndr_write_int32(dce, status))
+		return KSMBD_RPC_EBAD_DATA;
+	return KSMBD_RPC_OK;
+}
+
+static int srvsvc_share_info_return(struct ksmbd_rpc_pipe *pipe)
+{
+	struct ksmbd_dcerpc *dce = pipe->dce;
+	int ret;
 
 	switch (dce->si_req.level) {
 	case 0:
@@ -847,29 +863,10 @@ static int srvsvc_share_info_return(struct ksmbd_rpc_pipe *pipe)
 		return rpc_write_response_fragment(pipe);
 	}
 
-	dce->offset = sizeof(struct dcerpc_header) +
-		sizeof(struct dcerpc_response_header);
-	pipe->num_processed = 0;
-	if (rpc_restricted_context(dce->rpc_req)) {
-		if (pipe->num_entries)
-			rpc_pipe_reset(pipe);
-		dce->si_req.operation_status = KSMBD_RPC_EACCESS_DENIED;
-	}
-
-	status = srvsvc_share_get_info_return(pipe);
-
-	if (status == KSMBD_RPC_EBAD_DATA)
-		return status;
-
-	if (ndr_write_int32(dce, status))
-		return KSMBD_RPC_EBAD_DATA;
-
-	srvsvc_clear_headers(pipe, status);
-	if (dcerpc_write_headers(dce, status))
-		return KSMBD_RPC_EBAD_DATA;
-
-	dce->rpc_resp->payload_sz = dce->offset;
-	return KSMBD_RPC_OK;
+	ret = rpc_build_response(pipe, srvsvc_share_get_info_build_response);
+	if (ret)
+		return ret;
+	return rpc_write_response_fragment(pipe);
 }
 
 static int srvsvc_parse_server_info_req(struct ksmbd_dcerpc *dce,
@@ -898,7 +895,7 @@ static int srvsvc_server_get_info_invoke(struct ksmbd_rpc_pipe *pipe)
 	return KSMBD_RPC_OK;
 }
 
-static int srvsvc_server_get_info_return(struct ksmbd_rpc_pipe *pipe)
+static int srvsvc_server_get_info_build_response(struct ksmbd_rpc_pipe *pipe)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
 	__u32 output_level = __server_output_level(dce->si_req.level);
@@ -929,11 +926,6 @@ static int srvsvc_server_get_info_return(struct ksmbd_rpc_pipe *pipe)
 	if (ndr_write_int32(dce, status))
 		return KSMBD_RPC_EBAD_DATA;
 
-	srvsvc_clear_headers(pipe, status);
-	if (dcerpc_write_headers(dce, status))
-		return KSMBD_RPC_EBAD_DATA;
-
-	dce->rpc_resp->payload_sz = dce->offset;
 	return KSMBD_RPC_OK;
 }
 
@@ -958,6 +950,7 @@ static int srvsvc_return(struct ksmbd_rpc_pipe *pipe,
 			 int max_resp_sz)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
+	int ret;
 
 	switch (dce->req_hdr.opnum) {
 	case SRVSVC_OPNUM_SHARE_ENUM_ALL:
@@ -969,7 +962,10 @@ static int srvsvc_return(struct ksmbd_rpc_pipe *pipe,
 		return srvsvc_share_info_return(pipe);
 	case SRVSVC_OPNUM_SERVER_GET_INFO:
 		dcerpc_set_ext_payload(dce, resp->payload, max_resp_sz);
-		return srvsvc_server_get_info_return(pipe);
+		ret = rpc_build_response(pipe, srvsvc_server_get_info_build_response);
+		if (ret)
+			return ret;
+		return rpc_write_response_fragment(pipe);
 	default:
 		dcerpc_set_ext_payload(dce, resp->payload, max_resp_sz);
 		if (dcerpc_write_fault(dce, DCERPC_NCA_S_OP_RNG_ERROR))

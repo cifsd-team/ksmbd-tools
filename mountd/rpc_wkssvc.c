@@ -162,11 +162,6 @@ static int wkssvc_netwksta_info_return(struct ksmbd_rpc_pipe *pipe)
 	if (ndr_write_int32(dce, status))
 		return KSMBD_RPC_EBAD_DATA;
 
-	wkssvc_clear_headers(pipe, status);
-	if (dcerpc_write_headers(dce, status))
-		return KSMBD_RPC_EBAD_DATA;
-
-	dce->rpc_resp->payload_sz = dce->offset;
 	return KSMBD_RPC_OK;
 }
 
@@ -227,11 +222,15 @@ static int wkssvc_return(struct ksmbd_rpc_pipe *pipe,
 			 int max_resp_sz)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
+	int ret;
 
 	switch (dce->req_hdr.opnum) {
 	case WKSSVC_NETWKSTA_GET_INFO:
 		dcerpc_set_ext_payload(dce, resp->payload, max_resp_sz);
-		return wkssvc_netwksta_info_return(pipe);
+		ret = rpc_build_response(pipe, wkssvc_netwksta_info_return);
+		if (ret)
+			return ret;
+		return rpc_write_response_fragment(pipe);
 	default:
 		dcerpc_set_ext_payload(dce, resp->payload, max_resp_sz);
 		if (dcerpc_write_fault(dce, DCERPC_NCA_S_OP_RNG_ERROR))
