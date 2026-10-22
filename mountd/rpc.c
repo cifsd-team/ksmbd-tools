@@ -1674,12 +1674,18 @@ static int dcerpc_bind_context_result(struct ksmbd_rpc_pipe *pipe,
 				      int *reason,
 				      int *selected)
 {
+	const struct dcerpc_syntax *existing;
 	int i;
 
 	if (reason)
 		*reason = DCERPC_BIND_ACK_RSN_NOT_SPECIFIED;
 	if (selected)
 		*selected = -1;
+
+	/* An existing context ID must keep its negotiated abstract syntax. */
+	existing = rpc_pipe_context_syntax(pipe, ctx->id);
+	if (existing && dcerpc_syntax_cmp(existing, &ctx->abstract_syntax))
+		return DCERPC_BIND_ACK_RES_PROVIDER_REJECT;
 
 	if (!dcerpc_abstract_syntax_supported(pipe, &ctx->abstract_syntax)) {
 		if (reason)
@@ -1709,9 +1715,9 @@ static int dcerpc_bind_context_result(struct ksmbd_rpc_pipe *pipe,
 static int dcerpc_install_bind_contexts(struct ksmbd_rpc_pipe *pipe)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
+	guint previous_count = pipe->contexts->len;
 	int i;
 
-	g_ptr_array_set_size(pipe->contexts, 0);
 	for (i = 0; i < dce->bi_req.num_contexts; i++) {
 		struct dcerpc_context_binding *binding;
 		int reason, selected, result;
@@ -1721,10 +1727,12 @@ static int dcerpc_install_bind_contexts(struct ksmbd_rpc_pipe *pipe)
 		if (result != DCERPC_BIND_ACK_RES_ACCEPT &&
 		    result != DCERPC_BIND_ACK_RES_NEGOTIATE_ACK)
 			continue;
+		if (rpc_pipe_context_syntax(pipe, dce->bi_req.list[i].id))
+			continue;
 
 		binding = g_try_malloc(sizeof(*binding));
 		if (!binding) {
-			g_ptr_array_set_size(pipe->contexts, 0);
+			g_ptr_array_set_size(pipe->contexts, previous_count);
 			return KSMBD_RPC_ENOMEM;
 		}
 

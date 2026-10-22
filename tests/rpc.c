@@ -1318,6 +1318,99 @@ static void test_info_fragmentation(void)
 	}
 }
 
+static const guint8 lsad_syntax[] = {
+	0x78, 0x57, 0x34, 0x12, 0x34, 0x12, 0xcd, 0xab,
+	0xef, 0, 1, 0x23, 0x45, 0x67, 0x89, 0xab, 0, 0, 0, 0
+};
+static const guint8 dssetup_syntax[] = {
+	0x6a, 0x28, 0x19, 0x39, 0x0c, 0xb1, 0xd0, 0x11,
+	0x9b, 0xa8, 0, 0xc0, 0x4f, 0xd9, 0x2e, 0xf5, 0, 0, 0, 0
+};
+
+static void alter_context(unsigned int context, const guint8 *syntax,
+			   unsigned int expected)
+{
+	const guint8 ndr_syntax[] = {
+		0x04, 0x5d, 0x88, 0x8a, 0xeb, 0x1c, 0xc9, 0x11,
+		0x9f, 0xe8, 0x08, 0, 0x2b, 0x10, 0x48, 0x60, 2, 0, 0, 0
+	};
+	unsigned int flags = KSMBD_RPC_LSARPC_METHOD_INVOKE;
+	struct ksmbd_rpc_command *req, *resp = command(1, flags, 1024);
+	GByteArray *stub = g_byte_array_new();
+
+	put32(stub, 1);
+	put16(stub, context);
+	put16(stub, 1);
+	g_byte_array_append(stub, syntax, 20);
+	g_byte_array_append(stub, ndr_syntax, sizeof(ndr_syntax));
+	req = request(1, flags, 0, stub);
+	req->payload[2] = DCERPC_PTYPE_RPC_ALTCONT;
+	req->payload[16] = req->payload[17] = 0xff;
+	req->payload[18] = receive_limit & 0xff;
+	req->payload[19] = receive_limit >> 8;
+	req->payload[20] = 0;
+	g_assert_cmpint(rpc_ioctl_request(req, resp, 1024), ==, 0);
+	g_assert_cmpint(resp->payload[2], ==, DCERPC_PTYPE_RPC_ALTCONTRESP);
+	g_assert_cmpuint(get32(resp->payload + 32) & 0xffff, ==, expected);
+	g_byte_array_unref(stub);
+	g_free(req);
+	g_free(resp);
+}
+
+static GByteArray *exchange_context(unsigned int context, unsigned int opnum,
+				    GByteArray *stub)
+{
+	unsigned int flags = KSMBD_RPC_LSARPC_METHOD_INVOKE;
+	struct ksmbd_rpc_command *req = request(1, flags, opnum, stub);
+	struct ksmbd_rpc_command *resp = command(1, flags, 1024);
+	GByteArray *result;
+	int ret;
+
+	req->payload[20] = context;
+	req->payload[21] = context >> 8;
+	ret = rpc_ioctl_request(req, resp, 1024);
+	result = read_response(req, resp, ret, 1024);
+	g_free(req);
+	g_free(resp);
+	return result;
+}
+
+static void test_alter_context(void)
+{
+	GByteArray *policy, *result, *stub = g_byte_array_new();
+	unsigned int i, context;
+
+	fixture_init();
+	open_pipe(1, KSMBD_RPC_LSARPC_METHOD_INVOKE, 0xab, 0);
+	policy = open_policy();
+	alter_context(1, dssetup_syntax, 0);
+	alter_context(2, lsad_syntax, 0);
+	/* Repeating a binding must not replace it or add a duplicate. */
+	alter_context(2, lsad_syntax, 0);
+	for (i = 0; i < 2; i++) {
+		context = i ? 2 : 0;
+		g_byte_array_set_size(stub, 0);
+		g_byte_array_append(stub, policy->data, 20);
+		put16(stub, 5);
+		result = exchange_context(context, 7, stub);
+		g_assert_cmpuint(get32(result->data + result->len - 4), ==, 0);
+		g_byte_array_unref(result);
+	}
+	/* A conflicting proposal must leave every existing binding intact. */
+	alter_context(0, dssetup_syntax, 2);
+	result = exchange_context(0, 7, stub);
+	g_assert_cmpuint(get32(result->data + result->len - 4), ==, 0);
+	g_byte_array_unref(result);
+	g_byte_array_set_size(stub, 0);
+	put16(stub, 1);
+	result = exchange_context(1, 0, stub);
+	g_assert_cmpuint(get32(result->data + result->len - 4), ==, 0);
+	g_byte_array_unref(result);
+	g_byte_array_unref(stub);
+	g_byte_array_unref(policy);
+	fixture_destroy();
+}
+
 int main(int argc, char **argv)
 {
 	g_test_init(&argc, &argv, NULL);
@@ -1338,5 +1431,6 @@ int main(int argc, char **argv)
 	g_test_add_func("/rpc/samr/user-all-information", test_user_all_information);
 	g_test_add_func("/rpc/srvsvc/security-descriptor", test_share_security_descriptor);
 	g_test_add_func("/rpc/info-fragmentation", test_info_fragmentation);
+	g_test_add_func("/rpc/alter-context", test_alter_context);
 	return g_test_run();
 }
