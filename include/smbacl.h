@@ -40,6 +40,9 @@
 #define SID_TYPE_USER		1
 #define SID_TYPE_GROUP		2
 #define SID_TYPE_DOMAIN		3
+#define SID_TYPE_ALIAS		4
+#define SID_TYPE_WELL_KNOWN_GROUP 5
+#define SID_TYPE_LABEL		10
 #define SID_TYPE_UNKNOWN	8
 
 #define SMB_UNIX_GROUP_DOMAIN	"Unix Group"

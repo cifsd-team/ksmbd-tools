@@ -2071,6 +2071,153 @@ static void test_lsa_unmapped_sids(void)
 	fixture_destroy();
 }
 
+static void test_lsa_predefined(void)
+{
+	static const struct {
+		const char *domain, *name;
+		unsigned int authority, prefix_count, prefix, rid, type;
+	} cases[] = {
+	{ "", "Null Sid", 0, 0, 0, 0, 5 },
+	{ "", "Everyone", 1, 0, 0, 0, 5 },
+	{ "", "Local", 2, 0, 0, 0, 5 },
+	{ "", "Creator Owner", 3, 0, 0, 0, 5 },
+	{ "", "Creator Group", 3, 0, 0, 1, 5 },
+	{ "", "Creator Owner Server", 3, 0, 0, 2, 5 },
+	{ "", "Creator Group Server", 3, 0, 0, 3, 5 },
+	{ "", "Owner Rights", 3, 0, 0, 4, 5 },
+	{ "NT Pseudo Domain", "NT Pseudo Domain", 5, 0, 0, 0, 3 },
+	{ "NT Authority", "Dialup", 5, 0, 0, 1, 5 },
+	{ "NT Authority", "Network", 5, 0, 0, 2, 5 },
+	{ "NT Authority", "Batch", 5, 0, 0, 3, 5 },
+	{ "NT Authority", "Interactive", 5, 0, 0, 4, 5 },
+	{ "NT Authority", "Service", 5, 0, 0, 6, 5 },
+	{ "NT Authority", "Anonymous Logon", 5, 0, 0, 7, 5 },
+	{ "NT Authority", "Proxy", 5, 0, 0, 8, 5 },
+	{ "NT Authority", "Enterprise Domain Controllers", 5, 0, 0, 9, 5 },
+	{ "NT Authority", "Self", 5, 0, 0, 10, 5 },
+	{ "NT Authority", "Authenticated Users", 5, 0, 0, 11, 5 },
+	{ "NT Authority", "Restricted", 5, 0, 0, 12, 5 },
+	{ "NT Authority", "Terminal Server User", 5, 0, 0, 13, 5 },
+	{ "NT Authority", "Remote Interactive Logon", 5, 0, 0, 14, 5 },
+	{ "NT Authority", "This Organization", 5, 0, 0, 15, 5 },
+	{ "NT Authority", "System", 5, 0, 0, 18, 5 },
+	{ "NT Authority", "Local Service", 5, 0, 0, 19, 5 },
+	{ "NT Authority", "Network Service", 5, 0, 0, 20, 5 },
+	{ "NT Authority", "Write Restricted", 5, 0, 0, 33, 5 },
+	{ "NT Authority", "Other Organization", 5, 0, 0, 1000, 5 },
+	{ "Builtin", "Builtin", 5, 1, 32, 0, 3 },
+	{ "Internet$", "Internet$", 7, 0, 0, 0, 3 },
+	{ "NT Authority", "NTLM Authentication", 5, 1, 64, 10, 5 },
+	{ "NT Authority", "Digest Authentication", 5, 1, 64, 21, 5 },
+	{ "NT Authority", "Channel Authentication", 5, 1, 64, 14, 5 },
+	{ "Mandatory Label", "Mandatory Label", 16, 0, 0, 0, 3 },
+	{ "Mandatory Label", "Untrusted Mandatory Level", 16, 0, 0, 0, 10 },
+	{ "Mandatory Label", "Low Mandatory Level", 16, 0, 0, 4096, 10 },
+	{ "Mandatory Label", "Medium Mandatory Level", 16, 0, 0, 8192, 10 },
+	{ "Mandatory Label", "High Mandatory Level", 16, 0, 0, 12288, 10 },
+	{ "Mandatory Label", "System Mandatory Level", 16, 0, 0, 16384, 10 },
+	{ "Mandatory Label", "Protected Process Mandatory Level", 16, 0, 0, 20480, 10 },
+	};
+	GByteArray *policy, *stub = g_byte_array_new(), *result;
+	unsigned int i, version, direction;
+
+	fixture_init();
+	/* Predefined translations take precedence over configured accounts. */
+	g_free(((struct ksmbd_user *)users->pdata[0])->name);
+	((struct ksmbd_user *)users->pdata[0])->name = g_strdup("Everyone");
+	open_pipe(1, KSMBD_RPC_LSARPC_METHOD_INVOKE, 0xab, 0);
+	policy = open_policy();
+	for (i = 0; i < G_N_ELEMENTS(cases); i++) {
+		GByteArray *sid = g_byte_array_new();
+		guint8 header[] = { 1, cases[i].prefix_count + (cases[i].type != 3),
+			0, 0, 0, 0, 0, cases[i].authority };
+		g_autofree char *input = cases[i].domain[0] ?
+			g_strdup_printf("%s\\%s", cases[i].domain, cases[i].name) :
+			g_strdup(cases[i].name);
+
+		g_byte_array_append(sid, header, 8);
+		if (cases[i].prefix_count)
+			put32(sid, cases[i].prefix);
+		if (cases[i].type != 3)
+			put32(sid, cases[i].rid);
+		for (version = 0; version < 2; version++) {
+			for (direction = 0; direction < 2; direction++) {
+				struct wire_reader wire;
+				GByteArray *decoded;
+				g_autofree char *domain_name = NULL, *name = NULL;
+
+				if (direction) {
+					g_byte_array_set_size(stub, 0);
+					g_byte_array_append(stub, policy->data, 20);
+					put32(stub, 1);
+					put32(stub, 1);
+					put32(stub, 1);
+					put32(stub, 1);
+					put32(stub, sid->data[1]);
+					g_byte_array_append(stub, sid->data, sid->len);
+					put32(stub, 0);
+					put32(stub, 0);
+					put16(stub, 1);
+					put32(stub, 0);
+					if (version) {
+						put32(stub, 0);
+						put32(stub, 1);
+					}
+					result = exchange(1, KSMBD_RPC_LSARPC_METHOD_INVOKE,
+							  version ? 57 : 15, stub, 4096);
+				} else {
+					result = lsa_lookup_name(policy, input, version);
+				}
+				wire = (struct wire_reader){ .data = result->data, .size = result->len };
+				g_assert_cmpuint(wire32(&wire), !=, 0);
+				g_assert_cmpuint(wire32(&wire), ==, 1);
+				wire_skip(&wire, 12 + 8 + 4);
+				domain_name = wire_string(&wire);
+				g_assert_cmpstr(domain_name, ==, cases[i].domain);
+				decoded = wire_sid(&wire);
+				g_assert_cmpuint(decoded->data[1], ==, cases[i].prefix_count);
+				g_assert_cmpuint(decoded->data[7], ==, cases[i].authority);
+				if (cases[i].prefix_count)
+					g_assert_cmpuint(get32(decoded->data + 8), ==, cases[i].prefix);
+				g_byte_array_unref(decoded);
+				g_assert_cmpuint(wire32(&wire), ==, 1);
+				g_assert_cmpuint(wire32(&wire), !=, 0);
+				g_assert_cmpuint(wire32(&wire), ==, 1);
+				g_assert_cmpuint(wire16(&wire), ==, cases[i].type);
+				wire_align(&wire, 4);
+				if (direction) {
+					wire_skip(&wire, 4);
+					g_assert_cmpuint(wire32(&wire), !=, 0);
+				} else if (version) {
+					g_assert_cmpuint(wire32(&wire), !=, 0);
+				} else {
+					g_assert_cmpuint(wire32(&wire), ==,
+							 cases[i].type == 3 ? 0 : cases[i].rid);
+				}
+				g_assert_cmpuint(wire32(&wire), ==, 0);
+				if (version)
+					g_assert_cmpuint(wire32(&wire), ==, 0);
+				if (direction) {
+					name = wire_string(&wire);
+					g_assert_cmpstr(name, ==, cases[i].name);
+				} else if (version) {
+					decoded = wire_sid(&wire);
+					g_assert_cmpmem(decoded->data, decoded->len, sid->data, sid->len);
+					g_byte_array_unref(decoded);
+				}
+				g_assert_cmpuint(wire32(&wire), ==, 1);
+				g_assert_cmpuint(wire32(&wire), ==, 0);
+				g_assert_cmpuint(wire.offset, ==, wire.size);
+				g_byte_array_unref(result);
+			}
+		}
+		g_byte_array_unref(sid);
+	}
+	g_byte_array_unref(stub);
+	g_byte_array_unref(policy);
+	fixture_destroy();
+}
+
 static void test_user_path_consistency(void)
 {
 	GByteArray *server, *domain, *user, *stub = g_byte_array_new(), *result;
@@ -2316,5 +2463,6 @@ int main(int argc, char **argv)
 	g_test_add_func("/rpc/lsarpc/ignored-translations", test_lsa_ignored_translations);
 	g_test_add_func("/rpc/lsarpc/lookup-scope", test_lsa_lookup_scope);
 	g_test_add_func("/rpc/lsarpc/unmapped-sids", test_lsa_unmapped_sids);
+	g_test_add_func("/rpc/lsarpc/predefined", test_lsa_predefined);
 	return g_test_run();
 }

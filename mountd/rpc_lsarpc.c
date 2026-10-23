@@ -775,6 +775,122 @@ static int lsarpc_lookup_group(const char *name, __u32 *gid, char **resolved)
 	}
 }
 
+/* MS-LSAT 3.1.1.1.1, in the daemon's C (English) system locale. */
+struct lsarpc_predefined {
+	const char *domain, *name;
+	unsigned int authority, prefix_count, prefix, rid, type;
+};
+
+static const struct lsarpc_predefined lsarpc_predefined[] = {
+	{ "", "Null Sid", 0, 0, 0, 0, 5 },
+	{ "", "Everyone", 1, 0, 0, 0, 5 },
+	{ "", "Local", 2, 0, 0, 0, 5 },
+	{ "", "Creator Owner", 3, 0, 0, 0, 5 },
+	{ "", "Creator Group", 3, 0, 0, 1, 5 },
+	{ "", "Creator Owner Server", 3, 0, 0, 2, 5 },
+	{ "", "Creator Group Server", 3, 0, 0, 3, 5 },
+	{ "", "Owner Rights", 3, 0, 0, 4, 5 },
+	{ "NT Pseudo Domain", "NT Pseudo Domain", 5, 0, 0, 0, 3 },
+	{ "NT Authority", "Dialup", 5, 0, 0, 1, 5 },
+	{ "NT Authority", "Network", 5, 0, 0, 2, 5 },
+	{ "NT Authority", "Batch", 5, 0, 0, 3, 5 },
+	{ "NT Authority", "Interactive", 5, 0, 0, 4, 5 },
+	{ "NT Authority", "Service", 5, 0, 0, 6, 5 },
+	{ "NT Authority", "Anonymous Logon", 5, 0, 0, 7, 5 },
+	{ "NT Authority", "Proxy", 5, 0, 0, 8, 5 },
+	{ "NT Authority", "Enterprise Domain Controllers", 5, 0, 0, 9, 5 },
+	{ "NT Authority", "Self", 5, 0, 0, 10, 5 },
+	{ "NT Authority", "Authenticated Users", 5, 0, 0, 11, 5 },
+	{ "NT Authority", "Restricted", 5, 0, 0, 12, 5 },
+	{ "NT Authority", "Terminal Server User", 5, 0, 0, 13, 5 },
+	{ "NT Authority", "Remote Interactive Logon", 5, 0, 0, 14, 5 },
+	{ "NT Authority", "This Organization", 5, 0, 0, 15, 5 },
+	{ "NT Authority", "System", 5, 0, 0, 18, 5 },
+	{ "NT Authority", "Local Service", 5, 0, 0, 19, 5 },
+	{ "NT Authority", "Network Service", 5, 0, 0, 20, 5 },
+	{ "NT Authority", "Write Restricted", 5, 0, 0, 33, 5 },
+	{ "NT Authority", "Other Organization", 5, 0, 0, 1000, 5 },
+	{ "Builtin", "Builtin", 5, 1, 32, 0, 3 },
+	{ "Internet$", "Internet$", 7, 0, 0, 0, 3 },
+	{ "NT Authority", "NTLM Authentication", 5, 1, 64, 10, 5 },
+	{ "NT Authority", "Digest Authentication", 5, 1, 64, 21, 5 },
+	{ "NT Authority", "Channel Authentication", 5, 1, 64, 14, 5 },
+	{ "Mandatory Label", "Mandatory Label", 16, 0, 0, 0, 3 },
+	{ "Mandatory Label", "Untrusted Mandatory Level", 16, 0, 0, 0, 10 },
+	{ "Mandatory Label", "Low Mandatory Level", 16, 0, 0, 4096, 10 },
+	{ "Mandatory Label", "Medium Mandatory Level", 16, 0, 0, 8192, 10 },
+	{ "Mandatory Label", "High Mandatory Level", 16, 0, 0, 12288, 10 },
+	{ "Mandatory Label", "System Mandatory Level", 16, 0, 0, 16384, 10 },
+	{ "Mandatory Label", "Protected Process Mandatory Level", 16, 0, 0, 20480, 10 },
+};
+
+static void lsarpc_predefined_sids(const struct lsarpc_predefined *entry,
+				    struct smb_sid *domain, struct smb_sid *sid)
+{
+	memset(domain, 0, sizeof(*domain));
+	domain->revision = 1;
+	domain->authority[5] = entry->authority;
+	domain->num_subauth = entry->prefix_count;
+	if (entry->prefix_count)
+		domain->sub_auth[0] = entry->prefix;
+	smb_copy_sid(sid, domain);
+	if (entry->type != SID_TYPE_DOMAIN)
+		sid->sub_auth[sid->num_subauth++] = entry->rid;
+}
+
+static int lsarpc_resolve_predefined(struct lsarpc_names_info *ni,
+				     const char *input)
+{
+	const char *name = input;
+	g_autofree char *qualifier = NULL;
+	unsigned int i;
+
+	if (input) {
+		const char *separator = strrchr(input, '\\');
+
+		if (separator) {
+			qualifier = g_strndup(input, separator - input);
+			name = separator + 1;
+		}
+	}
+	for (i = 0; i < G_N_ELEMENTS(lsarpc_predefined); i++) {
+		const struct lsarpc_predefined *entry = &lsarpc_predefined[i];
+		struct smb_sid domain, sid;
+
+		lsarpc_predefined_sids(entry, &domain, &sid);
+		if (input ? (ksmbd_name_compare(name, entry->name) ||
+			     (qualifier && ksmbd_name_compare(qualifier, entry->domain))) :
+			    smb_compare_sids(&ni->sid, &sid))
+			continue;
+		smb_copy_sid(&ni->sid, &sid);
+		smb_copy_sid(&ni->domain_sid, &domain);
+		g_strlcpy(ni->domain_str, entry->domain, sizeof(ni->domain_str));
+		ni->resolved_name = g_strdup(entry->name);
+		ni->type = entry->type;
+		ni->mapped = ni->domain_known = 1;
+		return ni->resolved_name ? 1 : -ENOMEM;
+	}
+	if (!input && ni->sid.num_subauth) {
+		struct smb_sid parent = ni->sid;
+		__u32 rid = parent.sub_auth[--parent.num_subauth];
+
+		for (i = 0; i < G_N_ELEMENTS(lsarpc_predefined); i++) {
+			struct smb_sid domain, sid;
+			const struct lsarpc_predefined *entry = &lsarpc_predefined[i];
+
+			lsarpc_predefined_sids(entry, &domain, &sid);
+			if (smb_compare_sids(&parent, &domain))
+				continue;
+			smb_copy_sid(&ni->domain_sid, &domain);
+			g_strlcpy(ni->domain_str, entry->domain, sizeof(ni->domain_str));
+			ni->resolved_name = g_strdup_printf("0x%X", rid);
+			ni->domain_known = 1;
+			return ni->resolved_name ? 1 : -ENOMEM;
+		}
+	}
+	return 0;
+}
+
 static int lsarpc_resolve_sid(struct lsarpc_names_info *ni)
 {
 	int ret;
@@ -783,6 +899,9 @@ static int lsarpc_resolve_sid(struct lsarpc_names_info *ni)
 	ni->index = -1;
 	ni->type = SID_TYPE_UNKNOWN;
 	ni->mapped = 0;
+	ret = lsarpc_resolve_predefined(ni, NULL);
+	if (ret)
+		return ret < 0 ? ret : 0;
 	ret = set_domain_name(&ni->sid, ni->domain_str,
 			      sizeof(ni->domain_str), &ni->type);
 	if (ret && ret != -ENOENT)
@@ -876,6 +995,9 @@ static int lsarpc_resolve_name(struct lsarpc_names_info *ni, const char *input)
 	__u32 rid = 0;
 	int type, ret;
 
+	ret = lsarpc_resolve_predefined(ni, input);
+	if (ret)
+		return ret < 0 ? ret : 0;
 	ret = lsarpc_extract_account_name(input, &name, &type);
 	if (ret)
 		return ret;
@@ -915,6 +1037,11 @@ static int lsarpc_sid_relative_id(const struct lsarpc_names_info *ni, __u32 *rid
 	if (memcmp(ni->sid.authority, ni->domain_sid.authority,
 		   sizeof(ni->sid.authority)))
 		return -EINVAL;
+	if (ni->type == SID_TYPE_DOMAIN &&
+	    !smb_compare_sids(&ni->sid, &ni->domain_sid)) {
+		*rid = 0; /* Undefined for SidTypeDomain in LSAPR_TRANSLATED_SID. */
+		return 0;
+	}
 	if (ni->sid.num_subauth != ni->domain_sid.num_subauth + 1)
 		return -EINVAL;
 	for (i = 0; i < ni->domain_sid.num_subauth; i++) {
