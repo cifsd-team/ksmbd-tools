@@ -437,9 +437,9 @@ static int samr_write_error_payload(struct ksmbd_dcerpc *dce,
 {
 	switch (opnum) {
 	case SAMR_OPNUM_CONNECT5:
-		if (ndr_write_int32(dce, 0) ||
-		    ndr_write_int32(dce, 0) ||
-		    ndr_write_int32(dce, 0) ||
+		if (ndr_write_int32(dce, 1) ||
+		    ndr_write_int32(dce, 1) ||
+		    ndr_write_int32(dce, 3) ||
 		    ndr_write_int32(dce, 0) ||
 		    samr_write_zero_handle(dce))
 			return KSMBD_RPC_EBAD_DATA;
@@ -866,15 +866,15 @@ static int samr_connect5_return(struct ksmbd_rpc_pipe *pipe)
 	struct ksmbd_dcerpc *dce = pipe->dce;
 	struct connect_handle *ch;
 
-	if (ndr_write_int32(dce, dce->sm_req.level)) // level out
+	if (ndr_write_int32(dce, 1)) // level out
 		return KSMBD_RPC_EBAD_DATA;
 
-	if (ndr_write_int32(dce, dce->sm_req.level)) // revision info tag
+	if (ndr_write_int32(dce, 1)) // revision info tag
 		return KSMBD_RPC_EBAD_DATA;
-	if (ndr_write_int32(dce, dce->sm_req.client_version)) // client version
+	if (ndr_write_int32(dce, 3)) // server revision
 		return KSMBD_RPC_EBAD_DATA;
 
-	if (ndr_write_int32(dce, dce->sm_req.supported_features))
+	if (ndr_write_int32(dce, 0)) // no optional server features
 		return KSMBD_RPC_EBAD_DATA;
 
 	ch = samr_ch_alloc(pipe, SAMR_HANDLE_SERVER,

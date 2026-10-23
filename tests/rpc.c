@@ -1749,6 +1749,41 @@ static void test_alter_context(void)
 	fixture_destroy();
 }
 
+static void test_connect_revision(void)
+{
+	GByteArray *stub, *result;
+	unsigned int revisions[] = { 0, 1, 3, 0xffffffff };
+	unsigned int i;
+
+	fixture_init();
+	open_pipe(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 0xac, 1);
+	for (i = 0; i < G_N_ELEMENTS(revisions); i++) {
+		__u32 revision = htole32(revisions[i]);
+		__u32 features = htole32(10);
+
+		stub = connect_stub();
+		memcpy(stub->data + 16, &revision, 4);
+		memcpy(stub->data + 20, &features, 4);
+		result = exchange(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 64, stub, 128);
+		g_assert_cmpuint(get32(result->data), ==, 1);
+		g_assert_cmpuint(get32(result->data + 4), ==, 1);
+		g_assert_cmpuint(get32(result->data + 8), ==, 3);
+		g_assert_cmpuint(get32(result->data + 12), ==, 0);
+		g_assert_cmpuint(get32(result->data + result->len - 4), ==, 0);
+		g_byte_array_unref(result);
+		/* Even an error must contain a valid revision union discriminator. */
+		g_byte_array_set_size(stub, 8);
+		result = exchange(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 64, stub, 128);
+		g_assert_cmpuint(get32(result->data), ==, 1);
+		g_assert_cmpuint(get32(result->data + 4), ==, 1);
+		g_assert_cmpuint(get32(result->data + result->len - 4), ==,
+				 KSMBD_NT_STATUS_INVALID_PARAMETER);
+		g_byte_array_unref(result);
+		g_byte_array_unref(stub);
+	}
+	fixture_destroy();
+}
+
 int main(int argc, char **argv)
 {
 	g_test_init(&argc, &argv, NULL);
@@ -1772,5 +1807,6 @@ int main(int argc, char **argv)
 	g_test_add_func("/rpc/samr/account-namespaces", test_account_namespaces);
 	g_test_add_func("/rpc/lsarpc/account-names", test_lsa_account_names);
 	g_test_add_func("/rpc/alter-context", test_alter_context);
+	g_test_add_func("/rpc/samr/connect-revision", test_connect_revision);
 	return g_test_run();
 }
