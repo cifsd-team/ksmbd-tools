@@ -7,6 +7,8 @@
  */
 
 #include <smbacl.h>
+#include <management/user.h>
+#include <management/share.h>
 #include <tools.h>
 #include <glib.h>
 #include <inttypes.h>
@@ -30,6 +32,30 @@ static const struct smb_sid sid_unix_groups = { 1, 1, {0, 0, 0, 0, 0, 22},
 /* security id for local group */
 static const struct smb_sid sid_local_group = {
 	1, 1, {0, 0, 0, 0, 0, 5}, {32} };
+
+int smb_valid_user_rid(__u32 rid)
+{
+	/* Neither an unmapped configured account nor Linux UID -1 is a user SID. */
+	return rid != KSMBD_SHARE_INVALID_UID && rid != SMB_LOCAL_USERS_RID;
+}
+
+/* Keep the synthetic primary group in the same, unique account namespace. */
+char *smb_local_users_name(void)
+{
+	unsigned int suffix = 0;
+
+	for (;;) {
+		char *name = suffix ? g_strdup_printf("Unix Users (%u)", suffix) :
+				      g_strdup("Unix Users");
+		struct ksmbd_user *user = usm_lookup_user_casefold(name);
+
+		if (!user)
+			return name;
+		put_ksmbd_user(user);
+		g_free(name);
+		suffix++;
+	}
+}
 
 int smb_read_sid(struct ksmbd_dcerpc *dce, struct smb_sid *sid)
 {
@@ -220,7 +246,9 @@ int set_domain_name(struct smb_sid *sid, char *domain, size_t domain_len,
 			return -ENOMEM;
 
 		*type = sid->num_subauth == domain_sid.num_subauth ?
-			SID_TYPE_DOMAIN : SID_TYPE_USER;
+			SID_TYPE_DOMAIN :
+			sid->sub_auth[domain_sid.num_subauth] == SMB_LOCAL_USERS_RID ?
+			SID_TYPE_GROUP : SID_TYPE_USER;
 		return 0;
 	}
 
@@ -248,7 +276,7 @@ int set_domain_name(struct smb_sid *sid, char *domain, size_t domain_len,
 			return -ENOMEM;
 
 		*type = sid->num_subauth == sid_unix_groups.num_subauth ?
-			SID_TYPE_DOMAIN : SID_TYPE_GROUP;
+			SID_TYPE_DOMAIN : SID_TYPE_ALIAS;
 		return 0;
 	}
 

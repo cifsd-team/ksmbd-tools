@@ -45,6 +45,9 @@
 #define SID_TYPE_LABEL		10
 #define SID_TYPE_UNKNOWN	8
 
+/* Linux reserves (uid_t)-1, so this domain RID cannot alias a user UID. */
+#define SMB_LOCAL_USERS_RID	0xffffffffU
+
 #define SMB_UNIX_GROUP_DOMAIN	"Unix Group"
 
 struct smb_ntsd {
@@ -77,6 +80,8 @@ struct smb_ace {
 	struct smb_sid sid; /* ie UUID of user or group who gets these perms */
 };
 
+int smb_valid_user_rid(__u32 rid);
+char *smb_local_users_name(void);
 void smb_init_domain_sid(struct smb_sid *sid);
 void smb_init_unix_group_sid(struct smb_sid *sid);
 int smb_read_sid(struct ksmbd_dcerpc *dce, struct smb_sid *sid);

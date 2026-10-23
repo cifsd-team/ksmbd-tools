@@ -927,11 +927,16 @@ static int lsarpc_resolve_sid(struct lsarpc_names_info *ni)
 			smb_copy_sid(&ni->domain_sid, &ni->sid);
 			ni->domain_sid.num_subauth--;
 		}
-		ni->user = usm_lookup_uid(rid);
+		ni->user = smb_valid_user_rid(rid) ? usm_lookup_uid(rid) : NULL;
 		if (ni->user)
 			ni->resolved_name = g_strdup(ni->user->name);
 		break;
 	case SID_TYPE_GROUP:
+		smb_copy_sid(&ni->domain_sid, &ni->sid);
+		ni->domain_sid.num_subauth--;
+		ni->resolved_name = smb_local_users_name();
+		break;
+	case SID_TYPE_ALIAS:
 		if (!ni->sid.num_subauth)
 			return 0;
 		rid = ni->sid.sub_auth[ni->sid.num_subauth - 1];
@@ -974,7 +979,7 @@ static int lsarpc_extract_account_name(const char *input, char **name,
 	prefix_len = separator - input;
 	if (prefix_len == strlen(SMB_UNIX_GROUP_DOMAIN) &&
 	    !g_ascii_strncasecmp(input, SMB_UNIX_GROUP_DOMAIN, prefix_len)) {
-		*type = SID_TYPE_GROUP;
+		*type = SID_TYPE_ALIAS;
 	} else if ((prefix_len != strlen(domain_name) ||
 		    g_ascii_strncasecmp(input, domain_name, prefix_len)) &&
 		   (!global_conf.netbios_name ||
@@ -994,6 +999,7 @@ static int lsarpc_resolve_name(struct lsarpc_names_info *ni, const char *input)
 	g_autofree char *name = NULL;
 	__u32 rid = 0;
 	int type, ret;
+	g_autofree char *local_group = NULL;
 
 	ret = lsarpc_resolve_predefined(ni, input);
 	if (ret)
@@ -1001,9 +1007,21 @@ static int lsarpc_resolve_name(struct lsarpc_names_info *ni, const char *input)
 	ret = lsarpc_extract_account_name(input, &name, &type);
 	if (ret)
 		return ret;
-	if (type != SID_TYPE_GROUP)
+	if (type != SID_TYPE_ALIAS) {
+		local_group = smb_local_users_name();
 		ni->user = usm_lookup_user_casefold(name);
-	if (ni->user) {
+		if (ni->user && !smb_valid_user_rid(ni->user->uid)) {
+			put_ksmbd_user(ni->user);
+			ni->user = NULL;
+		}
+	}
+	if (local_group && !ksmbd_name_compare(name, local_group)) {
+		smb_init_domain_sid(&ni->domain_sid);
+		rid = SMB_LOCAL_USERS_RID;
+		g_strlcpy(ni->domain_str, domain_name, sizeof(ni->domain_str));
+		ni->type = SID_TYPE_GROUP;
+		ni->resolved_name = g_strdup(local_group);
+	} else if (ni->user) {
 		smb_init_domain_sid(&ni->domain_sid);
 		rid = ni->user->uid;
 		g_strlcpy(ni->domain_str, domain_name, sizeof(ni->domain_str));
@@ -1016,7 +1034,7 @@ static int lsarpc_resolve_name(struct lsarpc_names_info *ni, const char *input)
 		smb_init_unix_group_sid(&ni->domain_sid);
 		g_strlcpy(ni->domain_str, SMB_UNIX_GROUP_DOMAIN,
 			  sizeof(ni->domain_str));
-		ni->type = SID_TYPE_GROUP;
+		ni->type = SID_TYPE_ALIAS;
 	}
 	if (!ni->resolved_name)
 		return ni->user ? -ENOMEM : 0;

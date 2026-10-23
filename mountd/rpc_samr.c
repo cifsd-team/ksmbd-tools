@@ -557,6 +557,7 @@ struct samr_collect_members_ctx {
 	GArray *members;
 	GHashTable *seen;
 	__u32 rid;
+	int all_users;
 };
 
 static int samr_add_account_entry(GPtrArray *entries, GHashTable *seen,
@@ -592,7 +593,7 @@ static void samr_collect_user_cb(struct ksmbd_user *user, void *data)
 
 	if (!ctx || !user || !user->name)
 		return;
-	if (user->uid == (uid_t)KSMBD_SHARE_INVALID_UID)
+	if (!smb_valid_user_rid(user->uid))
 		return;
 	if (ctx->status)
 		return;
@@ -709,6 +710,18 @@ static GPtrArray *samr_collect_group_entries(void)
 	return entries;
 }
 
+static GPtrArray *samr_collect_local_group_entries(void)
+{
+	GPtrArray *entries = g_ptr_array_new_with_free_func(samr_account_entry_free);
+	g_autofree char *name = smb_local_users_name();
+
+	if (samr_add_account_entry(entries, NULL, SMB_LOCAL_USERS_RID, name)) {
+		g_ptr_array_free(entries, 1);
+		return NULL;
+	}
+	return entries;
+}
+
 static int samr_user_in_group(const struct ksmbd_user *user, __u32 rid)
 {
 	int i;
@@ -729,8 +742,8 @@ static void samr_collect_group_member_cb(struct ksmbd_user *user, void *data)
 	__u32 member_rid;
 	gpointer key;
 
-	if (!ctx || !user || user->uid == (uid_t)KSMBD_SHARE_INVALID_UID ||
-	    !samr_user_in_group(user, ctx->rid))
+	if (!ctx || !user || !smb_valid_user_rid(user->uid) ||
+	    (!ctx->all_users && !samr_user_in_group(user, ctx->rid)))
 		return;
 	member_rid = user->uid;
 	key = GUINT_TO_POINTER(member_rid + 1);
@@ -752,7 +765,7 @@ static gint samr_u32_cmp(gconstpointer a, gconstpointer b)
 	return 0;
 }
 
-static GArray *samr_collect_group_members(__u32 rid)
+static GArray *samr_collect_group_members(__u32 rid, int all_users)
 {
 	struct samr_collect_members_ctx ctx;
 	GArray *members;
@@ -763,6 +776,7 @@ static GArray *samr_collect_group_members(__u32 rid)
 
 	ctx.members = members;
 	ctx.rid = rid;
+	ctx.all_users = all_users;
 	ctx.seen = g_hash_table_new(g_direct_hash, g_direct_equal);
 	if (!ctx.seen) {
 		g_array_free(members, 1);
@@ -1222,8 +1236,8 @@ static int samr_enum_groups_return(struct ksmbd_rpc_pipe *pipe)
 	if (ret)
 		goto out;
 
-	if (samr_get_domain_kind(&ch->domain_sid) == SAMR_DOMAIN_KIND_UNIX_GROUP) {
-		entries = samr_collect_group_entries();
+	if (samr_get_domain_kind(&ch->domain_sid) == SAMR_DOMAIN_KIND_LOCAL) {
+		entries = samr_collect_local_group_entries();
 		if (!entries) {
 			ret = KSMBD_RPC_ENOMEM;
 			goto out;
@@ -1257,11 +1271,10 @@ static int samr_enum_aliases_return(struct ksmbd_rpc_pipe *pipe)
 	if (ret)
 		goto out;
 
-	/*
-	 * The local configuration has no separate SAM alias database.
-	 * Do not expose POSIX groups again as aliases with identical RIDs.
-	 */
-	entries = g_ptr_array_new_with_free_func(samr_account_entry_free);
+	/* POSIX groups are aliases: their members have full, cross-domain SIDs. */
+	entries = samr_get_domain_kind(&ch->domain_sid) == SAMR_DOMAIN_KIND_UNIX_GROUP ?
+		samr_collect_group_entries() :
+		g_ptr_array_new_with_free_func(samr_account_entry_free);
 	if (!entries) {
 		ret = KSMBD_RPC_ENOMEM;
 		goto out;
@@ -1511,8 +1524,9 @@ static int samr_lookup_names_return(struct ksmbd_rpc_pipe *pipe)
 	}
 
 	kind = samr_get_domain_kind(&ch->domain_sid);
-	if (kind == SAMR_DOMAIN_KIND_UNIX_GROUP) {
-		groups = samr_collect_group_entries();
+	if (kind == SAMR_DOMAIN_KIND_LOCAL || kind == SAMR_DOMAIN_KIND_UNIX_GROUP) {
+		groups = kind == SAMR_DOMAIN_KIND_LOCAL ?
+			samr_collect_local_group_entries() : samr_collect_group_entries();
 		if (!groups) {
 			ret = KSMBD_RPC_ENOMEM;
 			goto out;
@@ -1528,6 +1542,10 @@ static int samr_lookup_names_return(struct ksmbd_rpc_pipe *pipe)
 
 		user = kind == SAMR_DOMAIN_KIND_LOCAL ?
 			usm_lookup_user_casefold(name) : NULL;
+		if (user && !smb_valid_user_rid(user->uid)) {
+			put_ksmbd_user(user);
+			user = NULL;
+		}
 		if (user) {
 			rids[i] = user->uid;
 			types[i] = SID_TYPE_USER;
@@ -1541,7 +1559,7 @@ static int samr_lookup_names_return(struct ksmbd_rpc_pipe *pipe)
 			group = samr_find_account_entry_by_name(groups, name);
 			if (group) {
 				rids[i] = group->rid;
-				types[i] = SID_TYPE_GROUP;
+				types[i] = kind == SAMR_DOMAIN_KIND_LOCAL ? SID_TYPE_GROUP : SID_TYPE_ALIAS;
 				mapped++;
 			}
 		}
@@ -1653,8 +1671,9 @@ static int samr_lookup_ids_return(struct ksmbd_rpc_pipe *pipe)
 		goto out;
 
 	kind = samr_get_domain_kind(&ch->domain_sid);
-	if (kind == SAMR_DOMAIN_KIND_UNIX_GROUP) {
-		groups = samr_collect_group_entries();
+	if (kind == SAMR_DOMAIN_KIND_LOCAL || kind == SAMR_DOMAIN_KIND_UNIX_GROUP) {
+		groups = kind == SAMR_DOMAIN_KIND_LOCAL ?
+			samr_collect_local_group_entries() : samr_collect_group_entries();
 		if (!groups) {
 			ret = KSMBD_RPC_ENOMEM;
 			goto out;
@@ -1679,7 +1698,8 @@ static int samr_lookup_ids_return(struct ksmbd_rpc_pipe *pipe)
 		if (!rid)
 			continue;
 
-		user = kind == SAMR_DOMAIN_KIND_LOCAL ? usm_lookup_uid(*rid) : NULL;
+		user = kind == SAMR_DOMAIN_KIND_LOCAL && smb_valid_user_rid(*rid) ?
+			usm_lookup_uid(*rid) : NULL;
 		if (user) {
 			names[i] = g_strdup(user->name);
 			put_ksmbd_user(user);
@@ -1703,7 +1723,7 @@ static int samr_lookup_ids_return(struct ksmbd_rpc_pipe *pipe)
 				ret = KSMBD_RPC_ENOMEM;
 				goto out;
 			}
-			types[i] = SID_TYPE_GROUP;
+			types[i] = kind == SAMR_DOMAIN_KIND_LOCAL ? SID_TYPE_GROUP : SID_TYPE_ALIAS;
 			mapped++;
 		}
 	}
@@ -1765,7 +1785,8 @@ static int samr_open_user_return(struct ksmbd_rpc_pipe *pipe)
 		goto fail;
 
 	smb_init_domain_sid(&local_sid);
-	if (smb_compare_sids(&ch->domain_sid, &local_sid)) {
+	if (!smb_valid_user_rid(dce->sm_req.rid) ||
+	    smb_compare_sids(&ch->domain_sid, &local_sid)) {
 		ret = SAMR_STATUS_NO_SUCH_USER;
 		goto fail;
 	}
@@ -1826,16 +1847,17 @@ static int samr_open_account_handle_return(struct ksmbd_rpc_pipe *pipe,
 	if (ret)
 		goto fail;
 
-	if (samr_get_domain_kind(&ch->domain_sid) != SAMR_DOMAIN_KIND_UNIX_GROUP) {
-		ret = KSMBD_RPC_EINVALID_PARAMETER;
-		goto fail;
-	}
-	if (type == SAMR_HANDLE_ALIAS) {
+	if (type == SAMR_HANDLE_GROUP &&
+	    samr_get_domain_kind(&ch->domain_sid) == SAMR_DOMAIN_KIND_LOCAL)
+		groups = samr_collect_local_group_entries();
+	else if (type == SAMR_HANDLE_ALIAS &&
+		 samr_get_domain_kind(&ch->domain_sid) == SAMR_DOMAIN_KIND_UNIX_GROUP)
+		groups = samr_collect_group_entries();
+	else {
 		ret = KSMBD_RPC_EINVALID_PARAMETER;
 		goto fail;
 	}
 
-	groups = samr_collect_group_entries();
 	if (!groups) {
 		ret = KSMBD_RPC_ENOMEM;
 		goto fail;
@@ -2006,7 +2028,7 @@ static int samr_get_members_in_group_return(struct ksmbd_rpc_pipe *pipe)
 	if (ret)
 		goto out;
 
-	members = samr_collect_group_members(ch->rid);
+	members = samr_collect_group_members(ch->rid, 1);
 	if (!members) {
 		ret = KSMBD_RPC_ENOMEM;
 		goto out;
@@ -2027,6 +2049,7 @@ static int samr_get_members_in_alias_return(struct ksmbd_rpc_pipe *pipe)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
 	struct connect_handle *ch;
+	struct smb_sid user_domain;
 	GArray *members = NULL;
 	int ret;
 
@@ -2035,13 +2058,14 @@ static int samr_get_members_in_alias_return(struct ksmbd_rpc_pipe *pipe)
 	if (ret)
 		goto out;
 
-	members = samr_collect_group_members(ch->rid);
+	members = samr_collect_group_members(ch->rid, 0);
 	if (!members) {
 		ret = KSMBD_RPC_ENOMEM;
 		goto out;
 	}
 
-	if (samr_write_alias_members(dce, &ch->domain_sid, members))
+	smb_init_domain_sid(&user_domain);
+	if (samr_write_alias_members(dce, &user_domain, members))
 		ret = KSMBD_RPC_EBAD_DATA;
 	else
 		ret = KSMBD_RPC_OK;
@@ -2169,7 +2193,7 @@ static int samr_query_user_info_simple(struct ksmbd_dcerpc *dce,
 		ret = samr_write_user_string_rep(dce, ch->user->name);
 		if (ret)
 			return KSMBD_RPC_EBAD_DATA;
-		if (ndr_write_int32(dce, ch->user->gid))
+		if (ndr_write_int32(dce, SMB_LOCAL_USERS_RID))
 			return KSMBD_RPC_EBAD_DATA;
 		ret = samr_write_user_string_rep(dce, "");
 		if (ret)
@@ -2197,7 +2221,7 @@ static int samr_query_user_info_simple(struct ksmbd_dcerpc *dce,
 			return KSMBD_RPC_EBAD_DATA;
 		break;
 	case 9: /* UserPrimaryGroupInformation */
-		if (ndr_write_int32(dce, ch->user->gid))
+		if (ndr_write_int32(dce, SMB_LOCAL_USERS_RID))
 			return KSMBD_RPC_EBAD_DATA;
 		break;
 	case 10: /* UserHomeInformation */
@@ -2342,7 +2366,7 @@ static int samr_query_user_info_return(struct ksmbd_rpc_pipe *pipe)
 	if (ret)
 		goto out;
 
-	ret = ndr_write_int32(dce, ch->user->gid); // primary gid
+	ret = ndr_write_int32(dce, SMB_LOCAL_USERS_RID); // primary gid
 	if (ret)
 		goto out;
 
@@ -2558,7 +2582,7 @@ static int samr_get_group_for_user_return(struct ksmbd_rpc_pipe *pipe)
 	if (ndr_write_int32(dce, 1)) // max count
 		goto bad_data;
 
-	if (ndr_write_int32(dce, ch->user->gid)) // group rid
+	if (ndr_write_int32(dce, SMB_LOCAL_USERS_RID)) // group rid
 		goto bad_data;
 
 	if (ndr_write_int32(dce, 0x00000007)) // attributes
@@ -2608,11 +2632,16 @@ static int samr_get_alias_membership_invoke(struct ksmbd_rpc_pipe *pipe)
 		if (ndr_read_int32(dce, &sid_ref) || !sid_ref)
 			return KSMBD_RPC_EINVALID_PARAMETER;
 	}
+	dce->sm_req.names = g_ptr_array_new_with_free_func(g_free);
 	for (i = 0; i < count; i++) {
-		struct smb_sid sid;
+		struct smb_sid *sid = g_try_new0(struct smb_sid, 1);
 
-		if (samr_read_sid_argument(dce, &sid))
+		if (!sid || samr_read_sid_argument(dce, sid)) {
+			g_free(sid);
+			samr_free_names(&dce->sm_req);
 			return KSMBD_RPC_EINVALID_PARAMETER;
+		}
+		g_ptr_array_add(dce->sm_req.names, sid);
 	}
 
 	dce->sm_req.lookup_count = count;
@@ -2620,10 +2649,24 @@ static int samr_get_alias_membership_invoke(struct ksmbd_rpc_pipe *pipe)
 				      KSMBD_RPC_OK;
 }
 
+static void samr_add_alias_rid(GArray *rids, GHashTable *seen, __u32 rid)
+{
+	gpointer key = GUINT_TO_POINTER(rid);
+
+	if (rid == KSMBD_SHARE_INVALID_GID || g_hash_table_contains(seen, key))
+		return;
+	g_hash_table_add(seen, key);
+	g_array_append_val(rids, rid);
+}
+
 static int samr_get_alias_membership_return(struct ksmbd_rpc_pipe *pipe)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
 	struct connect_handle *ch;
+	GArray *rids = g_array_new(0, 0, sizeof(__u32));
+	GHashTable *seen = g_hash_table_new(g_direct_hash, g_direct_equal);
+	struct smb_sid local_sid;
+	unsigned int i;
 	int ret;
 
 	ch = samr_ch_lookup(pipe, dce->sm_req.handle);
@@ -2632,16 +2675,40 @@ static int samr_get_alias_membership_return(struct ksmbd_rpc_pipe *pipe)
 	if (ret)
 		goto out;
 
-	if (samr_write_nonnull_empty_ulong_array(dce))
-		goto bad_data;
+	smb_init_domain_sid(&local_sid);
+	if (samr_get_domain_kind(&ch->domain_sid) == SAMR_DOMAIN_KIND_UNIX_GROUP) {
+		for (i = 0; i < dce->sm_req.lookup_count; i++) {
+			struct smb_sid parent = *(struct smb_sid *)dce->sm_req.names->pdata[i];
+			struct ksmbd_user *user;
+			__u32 uid;
+			int j;
 
-	ret = KSMBD_RPC_OK;
+			if (parent.num_subauth != local_sid.num_subauth + 1)
+				continue;
+			uid = parent.sub_auth[--parent.num_subauth];
+			if (!smb_valid_user_rid(uid) || smb_compare_sids(&parent, &local_sid))
+				continue;
+			user = usm_lookup_uid(uid);
+			if (!user)
+				continue;
+			samr_add_alias_rid(rids, seen, user->gid);
+			for (j = 0; j < user->ngroups; j++)
+				samr_add_alias_rid(rids, seen, user->sgid[j]);
+			put_ksmbd_user(user);
+		}
+	}
+	g_array_sort(rids, samr_u32_cmp);
+	if (rids->len ? samr_write_ulong_array(dce, rids->len, (const __u32 *)rids->data) :
+			 samr_write_nonnull_empty_ulong_array(dce))
+		ret = KSMBD_RPC_EBAD_DATA;
+	else
+		ret = KSMBD_RPC_OK;
 out:
+	g_array_free(rids, 1);
+	g_hash_table_destroy(seen);
+	samr_free_names(&dce->sm_req);
 	samr_ch_put(ch);
 	return ret;
-bad_data:
-	ret = KSMBD_RPC_EBAD_DATA;
-	goto out;
 }
 
 static int samr_close_invoke(struct ksmbd_rpc_pipe *pipe)

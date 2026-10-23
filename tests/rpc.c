@@ -1414,6 +1414,14 @@ static void test_account_namespaces(void)
 	user->name = g_strdup("test-group");
 	for (i = 0; i < users->len; i++)
 		((struct ksmbd_user *)users->pdata[i])->gid = 1000;
+	user = users->pdata[users->len - 1];
+	user->uid = UINT32_MAX;
+	g_free(user->name);
+	user->name = g_strdup("invalid-uid-account");
+	user = users->pdata[users->len - 2];
+	user->uid = 65535; /* The configured-user manager's unmapped UID marker. */
+	g_free(user->name);
+	user->name = g_strdup("unmapped-uid-account");
 	open_pipe(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 0xac, 1);
 	server = samr_connect_handle();
 	g_byte_array_append(stub, server->data, 20);
@@ -1457,33 +1465,46 @@ static void test_account_namespaces(void)
 		g_byte_array_append(stub, i ? groups->data : local->data, 20);
 		put32(stub, 0);
 		put32(stub, UINT32_MAX);
-		result = exchange(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 11, stub, 128);
+		result = exchange(1, KSMBD_RPC_SAMR_METHOD_INVOKE, i ? 15 : 11, stub, 128);
 		wire = (struct wire_reader){ .data = result->data, .size = result->len };
 		g_assert_cmpuint(wire32(&wire), ==, i ? 1001 : 0);
 		g_assert_cmpuint(wire32(&wire), !=, 0);
-		g_assert_cmpuint(wire32(&wire), ==, i);
-		if (i) {
+		g_assert_cmpuint(wire32(&wire), ==, 1);
+		{
 			g_assert_cmpuint(wire32(&wire), !=, 0);
 			g_assert_cmpuint(wire32(&wire), ==, 1);
-			g_assert_cmpuint(wire32(&wire), ==, 1000);
+			g_assert_cmpuint(wire32(&wire), ==, i ? 1000 : UINT32_MAX);
 			wire_skip(&wire, 8);
 			name = wire_string(&wire);
-			g_assert_cmpstr(name, ==, "test-group");
-		} else {
-			g_assert_cmpuint(wire32(&wire), ==, 0);
+			g_assert_cmpstr(name, ==, i ? "test-group" : "Unix Users");
 		}
-		g_assert_cmpuint(wire32(&wire), ==, i);
+		g_assert_cmpuint(wire32(&wire), ==, 1);
 		g_assert_cmpuint(wire32(&wire), ==, 0);
 		g_assert_cmpuint(wire.offset, ==, wire.size);
 		g_byte_array_unref(result);
 	}
+	samr_check_name(local, "invalid-uid-account", UINT32_MAX, 8);
+	samr_check_name(local, "unmapped-uid-account", UINT32_MAX, 8);
+	result = samr_open_account(local, 34, 65535);
+	g_assert_cmpuint(get32(result->data + 20), ==, KSMBD_NT_STATUS_NO_SUCH_USER);
+	g_byte_array_unref(result);
+	samr_check_rid(local, UINT32_MAX, "Unix Users", 2);
+	result = samr_open_account(local, 34, UINT32_MAX);
+	g_assert_cmpuint(get32(result->data + 20), ==, KSMBD_NT_STATUS_NO_SUCH_USER);
+	g_byte_array_unref(result);
 	samr_check_name(local, "test-group", 1000, 1);
-	samr_check_name(groups, "test-group", 1000, 2);
+	samr_check_name(groups, "test-group", 1000, 4);
 	samr_check_name(groups, "user-0001-abcdefghijklmnopqrstuvwxyz", UINT32_MAX, 8);
 	samr_check_rid(local, 1000, "test-group", 1);
-	samr_check_rid(groups, 1000, "test-group", 2);
-	result = samr_open_account(groups, 19, 1000);
+	samr_check_rid(groups, 1000, "test-group", 4);
+	result = samr_open_account(groups, 27, 1000);
 	g_assert_cmpuint(get32(result->data + 20), ==, 0);
+	g_byte_array_unref(result);
+	result = samr_open_account(local, 19, UINT32_MAX);
+	g_assert_cmpuint(get32(result->data + 20), ==, 0);
+	g_byte_array_unref(result);
+	result = samr_open_account(groups, 19, 1000);
+	g_assert_cmpuint(get32(result->data + 20), !=, 0);
 	g_byte_array_unref(result);
 	result = samr_open_account(local, 19, 1000);
 	g_assert_cmpuint(get32(result->data + 20), !=, 0);
@@ -1520,8 +1541,9 @@ static GByteArray *lsa_lookup_name(GByteArray *policy, const char *name,
 	return result;
 }
 
-static void check_lsa_name(GByteArray *result, unsigned int version,
-			   unsigned int type, const guint8 *domain, size_t domain_size)
+static void check_lsa_name_rid(GByteArray *result, unsigned int version,
+			       unsigned int type, const guint8 *domain, size_t domain_size,
+			       unsigned int rid)
 {
 	struct wire_reader wire = { .data = result->data, .size = result->len };
 	GByteArray *sid;
@@ -1551,7 +1573,7 @@ static void check_lsa_name(GByteArray *result, unsigned int version,
 	if (version)
 		g_assert_cmpuint(!!ref, ==, mapped);
 	else
-		g_assert_cmpuint(ref, ==, mapped ? 1000 : 0);
+		g_assert_cmpuint(ref, ==, mapped ? rid : 0);
 	g_assert_cmpuint(wire32(&wire), ==, mapped ? 0 : UINT32_MAX);
 	if (version) {
 		g_assert_cmpuint(wire32(&wire), ==, 0);
@@ -1559,13 +1581,19 @@ static void check_lsa_name(GByteArray *result, unsigned int version,
 			sid = wire_sid(&wire);
 			g_assert_cmpuint(sid->len, ==, domain_size + 4);
 			g_assert_cmpmem(sid->data + 2, domain_size - 2, domain + 2, domain_size - 2);
-			g_assert_cmpuint(get32(sid->data + sid->len - 4), ==, 1000);
+			g_assert_cmpuint(get32(sid->data + sid->len - 4), ==, rid);
 			g_byte_array_unref(sid);
 		}
 	}
 	g_assert_cmpuint(wire32(&wire), ==, mapped);
 	g_assert_cmpuint(wire32(&wire), ==, mapped ? 0 : KSMBD_NT_STATUS_NONE_MAPPED);
 	g_assert_cmpuint(wire.offset, ==, wire.size);
+}
+
+static void check_lsa_name(GByteArray *result, unsigned int version,
+			   unsigned int type, const guint8 *domain, size_t domain_size)
+{
+	check_lsa_name_rid(result, version, type, domain, domain_size, 1000);
 }
 
 static void test_lsa_account_names(void)
@@ -1584,6 +1612,14 @@ static void test_lsa_account_names(void)
 	user = users->pdata[0];
 	g_free(user->name);
 	user->name = g_strdup("test-group");
+	user = users->pdata[users->len - 1];
+	user->uid = UINT32_MAX;
+	g_free(user->name);
+	user->name = g_strdup("invalid-uid-account");
+	user = users->pdata[users->len - 2];
+	user->uid = 65535; /* The configured-user manager's unmapped UID marker. */
+	g_free(user->name);
+	user->name = g_strdup("unmapped-uid-account");
 	open_pipe(1, KSMBD_RPC_LSARPC_METHOD_INVOKE, 0xab, 0);
 	policy = open_policy();
 	for (version = 0; version < 2; version++) {
@@ -1595,8 +1631,14 @@ static void test_lsa_account_names(void)
 					local_domain_sid, sizeof(local_domain_sid));
 			g_byte_array_unref(result);
 		}
+		result = lsa_lookup_name(policy, "SERVER\\unmapped-uid-account", version);
+		check_lsa_name(result, version, 8, local_domain_sid, sizeof(local_domain_sid));
+		g_byte_array_unref(result);
+		result = lsa_lookup_name(policy, "SERVER\\invalid-uid-account", version);
+		check_lsa_name(result, version, 8, local_domain_sid, sizeof(local_domain_sid));
+		g_byte_array_unref(result);
 		result = lsa_lookup_name(policy, "uNiX gRoUp\\test-group", version);
-		check_lsa_name(result, version, 2, unix_group_sid, sizeof(unix_group_sid));
+		check_lsa_name(result, version, 4, unix_group_sid, sizeof(unix_group_sid));
 		g_byte_array_unref(result);
 	}
 	g_byte_array_unref(policy);
@@ -2218,6 +2260,141 @@ static void test_lsa_predefined(void)
 	fixture_destroy();
 }
 
+static void test_group_alias_membership(void)
+{
+	GByteArray *server, *domain, *groups, *user, *group, *alias, *result;
+	GByteArray *stub = g_byte_array_new();
+	struct wire_reader wire;
+	static gid_t supplementary[] = { 1000, 1000 };
+	unsigned int i;
+
+	fixture_init();
+	while (users->len > 3)
+		fixture_remove_user(users->len - 1);
+	((struct ksmbd_user *)users->pdata[0])->gid = 1000;
+	((struct ksmbd_user *)users->pdata[1])->ngroups = 2;
+	((struct ksmbd_user *)users->pdata[1])->sgid = supplementary;
+	open_pipe(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 0xac, 1);
+	server = samr_connect_handle();
+	domain = samr_open_domain(server, local_domain_sid, sizeof(local_domain_sid));
+	groups = samr_open_domain(server, unix_group_sid, sizeof(unix_group_sid));
+	user = samr_open_account(domain, 34, 1000);
+	group = samr_open_account(domain, 19, UINT32_MAX);
+	alias = samr_open_account(groups, 27, 1000);
+	g_assert_cmpuint(get32(group->data + 20), ==, 0);
+	g_assert_cmpuint(get32(alias->data + 20), ==, 0);
+	samr_check_name(domain, "Unix Users", UINT32_MAX, 2);
+	samr_check_rid(domain, UINT32_MAX, "Unix Users", 2);
+	samr_check_rid(domain, 1000, ((struct ksmbd_user *)users->pdata[0])->name, 1);
+	g_byte_array_append(stub, user->data, 20);
+	result = exchange(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 39, stub, 4096);
+	g_assert_cmpuint(get32(result->data + 4), ==, 1);
+	g_assert_cmpuint(get32(result->data + 16), ==, UINT32_MAX);
+	g_assert_cmpuint(get32(result->data + 24), ==, 0);
+	g_byte_array_unref(result);
+	for (i = 0; i < 3; i++) {
+		unsigned int levels[] = { 1, 9, 21 }, offsets[] = { 24, 8, 172 };
+
+		g_byte_array_set_size(stub, 20);
+		put16(stub, levels[i]);
+		result = exchange(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 36, stub, 4096);
+		g_assert_cmpuint(get32(result->data + offsets[i]), ==, UINT32_MAX);
+		g_assert_cmpuint(get32(result->data + result->len - 4), ==, 0);
+		g_byte_array_unref(result);
+	}
+	g_byte_array_set_size(stub, 0);
+	g_byte_array_append(stub, group->data, 20);
+	result = exchange(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 25, stub, 4096);
+	wire = (struct wire_reader){ .data = result->data, .size = result->len };
+	g_assert_cmpuint(wire32(&wire), !=, 0);
+	g_assert_cmpuint(wire32(&wire), ==, 3);
+	g_assert_cmpuint(wire32(&wire), !=, 0);
+	g_assert_cmpuint(wire32(&wire), !=, 0);
+	g_assert_cmpuint(wire32(&wire), ==, 3);
+	for (i = 0; i < 3; i++)
+		g_assert_cmpuint(wire32(&wire), ==, 1000 + i);
+	g_assert_cmpuint(wire32(&wire), ==, 3);
+	for (i = 0; i < 3; i++)
+		g_assert_cmpuint(wire32(&wire), ==, 7);
+	g_assert_cmpuint(wire32(&wire), ==, 0);
+	g_assert_cmpuint(wire.offset, ==, wire.size);
+	g_byte_array_unref(result);
+	g_byte_array_set_size(stub, 0);
+	g_byte_array_append(stub, alias->data, 20);
+	result = exchange(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 33, stub, 4096);
+	wire = (struct wire_reader){ .data = result->data, .size = result->len };
+	g_assert_cmpuint(wire32(&wire), ==, 2);
+	g_assert_cmpuint(wire32(&wire), !=, 0);
+	g_assert_cmpuint(wire32(&wire), ==, 2);
+	wire_skip(&wire, 8);
+	for (i = 0; i < 2; i++) {
+		GByteArray *sid = wire_sid(&wire);
+
+		g_assert_cmpuint(sid->data[1], ==, 5);
+		g_assert_cmpmem(sid->data + 2, 22, local_domain_sid + 2, 22);
+		g_assert_cmpuint(get32(sid->data + 24), ==, 1000 + i);
+		g_byte_array_unref(sid);
+	}
+	g_assert_cmpuint(wire32(&wire), ==, 0);
+	g_assert_cmpuint(wire.offset, ==, wire.size);
+	g_byte_array_unref(result);
+	/* A duplicate SID is idempotent; supplementary and primary aliases unite. */
+	g_byte_array_set_size(stub, 0);
+	g_byte_array_append(stub, groups->data, 20);
+	put32(stub, 3);
+	put32(stub, 1);
+	put32(stub, 3);
+	for (i = 0; i < 3; i++)
+		put32(stub, 1);
+	put_local_user_sid(stub, 1000);
+	put_local_user_sid(stub, 1000);
+	put_local_user_sid(stub, 1001);
+	result = exchange(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 16, stub, 4096);
+	g_assert_cmpuint(get32(result->data), ==, 2);
+	g_assert_cmpuint(get32(result->data + 12), ==, 0);
+	g_assert_cmpuint(get32(result->data + 16), ==, 1000);
+	g_assert_cmpuint(get32(result->data + 20), ==, 0);
+	g_byte_array_unref(result);
+	/* A group-domain SID with the same last component is not a local user. */
+	g_byte_array_set_size(stub, 20);
+	put32(stub, 1);
+	put32(stub, 1);
+	put32(stub, 1);
+	put32(stub, 1);
+	put32(stub, 2);
+	g_byte_array_append(stub, unix_group_sid, sizeof(unix_group_sid));
+	stub->data[stub->len - sizeof(unix_group_sid) + 1] = 2;
+	put32(stub, 1000);
+	result = exchange(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 16, stub, 4096);
+	g_assert_cmpuint(get32(result->data), ==, 0);
+	g_assert_cmpuint(get32(result->data + result->len - 4), ==, 0);
+	g_byte_array_unref(result);
+	g_byte_array_unref(alias);
+	g_byte_array_unref(group);
+	g_byte_array_unref(user);
+	g_byte_array_unref(groups);
+	/* The synthetic name must remain unique in the local account namespace. */
+	g_free(((struct ksmbd_user *)users->pdata[0])->name);
+	((struct ksmbd_user *)users->pdata[0])->name = g_strdup("uNiX uSeRs");
+	samr_check_name(domain, "Unix Users", 1000, 1);
+	samr_check_name(domain, "Unix Users (1)", UINT32_MAX, 2);
+	samr_check_rid(domain, UINT32_MAX, "Unix Users (1)", 2);
+	g_byte_array_unref(domain);
+	g_byte_array_unref(server);
+	g_byte_array_unref(stub);
+	fixture_destroy();
+	fixture_init();
+	open_pipe(1, KSMBD_RPC_LSARPC_METHOD_INVOKE, 0xab, 0);
+	server = open_policy();
+	for (i = 0; i < 2; i++) {
+		result = lsa_lookup_name(server, "SERVER\\Unix Users", i);
+		check_lsa_name_rid(result, i, 2, local_domain_sid, sizeof(local_domain_sid), UINT32_MAX);
+		g_byte_array_unref(result);
+	}
+	g_byte_array_unref(server);
+	fixture_destroy();
+}
+
 static void test_user_path_consistency(void)
 {
 	GByteArray *server, *domain, *user, *stub = g_byte_array_new(), *result;
@@ -2464,5 +2641,6 @@ int main(int argc, char **argv)
 	g_test_add_func("/rpc/lsarpc/lookup-scope", test_lsa_lookup_scope);
 	g_test_add_func("/rpc/lsarpc/unmapped-sids", test_lsa_unmapped_sids);
 	g_test_add_func("/rpc/lsarpc/predefined", test_lsa_predefined);
+	g_test_add_func("/rpc/samr/group-alias-membership", test_group_alias_membership);
 	return g_test_run();
 }
