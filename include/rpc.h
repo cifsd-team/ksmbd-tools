@@ -378,6 +378,14 @@ struct ksmbd_rpc_pipe {
 						   int i);
 };
 
+struct rpc_generic_mapping {
+	unsigned int read, write, execute, all;
+};
+
+int rpc_grant_access(unsigned int desired, unsigned int public_access,
+		     const struct rpc_generic_mapping *mapping,
+		     unsigned int *granted);
+
 int ndr_read_int8(struct ksmbd_dcerpc *dce, __u8 *value);
 int ndr_read_int16(struct ksmbd_dcerpc *dce, __u16 *value);
 int ndr_read_int32(struct ksmbd_dcerpc *dce, __u32 *value);

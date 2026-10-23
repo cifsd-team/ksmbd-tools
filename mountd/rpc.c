@@ -447,6 +447,32 @@ static void __clear_pipes_table(void)
 	g_rw_lock_writer_unlock(&pipes_table_lock);
 }
 
+/*
+ * The current kernel IPC supplies no authenticated caller token. RPC objects
+ * therefore grant only their public ACL, independent of caller identity. Never
+ * infer an administrator or retain generic/MAXIMUM_ALLOWED bits in a handle.
+ */
+int rpc_grant_access(unsigned int desired, unsigned int public_access,
+		     const struct rpc_generic_mapping *mapping,
+		     unsigned int *granted)
+{
+	unsigned int concrete = desired & ~0xf2000000U;
+
+	*granted = 0;
+	if (desired & 0x80000000U)
+		concrete |= mapping->read;
+	if (desired & 0x40000000U)
+		concrete |= mapping->write;
+	if (desired & 0x20000000U)
+		concrete |= mapping->execute;
+	if (desired & 0x10000000U)
+		concrete |= mapping->all;
+	if (concrete & ~public_access)
+		return KSMBD_RPC_EACCESS_DENIED;
+	*granted = desired & 0x02000000U ? public_access : concrete;
+	return KSMBD_RPC_OK;
+}
+
 static void align_offset(struct ksmbd_dcerpc *dce, size_t n)
 {
 	dce->offset = __ALIGN(dce->offset, n);

@@ -1170,18 +1170,40 @@ static GByteArray *samr_connect_handle(void)
 	return handle;
 }
 
-static GByteArray *samr_open_domain(GByteArray *server, const guint8 *sid,
-				    unsigned int length)
+static GByteArray *samr_open_domain_access(GByteArray *server, const guint8 *sid,
+				    unsigned int length, unsigned int access)
 {
 	GByteArray *stub = g_byte_array_new();
 	GByteArray *result;
 
 	g_byte_array_append(stub, server->data, 20);
-	put32(stub, 0x02000000);
+	put32(stub, access);
 	put32(stub, sid[1]);
 	g_byte_array_append(stub, sid, length);
 	result = exchange(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 7, stub, 128);
+	g_byte_array_unref(stub);
+	return result;
+}
+
+static GByteArray *samr_open_domain(GByteArray *server, const guint8 *sid,
+				    unsigned int length)
+{
+	GByteArray *result = samr_open_domain_access(server, sid, length, 0x02000000);
+
 	g_assert_cmpuint(get32(result->data + 20), ==, 0);
+	return result;
+}
+
+static GByteArray *samr_open_account_access(GByteArray *domain, unsigned int opnum,
+				     unsigned int rid, unsigned int access)
+{
+	GByteArray *stub = g_byte_array_new();
+	GByteArray *result;
+
+	g_byte_array_append(stub, domain->data, 20);
+	put32(stub, access);
+	put32(stub, rid);
+	result = exchange(1, KSMBD_RPC_SAMR_METHOD_INVOKE, opnum, stub, 128);
 	g_byte_array_unref(stub);
 	return result;
 }
@@ -1189,15 +1211,7 @@ static GByteArray *samr_open_domain(GByteArray *server, const guint8 *sid,
 static GByteArray *samr_open_account(GByteArray *domain, unsigned int opnum,
 				     unsigned int rid)
 {
-	GByteArray *stub = g_byte_array_new();
-	GByteArray *result;
-
-	g_byte_array_append(stub, domain->data, 20);
-	put32(stub, 0x02000000);
-	put32(stub, rid);
-	result = exchange(1, KSMBD_RPC_SAMR_METHOD_INVOKE, opnum, stub, 128);
-	g_byte_array_unref(stub);
-	return result;
+	return samr_open_account_access(domain, opnum, rid, 0x02000000);
 }
 
 static const guint8 local_domain_sid[] = {
@@ -2395,6 +2409,87 @@ static void test_group_alias_membership(void)
 	fixture_destroy();
 }
 
+static void test_handle_grants(void)
+{
+	const unsigned int masks[] = {
+		0x00800000, 0x01000000, 0x10000000, 0x40000000,
+		0x02000000, 0x00020000, 0
+	};
+	GByteArray *server, *domain, *groups, *result, *stub;
+	unsigned int i, kind, opnum;
+	const guint8 zero_handle[20] = { 0 };
+
+	fixture_init();
+	((struct ksmbd_user *)users->pdata[0])->gid = 1000;
+	open_pipe(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 0xac, 1);
+	server = samr_connect_handle();
+	domain = samr_open_domain(server, local_domain_sid, sizeof(local_domain_sid));
+	groups = samr_open_domain(server, unix_group_sid, sizeof(unix_group_sid));
+	for (i = 0; i < G_N_ELEMENTS(masks); i++) {
+		for (kind = 0; kind < 5; kind++) {
+			if (!kind) {
+				__u32 access = htole32(masks[i]);
+
+				stub = connect_stub();
+				memcpy(stub->data + 4, &access, 4);
+				result = exchange(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 64, stub, 128);
+				g_byte_array_unref(stub);
+			} else if (kind == 1) {
+				result = samr_open_domain_access(server, local_domain_sid,
+							 sizeof(local_domain_sid), masks[i]);
+			} else {
+				result = samr_open_account_access(kind == 4 ? groups : domain,
+						 kind == 2 ? 34 : kind == 3 ? 19 : 27,
+						 kind == 3 ? UINT32_MAX : 1000, masks[i]);
+			}
+			g_assert_cmpuint(get32(result->data + result->len - 4), ==,
+					 i < 4 ? KSMBD_NT_STATUS_ACCESS_DENIED : 0);
+			if (i < 4)
+				g_assert_cmpmem(result->data + (kind ? 0 : 16), 20,
+						zero_handle, sizeof(zero_handle));
+			g_byte_array_unref(result);
+		}
+	}
+	g_byte_array_unref(groups);
+	g_byte_array_unref(domain);
+	g_byte_array_unref(server);
+	fixture_destroy();
+	fixture_init();
+	open_pipe(1, KSMBD_RPC_LSARPC_METHOD_INVOKE, 0xab, 0);
+	for (opnum = 6; opnum <= 44; opnum += 38) {
+		for (i = 0; i < G_N_ELEMENTS(masks) + 2; i++) {
+			unsigned int desired = i < G_N_ELEMENTS(masks) ? masks[i] :
+					       i == G_N_ELEMENTS(masks) ? 0x80000000 : 0x20000000;
+			__u32 access = htole32(desired);
+
+			stub = policy_attributes(0);
+			memcpy(stub->data + stub->len - 4, &access, 4);
+			result = exchange(1, KSMBD_RPC_LSARPC_METHOD_INVOKE, opnum, stub, 128);
+			g_assert_cmpuint(get32(result->data + 20), ==,
+					 i < 4 || i == G_N_ELEMENTS(masks) ?
+					 KSMBD_NT_STATUS_ACCESS_DENIED : 0);
+			if (i < 4 || i == G_N_ELEMENTS(masks))
+				g_assert_cmpmem(result->data, 20, zero_handle, sizeof(zero_handle));
+			g_byte_array_unref(result);
+			g_byte_array_unref(stub);
+		}
+	}
+	fixture_destroy();
+	/* Combining generic rights must map to concrete bits before subset checks. */
+	{
+		const struct rpc_generic_mapping mapping = { 1, 2, 4, 7 };
+		unsigned int granted = UINT32_MAX;
+
+		g_assert_cmpint(rpc_grant_access(0xa0000000, 5, &mapping, &granted), ==, 0);
+		g_assert_cmpuint(granted, ==, 5);
+		g_assert_cmpint(rpc_grant_access(0x02000000, 5, &mapping, &granted), ==, 0);
+		g_assert_cmpuint(granted, ==, 5);
+		g_assert_cmpint(rpc_grant_access(2, 5, &mapping, &granted), ==,
+			       KSMBD_RPC_EACCESS_DENIED);
+		g_assert_cmpuint(granted, ==, 0);
+	}
+}
+
 static void test_user_path_consistency(void)
 {
 	GByteArray *server, *domain, *user, *stub = g_byte_array_new(), *result;
@@ -2642,5 +2737,6 @@ int main(int argc, char **argv)
 	g_test_add_func("/rpc/lsarpc/unmapped-sids", test_lsa_unmapped_sids);
 	g_test_add_func("/rpc/lsarpc/predefined", test_lsa_predefined);
 	g_test_add_func("/rpc/samr/group-alias-membership", test_group_alias_membership);
+	g_test_add_func("/rpc/handle-grants", test_handle_grants);
 	return g_test_run();
 }

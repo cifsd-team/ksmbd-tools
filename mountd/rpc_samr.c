@@ -68,7 +68,6 @@
 #define SAM_ALIAS_WRITE			0x00020013
 #define SAM_ALIAS_EXECUTE		0x00020008
 #define SAM_READ_CONTROL		0x00020000
-#define SAM_STANDARD_WRITE_ACCESS	0x000D0000
 #define SAM_GENERIC_READ		0x80000000U
 #define SAM_GENERIC_WRITE		0x40000000U
 #define SAM_GENERIC_EXECUTE		0x20000000U
@@ -221,15 +220,24 @@ static int samr_ch_close(struct ksmbd_rpc_pipe *pipe,
 	return KSMBD_RPC_OK;
 }
 
+static int samr_grant_access(enum samr_handle_type type, unsigned int desired,
+			     unsigned int *granted);
+
 static struct connect_handle *samr_ch_alloc(struct ksmbd_rpc_pipe *pipe,
 					    enum samr_handle_type type,
 					    unsigned int access_mask,
 					    const struct smb_sid *domain_sid,
 					    struct ksmbd_user *user,
-					    unsigned int rid)
+					    unsigned int rid,
+					    int *status)
 {
 	struct connect_handle *ch;
+	unsigned int granted;
 
+	*status = samr_grant_access(type, access_mask, &granted);
+	if (*status)
+		return NULL;
+	*status = KSMBD_RPC_ENOMEM;
 	ch = g_try_malloc0(sizeof(struct connect_handle));
 	if (!ch)
 		return NULL;
@@ -241,7 +249,7 @@ static struct connect_handle *samr_ch_alloc(struct ksmbd_rpc_pipe *pipe,
 	ch->pipe_id = pipe->id;
 	ch->refcount = 1;
 	ch->type = type;
-	ch->access_mask = access_mask;
+	ch->access_mask = granted;
 	ch->retired = 0;
 	if (domain_sid)
 		smb_copy_sid(&ch->domain_sid, domain_sid);
@@ -259,42 +267,14 @@ static struct connect_handle *samr_ch_alloc(struct ksmbd_rpc_pipe *pipe,
 	return ch;
 }
 
-static unsigned int samr_generic_read_access(enum samr_handle_type type);
-static unsigned int samr_generic_write_access(enum samr_handle_type type);
-static unsigned int samr_generic_execute_access(enum samr_handle_type type);
-
 static int samr_handle_access(const struct connect_handle *ch,
 			      enum samr_handle_type type,
 			      unsigned int required)
 {
-	unsigned int all_access;
-
 	if (!ch || ch->type != type)
 		return SAMR_STATUS_INVALID_HANDLE;
-	if (type == SAMR_HANDLE_SERVER)
-		all_access = SAM_SERVER_ALL_ACCESS;
-	else if (type == SAMR_HANDLE_DOMAIN)
-		all_access = SAM_DOMAIN_ALL_ACCESS;
-	else if (type == SAMR_HANDLE_USER)
-		all_access = SAM_USER_ALL_ACCESS;
-	else if (type == SAMR_HANDLE_GROUP)
-		all_access = SAM_GROUP_ALL_ACCESS;
-	else if (type == SAMR_HANDLE_ALIAS)
-		all_access = SAM_ALIAS_ALL_ACCESS;
-	else
-		return SAMR_STATUS_INVALID_HANDLE;
-	if (required && (ch->access_mask & required) != required &&
-	    !(ch->access_mask & SAM_GENERIC_ALL) &&
-	    !(ch->access_mask & SAM_MAXIMUM_ALLOWED) &&
-	    !((ch->access_mask & SAM_GENERIC_READ) &&
-	      (samr_generic_read_access(type) & required) == required) &&
-	    !((ch->access_mask & SAM_GENERIC_WRITE) &&
-	      (samr_generic_write_access(type) & required) == required) &&
-	    !((ch->access_mask & SAM_GENERIC_EXECUTE) &&
-	      (samr_generic_execute_access(type) & required) == required) &&
-	    (ch->access_mask & all_access) != all_access)
-		return KSMBD_RPC_EACCESS_DENIED;
-	return KSMBD_RPC_OK;
+	return (ch->access_mask & required) == required ?
+		KSMBD_RPC_OK : KSMBD_RPC_EACCESS_DENIED;
 }
 
 static __u32 samr_wire_status(int status)
@@ -361,14 +341,14 @@ static unsigned int samr_generic_write_access(enum samr_handle_type type)
 {
 	switch (type) {
 	case SAMR_HANDLE_SERVER:
-		return SAM_STANDARD_WRITE_ACCESS | 0x00000002 | 0x00000004 |
+		return SAM_READ_CONTROL | 0x00000002 | 0x00000004 |
 			0x00000008;
 	case SAMR_HANDLE_DOMAIN:
-		return SAM_STANDARD_WRITE_ACCESS | 0x00000002 | 0x00000008 |
+		return SAM_READ_CONTROL | 0x00000002 | 0x00000008 |
 			0x00000010 | 0x00000020 | 0x00000040 |
 			0x00000400;
 	case SAMR_HANDLE_USER:
-		return SAM_STANDARD_WRITE_ACCESS | 0x00000004 | 0x00000020 |
+		return SAM_READ_CONTROL | 0x00000004 | 0x00000020 |
 			0x00000040 | 0x00000080 | 0x00000400;
 	case SAMR_HANDLE_GROUP:
 		return SAM_GROUP_WRITE;
@@ -395,6 +375,37 @@ static unsigned int samr_generic_execute_access(enum samr_handle_type type)
 	default:
 		return 0;
 	}
+}
+
+static unsigned int samr_public_access(enum samr_handle_type type)
+{
+	unsigned int access = samr_generic_read_access(type) |
+			      samr_generic_execute_access(type);
+
+	/* The public user object permits reading, not password changes. */
+	if (type == SAMR_HANDLE_USER)
+		access &= ~0x00000040U;
+	return access;
+}
+
+static int samr_grant_access(enum samr_handle_type type, unsigned int desired,
+			     unsigned int *granted)
+{
+	struct rpc_generic_mapping mapping = {
+		.read = samr_generic_read_access(type),
+		.write = samr_generic_write_access(type),
+		.execute = samr_generic_execute_access(type),
+	};
+
+	switch (type) {
+	case SAMR_HANDLE_SERVER: mapping.all = SAM_SERVER_ALL_ACCESS; break;
+	case SAMR_HANDLE_DOMAIN: mapping.all = SAM_DOMAIN_ALL_ACCESS; break;
+	case SAMR_HANDLE_USER: mapping.all = SAM_USER_ALL_ACCESS; break;
+	case SAMR_HANDLE_GROUP: mapping.all = SAM_GROUP_ALL_ACCESS; break;
+	case SAMR_HANDLE_ALIAS: mapping.all = SAM_ALIAS_ALL_ACCESS; break;
+	default: return KSMBD_RPC_EINVALID_PARAMETER;
+	}
+	return rpc_grant_access(desired, samr_public_access(type), &mapping, granted);
 }
 
 static void samr_free_names(struct samr_info_request *req)
@@ -879,6 +890,7 @@ static int samr_connect5_return(struct ksmbd_rpc_pipe *pipe)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
 	struct connect_handle *ch;
+	int ret;
 
 	if (ndr_write_int32(dce, 1)) // level out
 		return KSMBD_RPC_EBAD_DATA;
@@ -892,11 +904,11 @@ static int samr_connect5_return(struct ksmbd_rpc_pipe *pipe)
 		return KSMBD_RPC_EBAD_DATA;
 
 	ch = samr_ch_alloc(pipe, SAMR_HANDLE_SERVER,
-			   dce->sm_req.access_mask, NULL, NULL, 0);
+			   dce->sm_req.access_mask, NULL, NULL, 0, &ret);
 	if (!ch) {
 		if (samr_write_zero_handle(dce))
 			return KSMBD_RPC_EBAD_DATA;
-		return KSMBD_RPC_ENOMEM;
+		return ret;
 	}
 
 	/* write connect handle */
@@ -1378,9 +1390,8 @@ static int samr_open_domain_return(struct ksmbd_rpc_pipe *pipe)
 	}
 
 	domain = samr_ch_alloc(pipe, SAMR_HANDLE_DOMAIN,
-			       dce->sm_req.access_mask, &sid, NULL, 0);
+			       dce->sm_req.access_mask, &sid, NULL, 0, &ret);
 	if (!domain) {
-		ret = KSMBD_RPC_ENOMEM;
 		goto fail;
 	}
 	if (ndr_write_bytes(dce, domain->handle, HANDLE_SIZE)) {
@@ -1799,10 +1810,9 @@ static int samr_open_user_return(struct ksmbd_rpc_pipe *pipe)
 
 	user_handle = samr_ch_alloc(pipe, SAMR_HANDLE_USER,
 				    dce->sm_req.access_mask,
-				    &ch->domain_sid, user, dce->sm_req.rid);
+				    &ch->domain_sid, user, dce->sm_req.rid, &ret);
 	if (!user_handle) {
 		put_ksmbd_user(user);
-		ret = KSMBD_RPC_ENOMEM;
 		goto fail;
 	}
 
@@ -1868,9 +1878,8 @@ static int samr_open_account_handle_return(struct ksmbd_rpc_pipe *pipe,
 	}
 
 	account = samr_ch_alloc(pipe, type, dce->sm_req.access_mask,
-				&ch->domain_sid, NULL, dce->sm_req.rid);
+				&ch->domain_sid, NULL, dce->sm_req.rid, &ret);
 	if (!account) {
-		ret = KSMBD_RPC_ENOMEM;
 		goto fail;
 	}
 

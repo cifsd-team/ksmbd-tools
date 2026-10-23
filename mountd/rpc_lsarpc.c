@@ -152,10 +152,22 @@ static int lsarpc_ph_close(struct ksmbd_rpc_pipe *pipe,
 }
 
 static struct policy_handle *lsarpc_ph_alloc(struct ksmbd_rpc_pipe *pipe,
-					     unsigned int access_mask)
+					     unsigned int access_mask,
+					     int *status)
 {
 	struct policy_handle *ph;
+	unsigned int granted;
+	const struct rpc_generic_mapping mapping = {
+		LSA_POLICY_READ_ACCESS, LSA_POLICY_WRITE_ACCESS,
+		LSA_POLICY_EXECUTE_ACCESS, 0x000f0fff
+	};
 
+	/* Public policy ACL: local information, name lookup and READ_CONTROL. */
+	*status = rpc_grant_access(access_mask, LSA_POLICY_EXECUTE_ACCESS,
+				   &mapping, &granted);
+	if (*status)
+		return NULL;
+	*status = KSMBD_RPC_ENOMEM;
 	ph = g_try_malloc0(sizeof(struct policy_handle));
 	if (!ph)
 		return NULL;
@@ -167,7 +179,7 @@ static struct policy_handle *lsarpc_ph_alloc(struct ksmbd_rpc_pipe *pipe,
 	ph->pipe_id = pipe->id;
 	ph->refcount = 1;
 	ph->type = LSARPC_HANDLE_POLICY;
-	ph->access_mask = access_mask;
+	ph->access_mask = granted;
 	ph->retired = 0;
 	g_rw_lock_writer_lock(&ph_table_lock);
 	if (g_hash_table_lookup(ph_table, ph->handle)) {
@@ -223,30 +235,10 @@ static int lsarpc_syntax_interface(struct ksmbd_rpc_pipe *pipe,
 static int lsarpc_policy_access(const struct policy_handle *ph,
 				unsigned int required)
 {
-	unsigned int access;
-
 	if (!ph)
 		return LSARPC_STATUS_INVALID_HANDLE;
-
-	access = ph->access_mask;
-	if ((access & required) == required ||
-	    (access & LSA_POLICY_GENERIC_ALL) ||
-	    (access & LSA_MAXIMUM_ALLOWED))
-		return KSMBD_RPC_OK;
-
-	if ((access & LSA_POLICY_GENERIC_READ) &&
-	    (LSA_POLICY_READ_ACCESS & required) == required)
-		return KSMBD_RPC_OK;
-
-	if ((access & LSA_POLICY_GENERIC_WRITE) &&
-	    (LSA_POLICY_WRITE_ACCESS & required) == required)
-		return KSMBD_RPC_OK;
-
-	if ((access & LSA_POLICY_GENERIC_EXECUTE) &&
-	    (LSA_POLICY_EXECUTE_ACCESS & required) == required)
-		return KSMBD_RPC_OK;
-
-	return KSMBD_RPC_EACCESS_DENIED;
+	return (ph->access_mask & required) == required ?
+		KSMBD_RPC_OK : KSMBD_RPC_EACCESS_DENIED;
 }
 
 static __u32 lsarpc_wire_status(int status, int interface_kind)
@@ -603,12 +595,13 @@ static int lsarpc_open_policy2_return(struct ksmbd_rpc_pipe *pipe)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
 	struct policy_handle *ph;
+	int ret;
 
-	ph = lsarpc_ph_alloc(pipe, dce->lr_req.access_mask);
+	ph = lsarpc_ph_alloc(pipe, dce->lr_req.access_mask, &ret);
 	if (!ph) {
 		if (lsarpc_write_zero_handle(dce))
 			return KSMBD_RPC_EBAD_DATA;
-		return KSMBD_RPC_ENOMEM;
+		return ret;
 	}
 
 	/* write connect handle */
