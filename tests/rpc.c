@@ -1865,6 +1865,100 @@ static void test_samr_enum_mutation(void)
 	fixture_destroy();
 }
 
+static void put_local_user_sid(GByteArray *stub, unsigned int rid)
+{
+	put32(stub, 5);
+	g_byte_array_append(stub, local_domain_sid, sizeof(local_domain_sid));
+	stub->data[stub->len - sizeof(local_domain_sid) + 1] = 5;
+	put32(stub, rid);
+}
+
+static GByteArray *lsa_lookup_request(GByteArray *policy, unsigned int opnum,
+				      unsigned int ignored, unsigned int mapped,
+				      unsigned int level, unsigned int options)
+{
+	GByteArray *stub = g_byte_array_new(), *result;
+	int names = opnum == 14 || opnum == 68;
+	int extended = opnum == 57 || opnum == 68;
+
+	g_byte_array_append(stub, policy->data, 20);
+	put32(stub, 1);
+	if (names) {
+		put32(stub, 1);
+		put_rpc_string(stub, ((struct ksmbd_user *)users->pdata[0])->name);
+	} else {
+		put32(stub, 1);
+		put32(stub, 1);
+		put32(stub, 1);
+		put_local_user_sid(stub, 1000);
+	}
+	put32(stub, ignored && ignored != 2 ? 1 : 0);
+	put32(stub, ignored ? 1 : 0);
+	if (ignored) {
+		put32(stub, ignored == 2 ? 0 : ignored == 3 ? 2 : 1);
+		if (ignored != 2) {
+			put16(stub, 8);
+			pad_buffer(stub, 4);
+			if (names) {
+				put32(stub, extended ? 1 : 7);
+				put32(stub, UINT32_MAX);
+				if (extended) {
+					put32(stub, 123);
+					put_local_user_sid(stub, 1234);
+				}
+			} else {
+				/* String body follows all fixed entry fields. */
+				put16(stub, 14);
+				put16(stub, 14);
+				put32(stub, 1);
+				put32(stub, UINT32_MAX);
+				if (extended)
+					put32(stub, 123);
+				put_string(stub, "ignored", 0);
+				/* The next argument is a short; there is no 4-byte tail pad. */
+				g_byte_array_set_size(stub, stub->len - 2);
+			}
+		}
+	}
+	put16(stub, level);
+	put32(stub, mapped);
+	if (extended) {
+		put32(stub, options);
+		put32(stub, 1);
+	}
+	result = exchange(1, KSMBD_RPC_LSARPC_METHOD_INVOKE, opnum, stub, 4096);
+	g_byte_array_unref(stub);
+	return result;
+}
+
+static void test_lsa_ignored_translations(void)
+{
+	const unsigned int opnums[] = { 14, 15, 57, 68 };
+	GByteArray *policy, *baseline, *result;
+	unsigned int i, ignored;
+
+	fixture_init();
+	open_pipe(1, KSMBD_RPC_LSARPC_METHOD_INVOKE, 0xab, 0);
+	policy = open_policy();
+	for (i = 0; i < G_N_ELEMENTS(opnums); i++) {
+		baseline = lsa_lookup_request(policy, opnums[i], 0, 0, 1, 0);
+		g_assert_cmpuint(get32(baseline->data + baseline->len - 4), ==, 0);
+		for (ignored = 0; ignored <= 3; ignored++) {
+			result = lsa_lookup_request(policy, opnums[i], ignored, 99, 1, 0);
+			if (ignored == 3)
+				g_assert_cmpuint(get32(result->data + result->len - 4), ==,
+						 KSMBD_NT_STATUS_INVALID_PARAMETER);
+			else
+				g_assert_cmpmem(result->data, result->len,
+						baseline->data, baseline->len);
+			g_byte_array_unref(result);
+		}
+		g_byte_array_unref(baseline);
+	}
+	g_byte_array_unref(policy);
+	fixture_destroy();
+}
+
 static void test_user_path_consistency(void)
 {
 	GByteArray *server, *domain, *user, *stub = g_byte_array_new(), *result;
@@ -2107,5 +2201,6 @@ int main(int argc, char **argv)
 	g_test_add_func("/rpc/samr/user-path-consistency", test_user_path_consistency);
 	g_test_add_func("/rpc/samr/enum-sizes", test_samr_enum_sizes);
 	g_test_add_func("/rpc/samr/enum-mutation", test_samr_enum_mutation);
+	g_test_add_func("/rpc/lsarpc/ignored-translations", test_lsa_ignored_translations);
 	return g_test_run();
 }

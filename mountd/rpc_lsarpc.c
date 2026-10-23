@@ -920,25 +920,82 @@ static int lsarpc_sid_relative_id(const struct lsarpc_names_info *ni, __u32 *rid
 	return 0;
 }
 
-static int lsarpc_read_lookup_tail(struct ksmbd_dcerpc *dce,
-				   __u32 input_count)
+/* These in/out translations are unmarshalled for wire safety, then ignored. */
+static int lsarpc_read_translations(struct ksmbd_dcerpc *dce,
+				    int names, int extended)
 {
-	__u32 entries, names_ref;
-	__u16 level;
+	struct ignored_translation {
+		struct ndr_string_rep name;
+		__u32 sid_ref;
+	};
+	g_autofree struct ignored_translation *items = NULL;
+	__u32 count, ref, max_count, unused;
+	unsigned int i;
+	__u16 use;
 
-	if (ndr_read_int32(dce, &entries) ||
-	    ndr_read_int32(dce, &names_ref))
+	if (ndr_read_int32(dce, &count) || ndr_read_int32(dce, &ref) ||
+	    count > (names ? LSARPC_MAX_NAME_COUNT : LSARPC_MAX_SID_COUNT) ||
+	    (count && !ref))
 		return -EINVAL;
-	if (entries || names_ref)
+	if (!ref)
+		return 0;
+	if (ndr_read_int32(dce, &max_count) || max_count != count)
 		return -EINVAL;
-	if (ndr_read_int16(dce, &level) ||
-	    ndr_read_int32(dce, &dce->lr_req.lookup_count) ||
-	    ndr_read_int32(dce, &dce->lr_req.lookup_options) ||
-	    ndr_read_int32(dce, &dce->lr_req.client_revision))
+	if (count) {
+		items = g_try_new0(struct ignored_translation, count);
+		if (!items)
+			return -ENOMEM;
+	}
+	for (i = 0; i < count; i++) {
+		if (ndr_read_int16(dce, &use))
+			return -EINVAL;
+		auto_align_offset(dce);
+		if (names) {
+			if (ndr_read_int32(dce, &items[i].sid_ref))
+				return -EINVAL;
+		} else if (ndr_read_string_rep(dce, &items[i].name)) {
+			return -EINVAL;
+		}
+		if (ndr_read_int32(dce, &unused) ||
+		    (extended && ndr_read_int32(dce, &unused)))
+			return -EINVAL;
+	}
+	for (i = 0; i < count; i++) {
+		if (!names && items[i].name.ref_id) {
+			g_autofree char *value = ndr_read_string_data(dce, &items[i].name);
+
+			if (!value)
+				return -EINVAL;
+		} else if (names && extended && items[i].sid_ref) {
+			struct smb_sid sid;
+
+			if (ndr_read_int32(dce, &max_count) ||
+			    max_count > SID_MAX_SUB_AUTHORITIES ||
+			    smb_read_sid(dce, &sid) || max_count != sid.num_subauth)
+				return -EINVAL;
+		}
+	}
+	return 0;
+}
+
+static int lsarpc_read_lookup_tail(struct ksmbd_dcerpc *dce,
+				   int names, int extended)
+{
+	__u16 level;
+	__u32 ignored_mapped_count;
+
+	if (lsarpc_read_translations(dce, names, extended) ||
+	    ndr_read_int16(dce, &level) ||
+	    ndr_read_int32(dce, &ignored_mapped_count))
+		return -EINVAL;
+	dce->lr_req.lookup_count = 0;
+	dce->lr_req.lookup_options = 0;
+	dce->lr_req.client_revision = 0;
+	if (extended &&
+	    (ndr_read_int32(dce, &dce->lr_req.lookup_options) ||
+	     ndr_read_int32(dce, &dce->lr_req.client_revision)))
 		return -EINVAL;
 	if (level < 1 || level > 7)
-		return -EINVAL;
-	if (dce->lr_req.lookup_count > input_count)
 		return -EINVAL;
 	if (dce->lr_req.lookup_options !=
 		    LSA_LOOKUP_OPTION_SEARCH_ISOLATED_NAMES &&
@@ -953,38 +1010,11 @@ static int lsarpc_read_lookup_tail(struct ksmbd_dcerpc *dce,
 	return ndr_request_end(dce);
 }
 
-static int lsarpc_read_lookup_tail_legacy(struct ksmbd_dcerpc *dce,
-					  __u32 input_count)
-{
-	__u32 entries, names_ref;
-	__u16 level;
-
-	if (ndr_read_int32(dce, &entries) ||
-	    ndr_read_int32(dce, &names_ref))
-		return -EINVAL;
-	if (entries || names_ref)
-		return -EINVAL;
-	if (ndr_read_int16(dce, &level) ||
-	    ndr_read_int32(dce, &dce->lr_req.lookup_count))
-		return -EINVAL;
-
-	if (level < 1 || level > 7)
-		return -EINVAL;
-	if (dce->lr_req.lookup_count > input_count)
-		return -EINVAL;
-
-	dce->lr_req.level = level;
-	dce->lr_req.lookup_options = 0;
-	dce->lr_req.client_revision = 0;
-	return ndr_request_end(dce);
-}
-
 static int lsarpc_lookup_sid2_invoke(struct ksmbd_rpc_pipe *pipe)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
 	struct lsarpc_names_info *ni = NULL;
 	__u32 num_sid, array_ref, max_count;
-	__u32 translated_count;
 	unsigned int i;
 
 	if (lsarpc_syntax_interface(pipe, dce->req_hdr.context_id) !=
@@ -1037,10 +1067,7 @@ static int lsarpc_lookup_sid2_invoke(struct ksmbd_rpc_pipe *pipe)
 		pipe->num_entries++;
 	}
 
-	if (lsarpc_read_lookup_tail(dce, num_sid))
-		goto fail;
-	translated_count = dce->lr_req.lookup_count;
-	if (translated_count > num_sid)
+	if (lsarpc_read_lookup_tail(dce, 0, 1))
 		goto fail;
 	pipe->entry_processed = __lsarpc_entry_processed;
 	return KSMBD_RPC_OK;
@@ -1115,7 +1142,7 @@ static int lsarpc_lookup_sid_invoke(struct ksmbd_rpc_pipe *pipe)
 		pipe->num_entries++;
 	}
 
-	if (lsarpc_read_lookup_tail_legacy(dce, num_sid))
+	if (lsarpc_read_lookup_tail(dce, 0, 0))
 		goto fail;
 	pipe->entry_processed = __lsarpc_entry_processed;
 	return KSMBD_RPC_OK;
@@ -1545,9 +1572,7 @@ static int lsarpc_lookup_names3_invoke(struct ksmbd_rpc_pipe *pipe)
 		pipe->num_entries++;
 	}
 	g_ptr_array_free(reps, 1);
-	if (lsarpc_read_lookup_tail(dce, num_names))
-		goto fail;
-	if (dce->lr_req.lookup_count > num_names)
+	if (lsarpc_read_lookup_tail(dce, 1, 1))
 		goto fail;
 	pipe->entry_processed = __lsarpc_entry_processed;
 	return KSMBD_RPC_OK;
@@ -1635,7 +1660,7 @@ static int lsarpc_lookup_names_invoke(struct ksmbd_rpc_pipe *pipe)
 		pipe->num_entries++;
 	}
 	g_ptr_array_free(reps, 1);
-	if (lsarpc_read_lookup_tail_legacy(dce, num_names))
+	if (lsarpc_read_lookup_tail(dce, 1, 0))
 		goto fail;
 	pipe->entry_processed = __lsarpc_entry_processed;
 	return KSMBD_RPC_OK;

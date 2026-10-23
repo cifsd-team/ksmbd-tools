@@ -460,23 +460,6 @@ void auto_align_offset(struct ksmbd_dcerpc *dce)
 		dce->offset = __ALIGN(dce->offset, 4);
 }
 
-static void read_auto_align_offset(struct ksmbd_dcerpc *dce)
-{
-	size_t alignment = 1;
-	size_t padding;
-
-	if (dce->flags & KSMBD_DCERPC_ALIGN8)
-		alignment = 8;
-	else if (dce->flags & KSMBD_DCERPC_ALIGN4)
-		alignment = 4;
-	if (alignment == 1 || dce->offset > dce->payload_sz)
-		return;
-
-	padding = (alignment - dce->offset % alignment) % alignment;
-	if (padding <= dce->payload_sz - dce->offset)
-		dce->offset += padding;
-}
-
 static int try_realloc_payload(struct ksmbd_dcerpc *dce, size_t data_sz)
 {
 	char *n;
@@ -952,7 +935,6 @@ static char *ndr_read_vstring_internal(struct ksmbd_dcerpc *dce,
 		return NULL;
 
 	dce->offset += actual * 2;
-	read_auto_align_offset(dce);
 	if (actual_count)
 		*actual_count = actual;
 	return out;
