@@ -124,7 +124,7 @@ static gint samr_account_entry_cmp(gconstpointer a, gconstpointer b)
 		return -1;
 	if (ea->rid > eb->rid)
 		return 1;
-	return g_ascii_strcasecmp(ea->name, eb->name);
+	return ksmbd_name_compare(ea->name, eb->name);
 }
 
 static enum samr_domain_kind samr_get_domain_kind(const struct smb_sid *sid)
@@ -524,17 +524,17 @@ static int samr_lookup_domain_sid(const char *name, struct smb_sid *sid)
 	if (!name || !sid)
 		return -EINVAL;
 
-	if (!g_ascii_strcasecmp(name, domain_name) ||
+	if (!ksmbd_name_compare(name, domain_name) ||
 	    (global_conf.netbios_name &&
-	     !g_ascii_strcasecmp(name, global_conf.netbios_name))) {
+	     !ksmbd_name_compare(name, global_conf.netbios_name))) {
 		smb_init_domain_sid(sid);
 		return 0;
 	}
-	if (!g_ascii_strcasecmp(name, "Builtin")) {
+	if (!ksmbd_name_compare(name, "Builtin")) {
 		samr_init_builtin_sid(sid);
 		return 0;
 	}
-	if (!g_ascii_strcasecmp(name, SMB_UNIX_GROUP_DOMAIN)) {
+	if (!ksmbd_name_compare(name, SMB_UNIX_GROUP_DOMAIN)) {
 		smb_init_unix_group_sid(sid);
 		return 0;
 	}
@@ -803,7 +803,7 @@ samr_find_account_entry_by_name(GPtrArray *entries, const char *name)
 		struct samr_account_entry *entry;
 
 		entry = g_ptr_array_index(entries, i);
-		if (!g_ascii_strcasecmp(entry->name, name))
+		if (!ksmbd_name_compare(entry->name, name))
 			return entry;
 	}
 	return NULL;

@@ -210,7 +210,7 @@ struct ksmbd_user *usm_lookup_user_casefold(const char *name)
 	g_rw_lock_reader_lock(&users_table_lock);
 	g_hash_table_iter_init(&iter, users_table);
 	while (g_hash_table_iter_next(&iter, NULL, (gpointer *)&user)) {
-		if (g_ascii_strcasecmp(user->name, name))
+		if (ksmbd_name_compare(user->name, name))
 			continue;
 		ret = get_ksmbd_user(user);
 		break;

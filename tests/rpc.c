@@ -103,7 +103,7 @@ struct ksmbd_user *usm_lookup_user_casefold(const char *name)
 	for (i = 0; name && i < users->len; i++) {
 		struct ksmbd_user *user = g_ptr_array_index(users, i);
 
-		if (!g_ascii_strcasecmp(user->name, name))
+		if (!ksmbd_name_compare(user->name, name))
 			return usm_lookup_uid(user->uid);
 	}
 	return NULL;
@@ -1749,6 +1749,47 @@ static void test_alter_context(void)
 	fixture_destroy();
 }
 
+static void test_unicode_account_names(void)
+{
+	const char *names[][2] = {
+		{ "tést", "TÉST" }, { "οδυσσεύς", "ΟΔΥΣΣΕΎΣ" },
+		{ "straße", "STRASSE" }, { "𐐨name", "𐐀NAME" }
+	};
+	GByteArray *server, *domain, *policy, *result;
+	struct ksmbd_user *user;
+	unsigned int i, version;
+
+	fixture_init();
+	open_pipe(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 0xac, 1);
+	server = samr_connect_handle();
+	domain = samr_open_domain(server, local_domain_sid, sizeof(local_domain_sid));
+	user = users->pdata[0];
+	for (i = 0; i < G_N_ELEMENTS(names); i++) {
+		g_free(user->name);
+		user->name = g_strdup(names[i][0]);
+		samr_check_name(domain, names[i][1], 1000, 1);
+	}
+	g_byte_array_unref(domain);
+	g_byte_array_unref(server);
+	fixture_destroy();
+	fixture_init();
+	user = users->pdata[0];
+	open_pipe(1, KSMBD_RPC_LSARPC_METHOD_INVOKE, 0xab, 0);
+	policy = open_policy();
+	for (i = 0; i < G_N_ELEMENTS(names); i++) {
+		g_free(user->name);
+		user->name = g_strdup(names[i][0]);
+		for (version = 0; version < 2; version++) {
+			result = lsa_lookup_name(policy, names[i][1], version);
+			check_lsa_name(result, version, 1, local_domain_sid,
+					 sizeof(local_domain_sid));
+			g_byte_array_unref(result);
+		}
+	}
+	g_byte_array_unref(policy);
+	fixture_destroy();
+}
+
 static void test_user_all_big_endian(void)
 {
 	GByteArray *server, *domain, *user, *stub = g_byte_array_new();
@@ -1886,5 +1927,6 @@ int main(int argc, char **argv)
 	g_test_add_func("/rpc/samr/connect-revision", test_connect_revision);
 	g_test_add_func("/rpc/samr/alias-membership-access", test_alias_membership_access);
 	g_test_add_func("/rpc/samr/user-all-big-endian", test_user_all_big_endian);
+	g_test_add_func("/rpc/unicode-account-names", test_unicode_account_names);
 	return g_test_run();
 }
