@@ -2076,11 +2076,31 @@ static int samr_write_user_info_header(struct ksmbd_dcerpc *dce,
 	return 0;
 }
 
+static int samr_user_paths(const struct ksmbd_user *user, char **home,
+			   char **profile)
+{
+	char hostname[NAME_MAX] = { 0 };
+	size_t size;
+
+	if (gethostname(hostname, sizeof(hostname) - 1))
+		return -ENOMEM;
+	size = 2 + strlen(hostname) + 1 + strlen(user->name) + 1;
+	*home = g_try_malloc(size);
+	*profile = g_try_malloc(size + strlen("\\profile"));
+	if (!*home || !*profile) {
+		g_clear_pointer(home, g_free);
+		g_clear_pointer(profile, g_free);
+		return -ENOMEM;
+	}
+	snprintf(*home, size, "\\\\%s\\%s", hostname, user->name);
+	snprintf(*profile, size + strlen("\\profile"), "%s\\profile", *home);
+	return 0;
+}
+
 static int samr_query_user_info_simple(struct ksmbd_dcerpc *dce,
 				       struct connect_handle *ch)
 {
-	const char *home = "\\";
-	const char *profile = "\\profile";
+	g_autofree char *home = NULL, *profile = NULL;
 	unsigned int level = dce->sm_req.level;
 	int ret;
 
@@ -2099,6 +2119,10 @@ static int samr_query_user_info_simple(struct ksmbd_dcerpc *dce,
 	default:
 		return SAMR_STATUS_INVALID_INFO_CLASS;
 	}
+
+	if ((level == 10 || level == 12) &&
+	    samr_user_paths(ch->user, &home, &profile))
+		return KSMBD_RPC_ENOMEM;
 
 	if (samr_write_user_info_header(dce, level))
 		return KSMBD_RPC_EBAD_DATA;
@@ -2175,8 +2199,6 @@ static int samr_query_user_info_return(struct ksmbd_rpc_pipe *pipe)
 	struct connect_handle *ch = NULL;
 	char *home_dir;
 	g_autofree char *profile_path = NULL;
-	char hostname[NAME_MAX] = {0};
-	size_t home_dir_len;
 	unsigned int required;
 	int i, ret;
 
@@ -2213,39 +2235,10 @@ static int samr_query_user_info_return(struct ksmbd_rpc_pipe *pipe)
 		return ret;
 	}
 
-	if (gethostname(hostname, sizeof(hostname) - 1)) {
+	if (samr_user_paths(ch->user, &home_dir, &profile_path)) {
 		samr_ch_put(ch);
 		return KSMBD_RPC_ENOMEM;
 	}
-
-	home_dir_len = 2 + strlen(hostname) + 1 + strlen(ch->user->name) + 1;
-
-	home_dir = g_try_malloc0(home_dir_len);
-	if (!home_dir) {
-		samr_ch_put(ch);
-		return KSMBD_RPC_ENOMEM;
-	}
-
-	/* Make Home dir string */
-	strcpy(home_dir, "\\\\");
-	strcat(home_dir, hostname);
-	strcat(home_dir, "\\");
-	strcat(home_dir, ch->user->name);
-
-	profile_path = g_try_malloc0(home_dir_len + 1 + strlen("profile"));
-	if (!profile_path) {
-		g_free(home_dir);
-		samr_ch_put(ch);
-		return KSMBD_RPC_ENOMEM;
-	}
-
-	/* Make Profile path string */
-	strcat(profile_path, "\\\\");
-	strcat(profile_path, hostname);
-	strcat(profile_path, "\\");
-	strcat(profile_path, ch->user->name);
-	strcat(profile_path, "\\");
-	strcat(profile_path, "profile");
 
 	dce->num_pointers++;
 	ret = ndr_write_int32(dce, dce->num_pointers); // ref pointer

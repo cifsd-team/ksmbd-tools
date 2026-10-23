@@ -1749,6 +1749,66 @@ static void test_alter_context(void)
 	fixture_destroy();
 }
 
+static void test_user_path_consistency(void)
+{
+	GByteArray *server, *domain, *user, *stub = g_byte_array_new(), *result;
+	char *home = NULL, *profile = NULL;
+	struct wire_reader wire;
+	unsigned int i, refs[13];
+
+	fixture_init();
+	open_pipe(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 0xac, 1);
+	server = samr_connect_handle();
+	domain = samr_open_domain(server, local_domain_sid, sizeof(local_domain_sid));
+	user = samr_open_account(domain, 34, 1000);
+	g_byte_array_append(stub, user->data, 20);
+	put16(stub, 21);
+	result = exchange(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 36, stub, 4096);
+	wire = (struct wire_reader){ .data = result->data, .size = result->len };
+	wire_skip(&wire, 8 + 6 * 8);
+	for (i = 0; i < 13; i++) {
+		wire_skip(&wire, 4);
+		refs[i] = wire32(&wire);
+	}
+	wire_skip(&wire, 8 + 4 * 4 + 8 + 12);
+	for (i = 0; i < 13; i++) {
+		char *value;
+
+		if (!refs[i])
+			continue;
+		value = wire_string(&wire);
+		if (i == 2)
+			home = value;
+		else if (i == 5)
+			profile = value;
+		else
+			g_free(value);
+	}
+	g_byte_array_unref(result);
+	g_assert_nonnull(home);
+	g_assert_nonnull(profile);
+	for (i = 10; i <= 12; i += 2) {
+		g_autofree char *value = NULL;
+
+		g_byte_array_set_size(stub, 20);
+		put16(stub, i);
+		result = exchange(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 36, stub, 4096);
+		wire = (struct wire_reader){ .data = result->data, .size = result->len };
+		wire_skip(&wire, 8 + (i == 10 ? 16 : 8));
+		value = wire_string(&wire);
+		g_assert_cmpstr(value, ==, i == 10 ? home : profile);
+		g_assert_cmpuint(get32(result->data + result->len - 4), ==, 0);
+		g_byte_array_unref(result);
+	}
+	g_free(home);
+	g_free(profile);
+	g_byte_array_unref(stub);
+	g_byte_array_unref(user);
+	g_byte_array_unref(domain);
+	g_byte_array_unref(server);
+	fixture_destroy();
+}
+
 static void test_unicode_account_names(void)
 {
 	const char *names[][2] = {
@@ -1928,5 +1988,6 @@ int main(int argc, char **argv)
 	g_test_add_func("/rpc/samr/alias-membership-access", test_alias_membership_access);
 	g_test_add_func("/rpc/samr/user-all-big-endian", test_user_all_big_endian);
 	g_test_add_func("/rpc/unicode-account-names", test_unicode_account_names);
+	g_test_add_func("/rpc/samr/user-path-consistency", test_user_path_consistency);
 	return g_test_run();
 }
