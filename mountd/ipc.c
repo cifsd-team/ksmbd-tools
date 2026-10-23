@@ -436,7 +436,12 @@ int ipc_msg_send(struct ksmbd_ipc_msg *msg)
 	struct nlmsghdr *hdr;
 	int ret = -EINVAL;
 
-	nlmsg = nlmsg_alloc();
+	/*
+	 * nlmsg_alloc() makes room for a page only, and the payload can be
+	 * up to KSMBD_IPC_MAX_MESSAGE_SIZE, e.g. an RPC reply.
+	 */
+	nlmsg = nlmsg_alloc_size(nlmsg_total_size(GENL_HDRLEN +
+						  nla_total_size(msg->sz)));
 	if (!nlmsg) {
 		ret = -ENOMEM;
 		goto out_error;

@@ -6,6 +6,9 @@
  *   Author(s): Namjae Jeon (linkinjeon@kernel.org)
  */
 
+#include <dcerpc/dcerpc.h>
+#include <dcerpc/dcerpc-dtyp.h>
+
 #include <smbacl.h>
 #include <tools.h>
 #include <glib.h>
@@ -14,10 +17,6 @@
 static const struct smb_sid sid_domain = {1, 1, {0, 0, 0, 0, 0, 5},
 	{21, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} };
 
-/* security id for everyone/world system group */
-static const struct smb_sid sid_everyone = {
-	1, 1, {0, 0, 0, 0, 0, 1}, {0} };
-
 /* S-1-22-1 Unmapped Unix users */
 static const struct smb_sid sid_unix_users = {1, 1, {0, 0, 0, 0, 0, 22},
 	{1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} };
@@ -25,51 +24,6 @@ static const struct smb_sid sid_unix_users = {1, 1, {0, 0, 0, 0, 0, 22},
 /* S-1-22-2 Unmapped Unix groups */
 static const struct smb_sid sid_unix_groups = { 1, 1, {0, 0, 0, 0, 0, 22},
 	{2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} };
-
-/* security id for local group */
-static const struct smb_sid sid_local_group = {
-	1, 1, {0, 0, 0, 0, 0, 5}, {32} };
-
-int smb_read_sid(struct ksmbd_dcerpc *dce, struct smb_sid *sid)
-{
-	int i;
-
-	if (ndr_read_int8(dce, &sid->revision))
-		return -EINVAL;
-	if (ndr_read_int8(dce, &sid->num_subauth))
-		return -EINVAL;
-	if (!sid->num_subauth || sid->num_subauth >= SID_MAX_SUB_AUTHORITIES)
-		return -EINVAL;
-	for (i = 0; i < NUM_AUTHS; ++i)
-		if (ndr_read_int8(dce, &sid->authority[i]))
-			return -EINVAL;
-	for (i = 0; i < sid->num_subauth; ++i)
-		if (ndr_read_int32(dce, &sid->sub_auth[i]))
-			return -EINVAL;
-	return 0;
-}
-
-int smb_write_sid(struct ksmbd_dcerpc *dce, const struct smb_sid *src)
-{
-	int i;
-
-	if (ndr_write_int8(dce, src->revision))
-		return -ENOMEM;
-
-	if (ndr_write_int8(dce, src->num_subauth))
-		return -ENOMEM;
-
-	for (i = 0; i < NUM_AUTHS; ++i) {
-		if (ndr_write_int8(dce, src->authority[i]))
-			return -ENOMEM;
-	}
-	for (i = 0; i < src->num_subauth; ++i) {
-		if (ndr_write_int32(dce, src->sub_auth[i]))
-			return -ENOMEM;
-	}
-
-	return 0;
-}
 
 void smb_copy_sid(struct smb_sid *dst, const struct smb_sid *src)
 {
@@ -81,6 +35,33 @@ void smb_copy_sid(struct smb_sid *dst, const struct smb_sid *src)
 		dst->authority[i] = src->authority[i];
 	for (i = 0; i < dst->num_subauth; ++i)
 		dst->sub_auth[i] = src->sub_auth[i];
+}
+
+void smb_sid_from_rpc(struct smb_sid *sid, const RPC_SID *rsid)
+{
+	int i;
+
+	memset(sid, 0, sizeof(*sid));
+	sid->revision = rsid->Revision;
+	sid->num_subauth = MIN(rsid->SubAuthorityCount, MAXSUBAUTH);
+	memcpy(sid->authority, rsid->IdentifierAuthority, NUM_AUTHS);
+	for (i = 0; i < sid->num_subauth; i++)
+		sid->sub_auth[i] = rsid->SubAuthority[i];
+}
+
+RPC_SID *smb_sid_to_rpc(struct dcerpc_pdu *pdu, const struct smb_sid *sid)
+{
+	RPC_SID *rsid = dcerpc_alloc_data(pdu, sizeof(*rsid));
+	int i;
+
+	if (!rsid)
+		return NULL;
+	rsid->Revision = sid->revision;
+	rsid->SubAuthorityCount = MIN(sid->num_subauth, MAXSUBAUTH);
+	memcpy(rsid->IdentifierAuthority, sid->authority, NUM_AUTHS);
+	for (i = 0; i < rsid->SubAuthorityCount; i++)
+		rsid->SubAuthority[i] = sid->sub_auth[i];
+	return rsid;
 }
 
 void smb_init_domain_sid(struct smb_sid *sid)
@@ -216,130 +197,3 @@ int set_domain_name(struct smb_sid *sid, char *domain, size_t domain_len,
 	return ret;
 }
 
-static int smb_set_ace(struct ksmbd_dcerpc *dce, int access_req, int rid,
-		const struct smb_sid *rsid)
-{
-	int size;
-	struct smb_sid sid = {0};
-
-	memcpy(&sid, rsid, sizeof(struct smb_sid));
-	// ace type
-	if (ndr_write_int8(dce, ACCESS_ALLOWED))
-		return -ENOMEM;
-
-	// ace flags
-	if (ndr_write_int8(dce, 0))
-		return -ENOMEM;
-
-	size = 1 + 1 + 2 + 4 + 1 + 1 + 6 + (sid.num_subauth * 4);
-	if (rid)
-		size += 4;
-
-	// ace size
-	if (ndr_write_int16(dce, size))
-		return -ENOMEM;
-
-	// ace access required
-	if (ndr_write_int32(dce, access_req))
-		return -ENOMEM;
-
-	if (rid)
-		sid.sub_auth[sid.num_subauth++] = rid;
-
-	if (smb_write_sid(dce, &sid))
-		return -ENOMEM;
-
-	return size;
-}
-
-static int set_dacl(struct ksmbd_dcerpc *dce, int rid)
-{
-	int size = 0, i, ret;
-	struct smb_sid owner_domain;
-
-	/* Other */
-	ret = smb_set_ace(dce, 0x0002035b, 0, &sid_everyone);
-	if (ret < 0)
-		return ret;
-	size += ret;
-
-	/* Local Group Administrators */
-	ret = smb_set_ace(dce, 0x000f07ff, 544, &sid_local_group);
-	if (ret < 0)
-		return ret;
-	size += ret;
-
-	/* Local Group Account Operators */
-	ret = smb_set_ace(dce, 0x000f07ff, 548, &sid_local_group);
-	if (ret < 0)
-		return ret;
-	size += ret;
-
-	/* Owner RID */
-	memcpy(&owner_domain, &sid_domain, sizeof(struct smb_sid));
-	for (i = 0; i < 3; ++i) {
-		owner_domain.sub_auth[i + 1] = global_conf.gen_subauth[i];
-		owner_domain.num_subauth++;
-	}
-
-	ret = smb_set_ace(dce, 0x00020044, rid, &owner_domain);
-	if (ret < 0)
-		return ret;
-	size += ret;
-
-	return size;
-}
-
-int build_sec_desc(struct ksmbd_dcerpc *dce, __u32 *secdesclen, int rid)
-{
-	int l_offset, acl_size_offset;
-	int acl_size;
-
-	/* NT Security Descriptor : Revision */
-	if (ndr_write_int16(dce, 1))
-		return -ENOMEM;
-
-	/* ACL Type */
-	if (ndr_write_int16(dce, SELF_RELATIVE | DACL_PRESENT))
-		return -ENOMEM;
-
-	/* Offset to owner SID */
-	if (ndr_write_int32(dce, 0))
-		return -ENOMEM;
-
-	/* Offset to group SID */
-	if (ndr_write_int32(dce, 0))
-		return -ENOMEM;
-
-	/* Offset to SACL */
-	if (ndr_write_int32(dce, 0))
-		return -ENOMEM;
-
-	/* Offset to DACL */
-	if (ndr_write_int32(dce, sizeof(struct smb_ntsd)))
-		return -ENOMEM;
-
-	/* DACL Revision */
-	if (ndr_write_int16(dce, 2))
-		return -ENOMEM;
-
-	acl_size_offset = dce->offset;
-	dce->offset += 2;
-
-	/* Number of ACEs */
-	if (ndr_write_int32(dce, 4))
-		return -ENOMEM;
-
-	acl_size = set_dacl(dce, rid) + sizeof(struct smb_acl);
-	if (acl_size < 0)
-		return -ENOMEM;
-	/* ACL Size */
-	l_offset = dce->offset;
-	dce->offset = acl_size_offset;
-	if (ndr_write_int16(dce, acl_size))
-		return -ENOMEM;
-	dce->offset = l_offset;
-
-	*secdesclen = sizeof(struct smb_ntsd) + acl_size;
-	return 0;
-}

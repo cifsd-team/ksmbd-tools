@@ -5,12 +5,13 @@
  *   linux-cifsd-devel@lists.sourceforge.net
  */
 
-#include <memory.h>
-#include <endian.h>
-#include <stdint.h>
-#include <glib.h>
 #include <errno.h>
+#include <string.h>
+#include <glib.h>
 #include <linux/ksmbd_server.h>
+
+#include <dcerpc/dcerpc.h>
+#include <dcerpc/server.h>
 
 #include <rpc.h>
 #include <rpc_srvsvc.h>
@@ -21,82 +22,6 @@
 
 static GHashTable	*pipes_table;
 static GRWLock		pipes_table_lock;
-
-/*
- * Version 2.0 data representation protocol
- *
- * UUID: 8a885d04-1ceb-11c9-9fe8-08002b104860
- * VERSION: 2
- *
- *
- * Transfer Syntax: Bind Time Feature Negotiation
- * UUID:6cb71c2c-9812-4540-0300-000000000000
- *
- * 6CB71C2C-9812-4540
- *
- * MUST BE BLOCKED
- * Interface: SRVSVC UUID: 4b324fc8-1670-01d3-1278-5a47bf6ee188
- */
-struct dcerpc_syntax_table {
-	struct dcerpc_syntax	syn;
-	int			ack_result;
-};
-
-static struct dcerpc_syntax_table known_syntaxes[] = {
-	{
-		.syn.uuid.time_low = 0x8a885d04,
-		.syn.uuid.time_mid = 0x1ceb,
-		.syn.uuid.time_hi_and_version = 0x11c9,
-		.syn.uuid.clock_seq = {0x9f, 0xe8},
-		.syn.uuid.node = {0x8, 0x0, 0x2b, 0x10, 0x48, 0x60},
-		.syn.ver_major = 0x2,
-		.syn.ver_minor = 0x0,
-		.ack_result = DCERPC_BIND_ACK_RES_ACCEPT,
-	},
-	{
-		.syn.uuid.time_low = 0x6CB71C2C,
-		.syn.uuid.time_mid = 0x9812,
-		.syn.uuid.time_hi_and_version = 0x4540,
-		.syn.uuid.clock_seq = {0x0, 0x0},
-		.syn.uuid.node = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
-		.syn.ver_major = 0x1,
-		.syn.ver_minor = 0x0,
-		.ack_result = DCERPC_BIND_ACK_RES_NEGOTIATE_ACK,
-	},
-};
-
-/*
- * PNIO uuid
- * Transfer Syntax: PNIO (Implicit Ar)
- *
- * All zero-s.
- */
-static struct dcerpc_syntax negotiate_ack_PNIO_uuid;
-
-/*
- * We need a proper DCE RPC (ndr/ndr64) parser. And we also need a proper
- * IDL support...
- * Maybe someone smart and cool enough can do it for us. The one you can
- * find here is just a very simple implementation, which sort of works for
- * us, but we do realize that it sucks.
- *
- * Documentation:
- *
- * http://pubs.opengroup.org/onlinepubs/9629399/chap14.htm#tagfcjh_39
- * https://msdn.microsoft.com/en-us/library/cc243858.aspx
- */
-
-#define PAYLOAD_HEAD(d)	((d)->payload + (d)->offset)
-
-#define __ALIGN(x, a)							\
-	({								\
-		typeof(x) ret = (x);					\
-		if (((x) & ((typeof(x))(a) - 1)) != 0)			\
-			ret = __ALIGN_MASK(x, (typeof(x))(a) - 1);	\
-		ret;							\
-	})
-
-#define __ALIGN_MASK(x, mask)	(((x) + (mask)) & ~(mask))
 
 static struct ksmbd_rpc_pipe *rpc_pipe_lookup(unsigned int id)
 {
@@ -109,70 +34,15 @@ static struct ksmbd_rpc_pipe *rpc_pipe_lookup(unsigned int id)
 	return pipe;
 }
 
-static void dcerpc_free(struct ksmbd_dcerpc *dce)
-{
-	if (!(dce->flags & KSMBD_DCERPC_EXTERNAL_PAYLOAD))
-		g_free(dce->payload);
-	g_free(dce->response_payload);
-	g_free(dce);
-}
-
-static struct ksmbd_dcerpc *dcerpc_ext_alloc(unsigned int flags,
-					     void *payload,
-					     int payload_sz)
-{
-	struct ksmbd_dcerpc *dce;
-
-	dce = g_try_malloc0(sizeof(struct ksmbd_dcerpc));
-	if (!dce)
-		return NULL;
-
-	dce->payload = payload;
-	dce->payload_sz = payload_sz;
-
-	dce->flags = flags;
-	dce->flags |= KSMBD_DCERPC_EXTERNAL_PAYLOAD;
-	dce->flags |= KSMBD_DCERPC_FIXED_PAYLOAD_SZ;
-	return dce;
-}
-
-void dcerpc_set_ext_payload(struct ksmbd_dcerpc *dce, void *payload, size_t sz)
-{
-	dce->num_pointers = 1;
-	dce->payload = payload;
-	dce->payload_sz = sz;
-	dce->offset = 0;
-	dce->flags |= KSMBD_DCERPC_EXTERNAL_PAYLOAD;
-	dce->flags |= KSMBD_DCERPC_FIXED_PAYLOAD_SZ;
-}
-
-void rpc_pipe_reset(struct ksmbd_rpc_pipe *pipe)
-{
-	if (pipe->entry_processed) {
-		while (pipe->num_entries)
-			pipe->entry_processed(pipe, 0);
-	}
-	pipe->num_entries = 0;
-	pipe->entry_processed = NULL;
-
-	if (!pipe->dce)
-		return;
-
-	pipe->dce->response_started = 0;
-	g_clear_pointer(&pipe->dce->response_payload, g_free);
-	pipe->dce->response_payload_sz = 0;
-	pipe->dce->response_payload_offset = 0;
-	pipe->dce->response_alloc_hint = 0;
-	pipe->dce->response_limit = 0;
-}
-
 static void __rpc_pipe_free(struct ksmbd_rpc_pipe *pipe)
 {
-	rpc_pipe_reset(pipe);
-	if (pipe->dce)
-		dcerpc_free(pipe->dce);
-	if (pipe->entries)
-		g_ptr_array_free(pipe->entries, 1);
+	if (pipe->rpc)
+		dcerpc_server_pipe_destroy(pipe->rpc);
+	if (pipe->srv)
+		dcerpc_server_destroy(pipe->srv);
+	if (pipe->handles)
+		g_hash_table_destroy(pipe->handles);
+	g_mutex_clear(&pipe->lock);
 	g_free(pipe);
 }
 
@@ -196,7 +66,7 @@ static struct ksmbd_rpc_pipe *rpc_pipe_alloc(void)
 		return NULL;
 
 	pipe->id = -1;
-	pipe->entries = g_ptr_array_new();
+	g_mutex_init(&pipe->lock);
 	return pipe;
 }
 
@@ -232,528 +102,6 @@ static void __clear_pipes_table(void)
 	g_rw_lock_writer_unlock(&pipes_table_lock);
 }
 
-static void align_offset(struct ksmbd_dcerpc *dce, size_t n)
-{
-	dce->offset = __ALIGN(dce->offset, n);
-}
-
-void auto_align_offset(struct ksmbd_dcerpc *dce)
-{
-	if (dce->flags & KSMBD_DCERPC_ALIGN8)
-		dce->offset = __ALIGN(dce->offset, 8);
-	else if (dce->flags & KSMBD_DCERPC_ALIGN4)
-		dce->offset = __ALIGN(dce->offset, 4);
-}
-
-static int try_realloc_payload(struct ksmbd_dcerpc *dce, size_t data_sz)
-{
-	char *n;
-
-	if (dce->offset + data_sz < dce->payload_sz)
-		return 0;
-
-	if (dce->flags & KSMBD_DCERPC_FIXED_PAYLOAD_SZ) {
-		pr_err("DCE RPC: fixed payload buffer overflow\n");
-		return -ENOMEM;
-	}
-
-	n = g_try_realloc(dce->payload, dce->payload_sz + 4096);
-	if (!n)
-		return -ENOMEM;
-
-	dce->payload = n;
-	dce->payload_sz += 4096;
-	memset(dce->payload + dce->offset, 0, dce->payload_sz - dce->offset);
-	return 0;
-}
-
-static __u8 noop_int8(__u8 v)
-{
-	return v;
-}
-
-#define htobe_n noop_int8
-#define htole_n noop_int8
-#define betoh_n noop_int8
-#define letoh_n noop_int8
-
-#define NDR_WRITE_INT(name, type, be, le)				\
-int ndr_write_##name(struct ksmbd_dcerpc *dce, type value)		\
-{									\
-	align_offset(dce, sizeof(type));				\
-	if (try_realloc_payload(dce, sizeof(value)))			\
-		return -ENOMEM;						\
-	if (dce->flags & KSMBD_DCERPC_LITTLE_ENDIAN)			\
-		*(type *)PAYLOAD_HEAD(dce) = le(value);			\
-	else								\
-		*(type *)PAYLOAD_HEAD(dce) = be(value);			\
-	dce->offset += sizeof(value);					\
-	return 0;							\
-}
-
-NDR_WRITE_INT(int8,  __u8, htobe_n, htole_n);
-NDR_WRITE_INT(int16, __u16, htobe16, htole16);
-NDR_WRITE_INT(int32, __u32, htobe32, htole32);
-NDR_WRITE_INT(int64, __u64, htobe64, htole64);
-
-#define NDR_READ_INT(name, type, be, le)				\
-int ndr_read_##name(struct ksmbd_dcerpc *dce, type *value)		\
-{									\
-	type ret;							\
-									\
-	align_offset(dce, sizeof(type));				\
-	if (dce->offset + sizeof(type) > dce->payload_sz)		\
-		return -EINVAL;						\
-									\
-	if (dce->flags & KSMBD_DCERPC_LITTLE_ENDIAN)			\
-		ret = le(*(type *)PAYLOAD_HEAD(dce));			\
-	else								\
-		ret = be(*(type *)PAYLOAD_HEAD(dce));			\
-	dce->offset += sizeof(type);					\
-	if (value)							\
-		*value = ret;						\
-	return 0;							\
-}
-
-NDR_READ_INT(int8,  __u8, betoh_n, letoh_n);
-NDR_READ_INT(int16, __u16, be16toh, le16toh);
-NDR_READ_INT(int32, __u32, be32toh, le32toh);
-NDR_READ_INT(int64, __u64, be64toh, le64toh);
-
-/*
- * For a non-encapsulated union, the discriminant is marshalled into
- * the transmitted data stream twice: once as the field or parameter,
- * which is referenced by the switch_is construct, in the procedure
- * argument list; and once as the first part of the union
- * representation.
- */
-#define NDR_WRITE_UNION(name, type)					\
-int ndr_write_union_##name(struct ksmbd_dcerpc *dce, type value)	\
-{									\
-	int ret;							\
-									\
-	ret = ndr_write_##name(dce, value);				\
-	if (ret)							\
-		return ret;						\
-	ret = ndr_write_##name(dce, value);				\
-	return ret;							\
-}
-
-NDR_WRITE_UNION(int16, __u16);
-NDR_WRITE_UNION(int32, __u32);
-
-#define NDR_READ_UNION(name, type)					\
-int ndr_read_union_##name(struct ksmbd_dcerpc *dce, type *value)	\
-{									\
-	type val1, val2;						\
-									\
-	if (ndr_read_##name(dce, &val1))				\
-		return -EINVAL;						\
-	if (ndr_read_##name(dce, &val2))				\
-		return -EINVAL;						\
-	if (val1 != val2) {						\
-		pr_err("NDR: union representation mismatch %lu\n",	\
-				(unsigned long)val1);			\
-		return -EINVAL;						\
-	}								\
-	if (value)							\
-		*value = val1;						\
-	return 0;							\
-}
-
-NDR_READ_UNION(int32, __u32);
-
-int ndr_write_bytes(struct ksmbd_dcerpc *dce, void *value, size_t sz)
-{
-	align_offset(dce, 2);
-	if (try_realloc_payload(dce, sz))
-		return -ENOMEM;
-
-	memcpy(PAYLOAD_HEAD(dce), value, sz);
-	dce->offset += sz;
-	return 0;
-}
-
-int ndr_read_bytes(struct ksmbd_dcerpc *dce, void *value, size_t sz)
-{
-	align_offset(dce, 2);
-	if (dce->offset + sz > dce->payload_sz)
-		return -EINVAL;
-	memcpy(value, PAYLOAD_HEAD(dce), sz);
-	dce->offset += sz;
-	return 0;
-}
-
-static gchar *ndr_convert_char_to_unicode(struct ksmbd_dcerpc *dce, char *str,
-		size_t len, gsize *bytes_written)
-{
-	gchar *out;
-	gsize bytes_read = 0;
-	int charset = KSMBD_CHARSET_UTF16LE;
-
-	if (!(dce->flags & KSMBD_DCERPC_LITTLE_ENDIAN))
-		charset = KSMBD_CHARSET_UTF16BE;
-
-	if (dce->flags & KSMBD_DCERPC_ASCII_STRING)
-		charset = KSMBD_CHARSET_UTF8;
-
-	out = ksmbd_gconvert(str,
-			     len,
-			     charset,
-			     KSMBD_CHARSET_DEFAULT,
-			     &bytes_read,
-			     bytes_written);
-
-	return out;
-}
-
-int ndr_write_vstring(struct ksmbd_dcerpc *dce, void *value)
-{
-	g_autofree char *out = NULL;
-	gsize bytes_written = 0;
-
-	size_t raw_len, str_len;
-	char *raw_value = value;
-	int ret;
-
-	if (!value)
-		raw_value = "";
-
-	raw_len = strlen(raw_value) + 1;
-	out = ndr_convert_char_to_unicode(dce, raw_value, raw_len,
-			&bytes_written);
-	if (!out)
-		return -EINVAL;
-
-	str_len = g_utf8_strlen(raw_value, -1) + 1;
-
-	/*
-	 * NDR represents a conformant and varying string as an ordered
-	 * sequence of representations of the string elements, preceded
-	 * by three unsigned long integers. The first integer gives the
-	 * maximum number of elements in the string, including the terminator.
-	 * The second integer gives the offset from the first index of the
-	 * string to the first index of the actual subset being passed.
-	 * The third integer gives the actual number of elements being
-	 * passed, including the terminator.
-	 */
-	ret = ndr_write_int32(dce, str_len);
-	if (ret)
-		return ret;
-
-	ret = ndr_write_int32(dce, 0);
-	if (ret)
-		return ret;
-
-	ret = ndr_write_int32(dce, str_len);
-	if (ret)
-		return ret;
-
-	ret = ndr_write_bytes(dce, out, bytes_written);
-	if (ret)
-		return ret;
-	auto_align_offset(dce);
-
-	return ret;
-}
-
-int ndr_write_string(struct ksmbd_dcerpc *dce, char *str)
-{
-	g_autofree char *out = NULL;
-	gsize bytes_written = 0;
-
-	size_t len;
-	int ret;
-
-	if (!str)
-		str = "";
-
-	len = strlen(str);
-	out = ndr_convert_char_to_unicode(dce, str, len, &bytes_written);
-	if (!out)
-		return -EINVAL;
-
-	ret = ndr_write_int32(dce, len); // max count
-	if (ret)
-		return ret;
-
-	ret = ndr_write_int32(dce, 0);
-	if (ret)
-		return ret;
-
-	ret = ndr_write_int32(dce, len); // actual count
-	if (ret)
-		return ret;
-
-	ret = ndr_write_bytes(dce, out, bytes_written);
-	auto_align_offset(dce);
-
-	return ret;
-}
-
-int ndr_write_lsa_string(struct ksmbd_dcerpc *dce, char *str)
-{
-	g_autofree char *out = NULL;
-	gsize bytes_written = 0;
-
-	size_t len;
-	int ret;
-
-	if (!str)
-		str = "";
-
-	len = strlen(str);
-	out = ndr_convert_char_to_unicode(dce, str, len, &bytes_written);
-	if (!out)
-		return -EINVAL;
-
-	ret = ndr_write_int32(dce, len + 1); // max count
-	if (ret)
-		return ret;
-
-	ret = ndr_write_int32(dce, 0);
-	if (ret)
-		return ret;
-
-	ret = ndr_write_int32(dce, len); // actual count
-	if (ret)
-		return ret;
-
-	ret = ndr_write_bytes(dce, out, bytes_written);
-	auto_align_offset(dce);
-
-	return ret;
-}
-
-char *ndr_read_vstring(struct ksmbd_dcerpc *dce)
-{
-	gchar *out;
-	gsize bytes_read = 0;
-	gsize bytes_written = 0;
-
-	int raw_len;
-	int charset = KSMBD_CHARSET_UTF16LE;
-
-	if (ndr_read_int32(dce, &raw_len))
-		return NULL;
-	/* read in offset */
-	if (ndr_read_int32(dce, NULL))
-		return NULL;
-	if (ndr_read_int32(dce, NULL))
-		return NULL;
-
-	if (!(dce->flags & KSMBD_DCERPC_LITTLE_ENDIAN))
-		charset = KSMBD_CHARSET_UTF16BE;
-
-	if (dce->flags & KSMBD_DCERPC_ASCII_STRING)
-		charset = KSMBD_CHARSET_UTF8;
-
-	if (raw_len == 0) {
-		out = g_strdup("");
-		return out;
-	}
-
-	if (dce->offset + 2 * raw_len > dce->payload_sz)
-		return NULL;
-
-	out = ksmbd_gconvert(PAYLOAD_HEAD(dce),
-			     raw_len * 2,
-			     KSMBD_CHARSET_DEFAULT,
-			     charset,
-			     &bytes_read,
-			     &bytes_written);
-	if (!out)
-		return NULL;
-
-	dce->offset += raw_len * 2;
-	auto_align_offset(dce);
-	return out;
-}
-
-int ndr_read_vstring_ptr(struct ksmbd_dcerpc *dce, struct ndr_char_ptr *ctr)
-{
-	ctr->ptr = ndr_read_vstring(dce);
-	if (!ctr->ptr)
-		return -EINVAL;
-	return 0;
-}
-
-int ndr_read_uniq_vstring_ptr(struct ksmbd_dcerpc *dce,
-			      struct ndr_uniq_char_ptr *ctr)
-{
-	if (ndr_read_int32(dce, &ctr->ref_id))
-		return -EINVAL;
-
-	if (ctr->ref_id == 0) {
-		ctr->ptr = NULL;
-		return 0;
-	}
-	ctr->ptr = ndr_read_vstring(dce);
-	if (!ctr->ptr)
-		return -EINVAL;
-	return 0;
-}
-
-void ndr_free_vstring_ptr(struct ndr_char_ptr *ctr)
-{
-	g_free(ctr->ptr);
-	ctr->ptr = NULL;
-}
-
-void ndr_free_uniq_vstring_ptr(struct ndr_uniq_char_ptr *ctr)
-{
-	ctr->ref_id = 0;
-	g_free(ctr->ptr);
-	ctr->ptr = NULL;
-}
-
-int ndr_read_ptr(struct ksmbd_dcerpc *dce, struct ndr_ptr *ctr)
-{
-	if (ndr_read_int32(dce, &ctr->ptr))
-		return -EINVAL;
-	return 0;
-}
-
-int ndr_read_uniq_ptr(struct ksmbd_dcerpc *dce, struct ndr_uniq_ptr *ctr)
-{
-	if (ndr_read_int32(dce, &ctr->ref_id))
-		return -EINVAL;
-	if (ctr->ref_id == 0) {
-		ctr->ptr = 0;
-		return 0;
-	}
-	if (ndr_read_int32(dce, &ctr->ptr))
-		return -EINVAL;
-	return 0;
-}
-
-int ndr_max_entries(struct ksmbd_dcerpc *dce, struct ksmbd_rpc_pipe *pipe)
-{
-	size_t current_size, limit, threshold;
-	int i;
-
-	if (!(dce->flags & KSMBD_DCERPC_FIXED_PAYLOAD_SZ))
-		return pipe->num_entries;
-
-	if (!dce->entry_size) {
-		pr_err("No ->entry_size() callback was provided\n");
-		return pipe->num_entries;
-	}
-
-	limit = dce->response_limit ? dce->response_limit :
-		dce->payload_sz;
-	threshold = limit - limit / 5;
-	current_size = 0;
-	for (i = 0; i < pipe->num_entries; i++) {
-		void *entry;
-		int entry_size;
-
-		entry = g_ptr_array_index(pipe->entries, i);
-		entry_size = dce->entry_size(dce, entry);
-		if (entry_size < 0 ||
-		    current_size > SIZE_MAX - (size_t)entry_size)
-			return i;
-		current_size += entry_size;
-
-		if (current_size < threshold)
-			continue;
-		return i;
-	}
-
-	return pipe->num_entries;
-}
-
-int __ndr_write_array_of_structs(struct ksmbd_rpc_pipe *pipe, int max_entry_nr)
-{
-	struct ksmbd_dcerpc *dce = pipe->dce;
-	int i;
-
-	for (i = 0; i < max_entry_nr; i++) {
-		void *entry;
-
-		entry = g_ptr_array_index(pipe->entries, i);
-		if (dce->entry_rep(dce, entry))
-			return KSMBD_RPC_EBAD_DATA;
-	}
-
-	for (i = 0; i < max_entry_nr; i++) {
-		void *entry;
-
-		entry = g_ptr_array_index(pipe->entries, i);
-		if (dce->entry_data(dce, entry))
-			return KSMBD_RPC_EBAD_DATA;
-	}
-
-	if (pipe->entry_processed) {
-		for (i = 0; i < max_entry_nr; i++)
-			pipe->entry_processed(pipe, 0);
-	}
-
-	return KSMBD_RPC_OK;
-}
-
-static int ndr_write_empty_array_of_struct(struct ksmbd_rpc_pipe *pipe)
-{
-	struct ksmbd_dcerpc *dce = pipe->dce;
-
-	dce->num_pointers++;
-	if (ndr_write_int32(dce, dce->num_pointers))
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (ndr_write_int32(dce, 0))
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (ndr_write_int32(dce, 0))
-		return KSMBD_RPC_EBAD_DATA;
-
-	return KSMBD_RPC_OK;
-}
-
-int ndr_write_array_of_structs(struct ksmbd_rpc_pipe *pipe)
-{
-	struct ksmbd_dcerpc *dce = pipe->dce;
-	int max_entry_nr;
-
-	/*
-	 * In the NDR representation of a structure that contains a
-	 * conformant and varying array, the maximum counts for dimensions
-	 * of the array are moved to the beginning of the structure, but
-	 * the offsets and actual counts remain in place at the end of the
-	 * structure, immediately preceding the array elements.
-	 */
-
-	if (pipe->num_entries == 0)
-		return ndr_write_empty_array_of_struct(pipe);
-
-	max_entry_nr = ndr_max_entries(dce, pipe);
-	if (ndr_write_int32(dce, max_entry_nr))
-		return KSMBD_RPC_EBAD_DATA;
-	/*
-	 * ARRAY representation [per dimension]
-	 *    max_count
-	 *    offset
-	 *    actual_count
-	 *    element representation [1..N]
-	 *    actual elements [1..N]
-	 */
-	if (ndr_write_int32(dce, max_entry_nr))
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (ndr_write_int32(dce, 1))
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (ndr_write_int32(dce, max_entry_nr))
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (max_entry_nr == 0) {
-		pr_err("DCERPC: can't fit any data, buffer is too small\n");
-		rpc_pipe_reset(pipe);
-		return KSMBD_RPC_EBAD_DATA;
-	}
-
-	return __ndr_write_array_of_structs(pipe, max_entry_nr);
-}
-
 void rpc_init(void)
 {
 	if (!pipes_table)
@@ -775,483 +123,234 @@ void rpc_destroy(void)
 	}
 }
 
-static int dcerpc_hdr_write(struct ksmbd_dcerpc *dce,
-			    struct dcerpc_header *hdr)
+/*
+ * Services on libdcerpc's server runtime (<dcerpc/server.h>), by the
+ * kernel's method flag. The runtime does BIND, fragments and every NDR
+ * flavor; the service's stubs fill in the replies. Each open of a pipe
+ * gets its own endpoint, so pipes on different worker threads share
+ * nothing.
+ */
+static const struct {
+	unsigned int		method;
+	struct dcerpc_server	*(*endpoint)(void);
+} libdcerpc_services[] = {
+	{ KSMBD_RPC_SRVSVC_METHOD_INVOKE, rpc_srvsvc_endpoint },
+	{ KSMBD_RPC_WKSSVC_METHOD_INVOKE, rpc_wkssvc_endpoint },
+	{ KSMBD_RPC_LSARPC_METHOD_INVOKE, rpc_lsarpc_endpoint },
+	{ KSMBD_RPC_SAMR_METHOD_INVOKE, rpc_samr_endpoint },
+};
+
+/*
+ * The kernel answers FSCTL_PIPE_TRANSCEIVE with at most
+ * KSMBD_IPC_MAX_PAYLOAD (4096) bytes of our reply and drops the rest, so
+ * no fragment may be larger than that. A READ takes the whole reply.
+ */
+#define LIBDCERPC_MAX_FRAG	4096
+
+char *rpc_pdu_strdup(struct dcerpc_pdu *pdu, const char *s)
 {
-	int ret;
+	size_t len;
+	char *d;
 
-	ret = ndr_write_int8(dce, hdr->rpc_vers);
-	if (ret)
-		return ret;
-
-	ret = ndr_write_int8(dce, hdr->rpc_vers_minor);
-	if (ret)
-		return ret;
-
-	ret = ndr_write_int8(dce, hdr->ptype);
-	if (ret)
-		return ret;
-
-	ret = ndr_write_int8(dce, hdr->pfc_flags);
-	if (ret)
-		return ret;
-
-	ret = ndr_write_bytes(dce, &hdr->packed_drep,
-			      sizeof(hdr->packed_drep));
-	if (ret)
-		return ret;
-
-	ret = ndr_write_int16(dce, hdr->frag_length);
-	if (ret)
-		return ret;
-
-	ret = ndr_write_int16(dce, hdr->auth_length);
-	if (ret)
-		return ret;
-
-	ret = ndr_write_int32(dce, hdr->call_id);
-
-	return ret;
+	if (!s)
+		return NULL;
+	len = strlen(s) + 1;
+	d = dcerpc_alloc_data(pdu, len);
+	if (d)
+		memcpy(d, s, len);
+	return d;
 }
 
-static int dcerpc_hdr_read(struct ksmbd_dcerpc *dce,
-			   struct dcerpc_header *hdr)
+struct ksmbd_rpc_pipe *rpc_pipe_of_pdu(struct dcerpc_pdu *pdu)
 {
-	/* Common Type Header for the Serialization Stream */
+	struct dcerpc_server_call *call = dcerpc_pdu_server_call(pdu);
+	struct dcerpc_server_pipe *rpc;
 
-	if (ndr_read_int8(dce, &hdr->rpc_vers))
-		return -EINVAL;
-	if (ndr_read_int8(dce, &hdr->rpc_vers_minor))
-		return -EINVAL;
-	if (ndr_read_int8(dce, &hdr->ptype))
-		return -EINVAL;
-	if (ndr_read_int8(dce, &hdr->pfc_flags))
-		return -EINVAL;
-	/*
-	 * This common type header MUST be presented by using
-	 * little-endian format in the octet stream. The first
-	 * byte of the common type header MUST be equal to 1 to
-	 * indicate level 1 of type serialization.
-	 *
-	 * Type serialization version 1 can use either a little-endian
-	 * or big-endian integer and floating-pointer byte order but
-	 * MUST use the IEEE floating-point format representation and
-	 * ASCII character format.
-	 */
-	if (ndr_read_bytes(dce, &hdr->packed_drep, sizeof(hdr->packed_drep)))
-		return -EINVAL;
-
-	dce->flags |= KSMBD_DCERPC_ALIGN4;
-	dce->flags |= KSMBD_DCERPC_LITTLE_ENDIAN;
-	if (hdr->packed_drep[0] != DCERPC_SERIALIZATION_LITTLE_ENDIAN)
-		dce->flags &= ~KSMBD_DCERPC_LITTLE_ENDIAN;
-
-	if (ndr_read_int16(dce, &hdr->frag_length))
-		return -EINVAL;
-	if (ndr_read_int16(dce, &hdr->auth_length))
-		return -EINVAL;
-	if (ndr_read_int32(dce, &hdr->call_id))
-		return -EINVAL;
-	return 0;
+	rpc = call ? dcerpc_server_call_get_pipe(call) : NULL;
+	return rpc ? dcerpc_server_pipe_get_private(rpc) : NULL;
 }
 
-static int dcerpc_response_hdr_write(struct ksmbd_dcerpc *dce,
-				     struct dcerpc_response_header *hdr)
-{
-	int ret;
-
-	ret = ndr_write_int32(dce, hdr->alloc_hint);
-	if (ret)
-		return ret;
-
-	ret = ndr_write_int16(dce, hdr->context_id);
-	if (ret)
-		return ret;
-
-	ret = ndr_write_int8(dce, hdr->cancel_count);
-	auto_align_offset(dce);
-
-	return ret;
-}
-
-static int dcerpc_request_hdr_read(struct ksmbd_dcerpc *dce,
-				   struct dcerpc_request_header *hdr)
-{
-	if (ndr_read_int32(dce, &hdr->alloc_hint))
-		return -EINVAL;
-	if (ndr_read_int16(dce, &hdr->context_id))
-		return -EINVAL;
-	if (ndr_read_int16(dce, &hdr->opnum))
-		return -EINVAL;
-	return 0;
-}
-
-int dcerpc_write_headers(struct ksmbd_dcerpc *dce, int method_status)
-{
-	struct dcerpc_header hdr;
-	struct dcerpc_response_header resp_hdr;
-	size_t payload_offset;
-	int continuation;
-	int ret;
-
-	(void)method_status;
-	payload_offset = dce->offset;
-	if (payload_offset < sizeof(struct dcerpc_header) +
-	    sizeof(struct dcerpc_response_header) ||
-	    payload_offset > UINT16_MAX)
-		return -EINVAL;
-	dce->offset = 0;
-
-	hdr = dce->hdr;
-	hdr.ptype = DCERPC_PTYPE_RPC_RESPONSE;
-	continuation = !!(dce->flags & KSMBD_DCERPC_RETURN_READY);
-	hdr.pfc_flags = continuation ? 0 : DCERPC_PFC_LAST_FRAG;
-	if (!dce->response_started)
-		hdr.pfc_flags |= DCERPC_PFC_FIRST_FRAG;
-	hdr.frag_length = payload_offset;
-	ret = dcerpc_hdr_write(dce, &hdr);
-	if (ret)
-		return ret;
-
-	if (dce->response_alloc_hint) {
-		if (dce->response_alloc_hint > UINT32_MAX)
-			return -EINVAL;
-		resp_hdr.alloc_hint = dce->response_alloc_hint;
-	} else {
-		resp_hdr.alloc_hint = payload_offset -
-			sizeof(struct dcerpc_header) -
-			sizeof(struct dcerpc_response_header);
-	}
-	resp_hdr.context_id = dce->req_hdr.context_id;
-	resp_hdr.cancel_count = 0;
-	ret = dcerpc_response_hdr_write(dce, &resp_hdr);
-	if (ret)
-		return ret;
-
-	dce->offset = payload_offset;
-	dce->response_started = continuation;
-	return 0;
-}
-
-static int __dcerpc_read_syntax(struct ksmbd_dcerpc *dce,
-				struct dcerpc_syntax *syn)
-{
-	if (ndr_read_int32(dce, &syn->uuid.time_low))
-		return -EINVAL;
-	if (ndr_read_int16(dce, &syn->uuid.time_mid))
-		return -EINVAL;
-	if (ndr_read_int16(dce, &syn->uuid.time_hi_and_version))
-		return -EINVAL;
-	if (ndr_read_bytes(dce, syn->uuid.clock_seq,
-			   sizeof(syn->uuid.clock_seq)))
-		return -EINVAL;
-	if (ndr_read_bytes(dce, syn->uuid.node, sizeof(syn->uuid.node)))
-		return -EINVAL;
-	if (ndr_read_int16(dce, &syn->ver_major))
-		return -EINVAL;
-	if (ndr_read_int16(dce, &syn->ver_minor))
-		return -EINVAL;
-	return 0;
-}
-
-static int __dcerpc_write_syntax(struct ksmbd_dcerpc *dce,
-				 struct dcerpc_syntax *syn)
-{
-	int ret;
-
-	ret = ndr_write_int32(dce, syn->uuid.time_low);
-	if (ret)
-		return ret;
-
-	ret = ndr_write_int16(dce, syn->uuid.time_mid);
-	if (ret)
-		return ret;
-
-	ret = ndr_write_int16(dce, syn->uuid.time_hi_and_version);
-	if (ret)
-		return ret;
-
-	ret = ndr_write_bytes(dce, syn->uuid.clock_seq,
-			      sizeof(syn->uuid.clock_seq));
-	if (ret)
-		return ret;
-
-	ret = ndr_write_bytes(dce, syn->uuid.node, sizeof(syn->uuid.node));
-	if (ret)
-		return ret;
-
-	ret = ndr_write_int16(dce, syn->ver_major);
-	if (ret)
-		return ret;
-
-	ret = ndr_write_int16(dce, syn->ver_minor);
-
-	return ret;
-}
-
-static void dcerpc_bind_req_free(struct dcerpc_bind_request *hdr)
-{
-	int i;
-
-	for (i = 0; i < hdr->num_contexts; i++)
-		g_free(hdr->list[i].transfer_syntaxes);
-	g_free(hdr->list);
-	hdr->list = NULL;
-	hdr->num_contexts = 0;
-}
-
-static int dcerpc_parse_bind_req(struct ksmbd_dcerpc *dce,
-				 struct dcerpc_bind_request *hdr)
-{
-	int i, j;
-	int ret = -EINVAL;
-
-	hdr->flags = dce->rpc_req->flags;
-	if (ndr_read_int16(dce, &hdr->max_xmit_frag_sz))
-		return -EINVAL;
-	if (ndr_read_int16(dce, &hdr->max_recv_frag_sz))
-		return -EINVAL;
-	if (ndr_read_int32(dce, &hdr->assoc_group_id))
-		return -EINVAL;
-	if (ndr_read_int8(dce, &hdr->num_contexts))
-		return -EINVAL;
-	hdr->list = NULL;
-	auto_align_offset(dce);
-
-	if (!hdr->num_contexts)
-		return 0;
-
-	hdr->list = g_try_malloc0_n(hdr->num_contexts, sizeof(struct dcerpc_context));
-	if (!hdr->list)
-		return -ENOMEM;
-
-	for (i = 0; i < hdr->num_contexts; i++) {
-		struct dcerpc_context *ctx = &hdr->list[i];
-
-		if (ndr_read_int16(dce, &ctx->id))
-			goto fail;
-		if (ndr_read_int8(dce, &ctx->num_syntaxes))
-			goto fail;
-		if (!ctx->num_syntaxes) {
-			pr_err("BIND: zero syntaxes provided\n");
-			goto fail;
-		}
-
-		if (__dcerpc_read_syntax(dce, &ctx->abstract_syntax))
-			goto fail;
-
-		ctx->transfer_syntaxes = g_try_malloc0_n(ctx->num_syntaxes,
-						sizeof(struct dcerpc_syntax));
-		if (!ctx->transfer_syntaxes) {
-			ret = -ENOMEM;
-			goto fail;
-		}
-
-		for (j = 0; j < ctx->num_syntaxes; j++) {
-			if (__dcerpc_read_syntax(dce, &ctx->transfer_syntaxes[j]))
-				goto fail;
-		}
-	}
-	return KSMBD_RPC_OK;
-
-fail:
-	dcerpc_bind_req_free(hdr);
-	return ret;
-}
-
-static int dcerpc_bind_invoke(struct ksmbd_rpc_pipe *pipe)
-{
-	struct ksmbd_dcerpc *dce;
-
-	dce = pipe->dce;
-	if (dcerpc_parse_bind_req(dce, &dce->bi_req))
-		return KSMBD_RPC_EBAD_DATA;
-
-	pipe->entry_processed = NULL;
-	return KSMBD_RPC_OK;
-}
-
-static int dcerpc_syntax_cmp(struct dcerpc_syntax *a, struct dcerpc_syntax *b)
-{
-	if (a->uuid.time_low != b->uuid.time_low)
-		return -1;
-	if (a->uuid.time_mid != b->uuid.time_mid)
-		return -1;
-	if (a->uuid.time_hi_and_version != b->uuid.time_hi_and_version)
-		return -1;
-	if (a->ver_major != b->ver_major)
-		return -1;
-	if (a->ver_minor != b->ver_minor)
-		return -1;
-	return 0;
-}
-
-static int dcerpc_syntax_supported(struct dcerpc_syntax *a)
-{
-	int k;
-
-	for (k = 0; k < ARRAY_SIZE(known_syntaxes); k++) {
-		struct dcerpc_syntax *b = &known_syntaxes[k].syn;
-
-		if (dcerpc_syntax_cmp(a, b))
-			continue;
-
-		if (known_syntaxes[k].ack_result == DCERPC_BIND_ACK_RES_ACCEPT &&
-		    (memcmp(a->uuid.clock_seq, b->uuid.clock_seq,
-			    sizeof(a->uuid.clock_seq)) ||
-		     memcmp(a->uuid.node, b->uuid.node,
-			    sizeof(a->uuid.node))))
-			continue;
-
-		return known_syntaxes[k].ack_result;
-	}
-	return -1;
-}
-
-static int dcerpc_bind_ack_return(struct ksmbd_rpc_pipe *pipe)
-{
-	struct ksmbd_dcerpc *dce = pipe->dce;
-	int num_trans, i, payload_offset;
-	char *addr;
-
-	dce->offset = sizeof(struct dcerpc_header);
-
-	/*
-	 * Preserve bind assoc group, if was specified.
-	 */
-	if (dce->bi_req.assoc_group_id == 0)
-		dce->bi_req.assoc_group_id = 0x53f0;
-
-	if (ndr_write_int16(dce, dce->bi_req.max_xmit_frag_sz))
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (ndr_write_int16(dce, dce->bi_req.max_recv_frag_sz))
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (ndr_write_int32(dce, dce->bi_req.assoc_group_id))
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (dce->bi_req.flags & KSMBD_RPC_SRVSVC_METHOD_INVOKE)
-		addr = "\\PIPE\\srvsvc";
-	else if (dce->bi_req.flags & KSMBD_RPC_WKSSVC_METHOD_INVOKE)
-		addr = "\\PIPE\\wkssvc";
-	else if (dce->bi_req.flags & KSMBD_RPC_SAMR_METHOD_INVOKE)
-		addr = "\\PIPE\\samr";
-	else if (dce->bi_req.flags & KSMBD_RPC_LSARPC_METHOD_INVOKE)
-		addr = "\\PIPE\\lsarpc";
-	else
-		return KSMBD_RPC_EBAD_FUNC;
-
-	if (dce->hdr.ptype == DCERPC_PTYPE_RPC_ALTCONT) {
-		if (ndr_write_int16(dce, 0))
-			return KSMBD_RPC_EBAD_DATA;
-
-		if (ndr_write_int16(dce, 0))
-			return KSMBD_RPC_EBAD_DATA;
-	} else {
-		if (ndr_write_int16(dce, strlen(addr) + 1))
-			return KSMBD_RPC_EBAD_DATA;
-
-		if (ndr_write_bytes(dce, addr, strlen(addr) + 1))
-			return KSMBD_RPC_EBAD_DATA;
-	}
-	align_offset(dce, 4); /* [flag(NDR_ALIGN4)]    DATA_BLOB _pad1; */
-
-	num_trans = dce->bi_req.num_contexts;
-	if (ndr_write_int8(dce, num_trans))
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (ndr_write_int8(dce, 0))
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (ndr_write_int16(dce, 0))
-		return KSMBD_RPC_EBAD_DATA;
-
-	for (i = 0; i < num_trans; i++) {
-		struct dcerpc_context *ctx = &dce->bi_req.list[i];
-		struct dcerpc_syntax *s = &ctx->transfer_syntaxes[0];
-		__s16 result = DCERPC_BIND_ACK_RES_PROVIDER_REJECT;
-		__s16 reason = DCERPC_BIND_ACK_RSN_TRANSFER_SYNTAXES_NOT_SUPPORTED;
-		int j;
-
-		for (j = 0; j < ctx->num_syntaxes; j++) {
-			struct dcerpc_syntax *candidate = &ctx->transfer_syntaxes[j];
-			int supported = dcerpc_syntax_supported(candidate);
-
-			if (supported == DCERPC_BIND_ACK_RES_ACCEPT) {
-				s = candidate;
-				result = DCERPC_BIND_ACK_RES_ACCEPT;
-				reason = DCERPC_BIND_ACK_RSN_NOT_SPECIFIED;
-				break;
-			}
-
-			if (supported == DCERPC_BIND_ACK_RES_NEGOTIATE_ACK &&
-			    ctx->num_syntaxes == 1) {
-				s = &negotiate_ack_PNIO_uuid;
-				result = DCERPC_BIND_ACK_RES_NEGOTIATE_ACK;
-				reason = 0;
-				break;
-			}
-		}
-
-		if (ndr_write_int16(dce, result))
-			return KSMBD_RPC_EBAD_DATA;
-
-		if (ndr_write_int16(dce, reason))
-			return KSMBD_RPC_EBAD_DATA;
-
-		if (__dcerpc_write_syntax(dce, s))
-			return KSMBD_RPC_EBAD_DATA;
-	}
-
-	payload_offset = dce->offset;
-	dce->offset = 0;
-
-	if (dce->hdr.ptype == DCERPC_PTYPE_RPC_ALTCONT)
-		dce->hdr.ptype = DCERPC_PTYPE_RPC_ALTCONTRESP;
-	else
-		dce->hdr.ptype = DCERPC_PTYPE_RPC_BINDACK;
-	dce->hdr.pfc_flags = DCERPC_PFC_FIRST_FRAG | DCERPC_PFC_LAST_FRAG;
-	dce->hdr.frag_length = payload_offset;
-	if (dcerpc_hdr_write(dce, &dce->hdr))
-		return KSMBD_RPC_EBAD_DATA;
-
-	dce->offset = payload_offset;
-	dce->rpc_resp->payload_sz = dce->offset;
-	return KSMBD_RPC_OK;
-}
-
-static int dcerpc_bind_return(struct ksmbd_rpc_pipe *pipe)
-{
-	struct ksmbd_dcerpc *dce = pipe->dce;
-	int ret;
-
-	if (!dce->bi_req.num_contexts)
-		ret = KSMBD_RPC_EBAD_DATA;
-	else
-		ret = dcerpc_bind_ack_return(pipe);
-
-	dcerpc_bind_req_free(&dce->bi_req);
-	return ret;
-}
-
-int rpc_restricted_context(struct ksmbd_rpc_command *req)
+int rpc_pipe_restricted(struct ksmbd_rpc_pipe *pipe)
 {
 	if (global_conf.restrict_anon == 0)
 		return 0;
 
-	return req->flags & KSMBD_RPC_RESTRICTED_CONTEXT;
+	return !pipe || pipe->req_flags & KSMBD_RPC_RESTRICTED_CONTEXT;
+}
+
+struct rpc_handle {
+	struct dcerpc_context_handle	handle;
+	void				*data;
+	GDestroyNotify			free_data;
+};
+
+static void rpc_handle_free(struct rpc_handle *h)
+{
+	if (h->free_data)
+		h->free_data(h->data);
+	g_free(h);
+}
+
+int rpc_pipe_handle_open(struct ksmbd_rpc_pipe *pipe, void *data,
+			 GDestroyNotify free_data,
+			 struct dcerpc_context_handle *handle)
+{
+	struct rpc_handle *h;
+	int i;
+
+	if (!pipe->handles)
+		pipe->handles = g_hash_table_new_full(NULL, NULL, NULL,
+				(GDestroyNotify)rpc_handle_free);
+	h = g_try_malloc0(sizeof(*h));
+	if (!h)
+		return -1;
+
+	/* The id, and random bytes so that a handle can't be guessed */
+	h->handle.context_handle_uuid.v1 = ++pipe->next_handle;
+	h->handle.context_handle_uuid.v2 = g_random_int();
+	h->handle.context_handle_uuid.v3 = g_random_int();
+	for (i = 0; i < 8; i++)
+		h->handle.context_handle_uuid.v4[i] = g_random_int();
+	h->data = data;
+	h->free_data = free_data;
+	g_hash_table_insert(pipe->handles,
+			    GUINT_TO_POINTER(h->handle.context_handle_uuid.v1),
+			    h);
+	*handle = h->handle;
+	return 0;
+}
+
+static struct rpc_handle *
+rpc_handle_find(struct ksmbd_rpc_pipe *pipe,
+		const struct dcerpc_context_handle *handle)
+{
+	struct rpc_handle *h;
+
+	if (!pipe || !pipe->handles)
+		return NULL;
+	h = g_hash_table_lookup(pipe->handles,
+			GUINT_TO_POINTER(handle->context_handle_uuid.v1));
+	if (!h || memcmp(&h->handle.context_handle_uuid,
+			 &handle->context_handle_uuid,
+			 sizeof(handle->context_handle_uuid)))
+		return NULL;
+	return h;
+}
+
+int rpc_pipe_handle_lookup(struct ksmbd_rpc_pipe *pipe,
+			   const struct dcerpc_context_handle *handle,
+			   void **data)
+{
+	struct rpc_handle *h = rpc_handle_find(pipe, handle);
+
+	if (!h)
+		return -1;
+	if (data)
+		*data = h->data;
+	return 0;
+}
+
+int rpc_pipe_handle_close(struct ksmbd_rpc_pipe *pipe,
+			  const struct dcerpc_context_handle *handle)
+{
+	struct rpc_handle *h = rpc_handle_find(pipe, handle);
+
+	if (!h)
+		return -1;
+	g_hash_table_remove(pipe->handles,
+			    GUINT_TO_POINTER(handle->context_handle_uuid.v1));
+	return 0;
+}
+
+/* libdcerpc's messages about a pipe, at mountd's log levels */
+static void libdcerpc_log(void *private_data, int level, const char *msg)
+{
+	struct ksmbd_rpc_pipe *pipe = private_data;
+
+	if (level == DCERPC_SERVER_LOG_ERROR)
+		pr_err("RPC: pipe %u: %s\n", pipe->id, msg);
+	else if (level == DCERPC_SERVER_LOG_INFO)
+		pr_info("RPC: pipe %u: %s\n", pipe->id, msg);
+	else
+		pr_debug("RPC: pipe %u: %s\n", pipe->id, msg);
+}
+
+/* 1 if flags name a service and the pipe is now its, else 0 */
+static int libdcerpc_pipe_open(struct ksmbd_rpc_pipe *pipe,
+			       unsigned int flags)
+{
+	size_t i;
+
+	for (i = 0; i < G_N_ELEMENTS(libdcerpc_services); i++) {
+		if (flags & libdcerpc_services[i].method)
+			break;
+	}
+	if (i == G_N_ELEMENTS(libdcerpc_services))
+		return 0;
+
+	pipe->srv = libdcerpc_services[i].endpoint();
+	if (!pipe->srv ||
+	    dcerpc_server_set_max_xmit_frag(pipe->srv, LIBDCERPC_MAX_FRAG))
+		return -ENOMEM;
+	/* the hex dumps and YAML of debug only with -v */
+	dcerpc_server_set_log(pipe->srv,
+			      log_level >= PR_DEBUG ? DCERPC_SERVER_LOG_DEBUG :
+			      log_level >= PR_INFO ? DCERPC_SERVER_LOG_INFO :
+			      DCERPC_SERVER_LOG_ERROR,
+			      libdcerpc_log, pipe);
+	pipe->rpc = dcerpc_server_pipe_create(pipe->srv, pipe);
+	if (!pipe->rpc)
+		return -ENOMEM;
+	return 1;
+}
+
+/* What the client wrote: every complete request is handled before return */
+static int libdcerpc_pipe_write(struct ksmbd_rpc_pipe *pipe,
+				struct ksmbd_rpc_command *req)
+{
+	int ret = KSMBD_RPC_OK;
+
+	g_mutex_lock(&pipe->lock);
+	pipe->req_flags = req->flags;
+	if (dcerpc_server_pipe_write(pipe->rpc, req->payload,
+				     req->payload_sz)) {
+		pr_err("RPC: pipe %u: not DCE/RPC\n", pipe->id);
+		ret = KSMBD_RPC_EBAD_DATA;
+	}
+	g_mutex_unlock(&pipe->lock);
+	return ret;
+}
+
+/* The next fragment for the client, or an empty reply if there is none */
+static int libdcerpc_pipe_read(struct ksmbd_rpc_pipe *pipe,
+			       struct ksmbd_rpc_command *resp,
+			       int max_resp_sz)
+{
+	size_t max = max_resp_sz - sizeof(struct ksmbd_rpc_command);
+	int more;
+
+	g_mutex_lock(&pipe->lock);
+	resp->payload_sz = dcerpc_server_pipe_read(pipe->rpc, resp->payload,
+						   max, &more);
+	g_mutex_unlock(&pipe->lock);
+	if (more)
+		pr_err("RPC: pipe %u: fragment larger than %zu\n",
+		       pipe->id, max);
+	return KSMBD_RPC_OK;
 }
 
 int rpc_ioctl_request(struct ksmbd_rpc_command *req,
 		      struct ksmbd_rpc_command *resp,
 		      int max_resp_sz)
 {
+	struct ksmbd_rpc_pipe *pipe = rpc_pipe_lookup(req->handle);
 	int ret;
 
-	ret = rpc_write_request(req, resp);
+	if (!pipe)
+		return KSMBD_RPC_EBAD_FID;
+	ret = libdcerpc_pipe_write(pipe, req);
 	if (ret == KSMBD_RPC_OK)
-		return rpc_read_request(req, resp, max_resp_sz);
+		ret = libdcerpc_pipe_read(pipe, resp, max_resp_sz);
 	return ret;
 }
 
@@ -1259,107 +358,32 @@ int rpc_read_request(struct ksmbd_rpc_command *req,
 		     struct ksmbd_rpc_command *resp,
 		     int max_resp_sz)
 {
-	int ret = KSMBD_RPC_ENOTIMPLEMENTED;
-	struct ksmbd_rpc_pipe *pipe;
-	struct ksmbd_dcerpc *dce;
+	struct ksmbd_rpc_pipe *pipe = rpc_pipe_lookup(req->handle);
 
-	pipe = rpc_pipe_lookup(req->handle);
-	if (!pipe || !pipe->dce) {
-		pr_err("RPC: no pipe or pipe has no associated DCE [%d]\n",
-			req->handle);
+	if (!pipe) {
+		pr_err("RPC: unknown pipe ID: %d\n", req->handle);
 		return KSMBD_RPC_EBAD_FID;
 	}
-
-	dce = pipe->dce;
-	dce->flags &= ~KSMBD_DCERPC_RETURN_READY;
-	dce->rpc_req = req;
-	dce->rpc_resp = resp;
-	dcerpc_set_ext_payload(dce, resp->payload, max_resp_sz);
-
-	if (dce->hdr.ptype == DCERPC_PTYPE_RPC_BIND ||
-	    dce->hdr.ptype == DCERPC_PTYPE_RPC_ALTCONT)
-		return dcerpc_bind_return(pipe);
-
-	if (dce->hdr.ptype != DCERPC_PTYPE_RPC_REQUEST)
-		return KSMBD_RPC_ENOTIMPLEMENTED;
-
-	if (req->flags & KSMBD_RPC_SRVSVC_METHOD_INVOKE)
-		return rpc_srvsvc_read_request(pipe, resp, max_resp_sz);
-
-	if (req->flags & KSMBD_RPC_WKSSVC_METHOD_INVOKE)
-		return rpc_wkssvc_read_request(pipe, resp, max_resp_sz);
-
-	if (req->flags & KSMBD_RPC_SAMR_METHOD_INVOKE)
-		return rpc_samr_read_request(pipe, resp, max_resp_sz);
-
-	if (req->flags & KSMBD_RPC_LSARPC_METHOD_INVOKE)
-		return rpc_lsarpc_read_request(pipe, resp, max_resp_sz);
-	return ret;
+	return libdcerpc_pipe_read(pipe, resp, max_resp_sz);
 }
 
 int rpc_write_request(struct ksmbd_rpc_command *req,
 		      struct ksmbd_rpc_command *resp)
 {
-	struct ksmbd_rpc_pipe *pipe;
-	struct ksmbd_dcerpc *dce;
+	struct ksmbd_rpc_pipe *pipe = rpc_pipe_lookup(req->handle);
 
-	pipe = rpc_pipe_lookup(req->handle);
-	if (!pipe)
-		return KSMBD_RPC_ENOMEM;
-
-	if (pipe->dce->flags & KSMBD_DCERPC_RETURN_READY)
-		return KSMBD_RPC_OK;
-
-	if (pipe->num_entries)
-		pr_err("RPC: A call on unflushed pipe. Pending %d\n",
-			pipe->num_entries);
-	if (pipe->num_entries || pipe->entry_processed ||
-	    pipe->dce->response_payload)
-		rpc_pipe_reset(pipe);
-
-	dce = pipe->dce;
-	dce->rpc_req = req;
-	dce->rpc_resp = resp;
-	dce->response_started = 0;
-	g_clear_pointer(&dce->response_payload, g_free);
-	dce->response_payload_sz = 0;
-	dce->response_payload_offset = 0;
-	dce->response_alloc_hint = 0;
-	dce->response_limit = 0;
-	dcerpc_set_ext_payload(dce, req->payload, req->payload_sz);
-	dce->flags |= KSMBD_DCERPC_RETURN_READY;
-
-	if (dcerpc_hdr_read(dce, &dce->hdr))
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (dce->hdr.ptype == DCERPC_PTYPE_RPC_BIND ||
-	    dce->hdr.ptype == DCERPC_PTYPE_RPC_ALTCONT)
-		return dcerpc_bind_invoke(pipe);
-
-	if (dce->hdr.ptype != DCERPC_PTYPE_RPC_REQUEST)
-		return KSMBD_RPC_ENOTIMPLEMENTED;
-
-	if (dcerpc_request_hdr_read(dce, &dce->req_hdr))
-		return KSMBD_RPC_EBAD_DATA;
-
-	if (req->flags & KSMBD_RPC_SRVSVC_METHOD_INVOKE)
-		return rpc_srvsvc_write_request(pipe);
-
-	if (req->flags & KSMBD_RPC_WKSSVC_METHOD_INVOKE)
-		return rpc_wkssvc_write_request(pipe);
-
-	if (req->flags & KSMBD_RPC_SAMR_METHOD_INVOKE)
-		return rpc_samr_write_request(pipe);
-
-	if (req->flags & KSMBD_RPC_LSARPC_METHOD_INVOKE)
-		return rpc_lsarpc_write_request(pipe);
-	return KSMBD_RPC_ENOTIMPLEMENTED;
+	if (!pipe) {
+		pr_err("RPC: unknown pipe ID: %d\n", req->handle);
+		return KSMBD_RPC_EBAD_FID;
+	}
+	return libdcerpc_pipe_write(pipe, req);
 }
 
 int rpc_open_request(struct ksmbd_rpc_command *req,
 		     struct ksmbd_rpc_command *resp)
 {
 	struct ksmbd_rpc_pipe *pipe;
+	int ret;
 
 	pipe = rpc_pipe_lookup(req->handle);
 	if (pipe) {
@@ -1371,13 +395,13 @@ int rpc_open_request(struct ksmbd_rpc_command *req,
 	if (!pipe)
 		return -ENOMEM;
 
-	pipe->dce = dcerpc_ext_alloc(KSMBD_DCERPC_LITTLE_ENDIAN |
-				     KSMBD_DCERPC_ALIGN4,
-				     req->payload,
-				     req->payload_sz);
-	if (!pipe->dce) {
+	ret = libdcerpc_pipe_open(pipe, req->flags);
+	if (ret <= 0) {
+		if (!ret)
+			pr_err("RPC: no service for pipe flags 0x%x\n",
+			       req->flags);
 		rpc_pipe_free(pipe);
-		return KSMBD_RPC_ENOMEM;
+		return ret ? KSMBD_RPC_ENOMEM : KSMBD_RPC_ENOTIMPLEMENTED;
 	}
 	return KSMBD_RPC_OK;
 }
