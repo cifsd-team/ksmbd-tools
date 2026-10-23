@@ -2490,6 +2490,86 @@ static void test_handle_grants(void)
 	}
 }
 
+static void test_user_all_access_fields(void)
+{
+	GByteArray *server, *domain, *user, *stub = g_byte_array_new(), *result;
+	unsigned int combination, i;
+
+	fixture_init();
+	open_pipe(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 0xac, 1);
+	server = samr_connect_handle();
+	domain = samr_open_domain(server, local_domain_sid, sizeof(local_domain_sid));
+	for (combination = 0; combination < 16; combination++) {
+		unsigned int access = (combination & 3) | ((combination & 12) << 1);
+		unsigned int expected = (combination & 1 ? 0x3f : 0) |
+			(combination & 2 ? 0xc00000 : 0) |
+			(combination & 4 ? 0x3ffc0 : 0) |
+			(combination & 8 ? 0x3c0000 : 0);
+		struct wire_reader wire;
+		unsigned int refs[13];
+
+		user = samr_open_account_access(domain, 34, 1000, access);
+		g_assert_cmpuint(get32(user->data + 20), ==, 0);
+		g_byte_array_set_size(stub, 0);
+		g_byte_array_append(stub, user->data, 20);
+		put16(stub, 21);
+		result = exchange(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 36, stub, 4096);
+		g_byte_array_unref(user);
+		if (!combination) {
+			g_assert_cmpuint(get32(result->data + result->len - 4), ==,
+					 KSMBD_NT_STATUS_ACCESS_DENIED);
+			g_byte_array_unref(result);
+			continue;
+		}
+		wire = (struct wire_reader){ .data = result->data, .size = result->len };
+		g_assert_cmpuint(wire32(&wire), !=, 0);
+		g_assert_cmpuint(wire16(&wire), ==, 21);
+		wire_align(&wire, 8);
+		for (i = 0; i < 12; i++)
+			g_assert_cmpuint(wire32(&wire), ==, 0);
+		for (i = 0; i < 13; i++) {
+			unsigned int length = wire16(&wire);
+
+			g_assert_cmpuint(wire16(&wire), >=, length);
+			refs[i] = wire32(&wire);
+			g_assert_cmpuint(!!refs[i], ==,
+				(i < 2 && (combination & 1)) ||
+				((i == 2 || i == 5) && (combination & 4)));
+			if (!refs[i])
+				g_assert_cmpuint(length, ==, 0);
+		}
+		g_assert_cmpuint(wire32(&wire), ==, 0);
+		g_assert_cmpuint(wire32(&wire), ==, 0);
+		g_assert_cmpuint(wire32(&wire), ==, combination & 1 ? 1000 : 0);
+		g_assert_cmpuint(wire32(&wire), ==, combination & 1 ? UINT32_MAX : 0);
+		g_assert_cmpuint(wire32(&wire), ==, combination & 8 ? 16 : 0);
+		g_assert_cmpuint(wire32(&wire), ==, expected);
+		g_assert_cmpuint(wire16(&wire), ==, combination & 4 ? 168 : 0);
+		g_assert_cmpuint(!!wire32(&wire), ==, !!(combination & 4));
+		for (i = 0; i < 3; i++)
+			g_assert_cmpuint(wire32(&wire), ==, 0);
+		for (i = 0; i < 13; i++) {
+			g_autofree char *value = refs[i] ? wire_string(&wire) : NULL;
+
+			if (refs[i] && i < 2)
+				g_assert_cmpstr(value, ==, ((struct ksmbd_user *)users->pdata[0])->name);
+		}
+		if (combination & 4) {
+			g_assert_cmpuint(wire32(&wire), ==, 1260);
+			g_assert_cmpuint(wire32(&wire), ==, 0);
+			g_assert_cmpuint(wire32(&wire), ==, 21);
+			wire_skip(&wire, 21);
+		}
+		g_assert_cmpuint(wire32(&wire), ==, 0);
+		g_assert_cmpuint(wire.offset, ==, wire.size);
+		g_byte_array_unref(result);
+	}
+	g_byte_array_unref(stub);
+	g_byte_array_unref(domain);
+	g_byte_array_unref(server);
+	fixture_destroy();
+}
+
 static void test_user_path_consistency(void)
 {
 	GByteArray *server, *domain, *user, *stub = g_byte_array_new(), *result;
@@ -2738,5 +2818,6 @@ int main(int argc, char **argv)
 	g_test_add_func("/rpc/lsarpc/predefined", test_lsa_predefined);
 	g_test_add_func("/rpc/samr/group-alias-membership", test_group_alias_membership);
 	g_test_add_func("/rpc/handle-grants", test_handle_grants);
+	g_test_add_func("/rpc/samr/user-all-access-fields", test_user_all_access_fields);
 	return g_test_run();
 }

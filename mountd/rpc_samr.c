@@ -55,6 +55,7 @@
 #define SAM_GROUP_ALL_ACCESS		0x000F001F
 #define SAM_ALIAS_ALL_ACCESS		0x000F001F
 #define SAM_USER_READ_GENERAL		0x00000001
+#define SAM_USER_READ_PREFERENCES	0x00000002
 #define SAM_USER_READ_LOGON		0x00000008
 #define SAM_USER_READ_ACCOUNT		0x00000010
 #define SAM_USER_LIST_GROUPS		0x00000100
@@ -2260,216 +2261,121 @@ static int samr_query_user_info_simple(struct ksmbd_dcerpc *dce,
 	return KSMBD_RPC_OK;
 }
 
+static unsigned int samr_user_all_fields(unsigned int access)
+{
+	unsigned int fields = 0;
+
+	if (access & SAM_USER_READ_GENERAL)
+		fields |= 0x0000003f; /* Names, IDs, admin/user comments. */
+	if (access & SAM_USER_READ_LOGON)
+		fields |= 0x0003ffc0; /* Paths, workstations, logon/password-change data. */
+	if (access & SAM_USER_READ_ACCOUNT)
+		fields |= 0x003c0000; /* Password last set, expiry, control, parameters. */
+	if (access & SAM_USER_READ_PREFERENCES)
+		fields |= 0x00c00000; /* Country code and code page. */
+	return fields;
+}
+
+static int samr_write_user_all(struct ksmbd_dcerpc *dce,
+			       const struct connect_handle *ch, unsigned int fields)
+{
+	g_autofree char *home = NULL, *profile = NULL;
+	const char *strings[13] = { 0 };
+	int general = !!(ch->access_mask & SAM_USER_READ_GENERAL);
+	int logon = !!(ch->access_mask & SAM_USER_READ_LOGON);
+	int account = !!(ch->access_mask & SAM_USER_READ_ACCOUNT);
+	unsigned int i;
+
+	if (logon && samr_user_paths(ch->user, &home, &profile))
+		return KSMBD_RPC_ENOMEM;
+	if (general)
+		strings[0] = strings[1] = ch->user->name;
+	if (logon) {
+		strings[2] = home;
+		strings[5] = profile;
+	}
+	if (samr_write_user_info_header(dce, 21))
+		return KSMBD_RPC_EBAD_DATA;
+	/* Unrecorded timestamps are zero; unauthorized fields are also zero. */
+	for (i = 0; i < 6; i++)
+		if (ndr_write_int64(dce, 0))
+			return KSMBD_RPC_EBAD_DATA;
+
+	/* Ten strings, two absent OWF passwords, and absent private data. */
+	for (i = 0; i < G_N_ELEMENTS(strings); i++)
+		if (strings[i] ? samr_write_user_string_rep(dce, strings[i]) :
+				 samr_write_null_string_rep(dce))
+			return KSMBD_RPC_EBAD_DATA;
+	if (ndr_write_int32(dce, 0) || ndr_write_int32(dce, 0) || /* SD */
+	    ndr_write_int32(dce, general ? ch->user->uid : 0) ||
+	    ndr_write_int32(dce, general ? SMB_LOCAL_USERS_RID : 0) ||
+	    ndr_write_int32(dce, account ? SAMR_USER_ACCOUNT_CONTROL_NORMAL : 0) ||
+	    ndr_write_int32(dce, fields) ||
+	    ndr_write_int16(dce, logon ? 168 : 0))
+		return KSMBD_RPC_EBAD_DATA;
+	if (logon)
+		dce->num_pointers++;
+	if (ndr_write_int32(dce, logon ? dce->num_pointers : 0))
+		return KSMBD_RPC_EBAD_DATA;
+	/* BadPasswordCount, LogonCount, CountryCode, CodePage. */
+	for (i = 0; i < 4; i++)
+		if (ndr_write_int16(dce, 0))
+			return KSMBD_RPC_EBAD_DATA;
+	/* Password-present/expired/private-data booleans are not returned. */
+	for (i = 0; i < 4; i++)
+		if (ndr_write_int8(dce, 0))
+			return KSMBD_RPC_EBAD_DATA;
+	for (i = 0; i < G_N_ELEMENTS(strings); i++)
+		if (strings[i] && ndr_write_string_data(dce, strings[i]))
+			return KSMBD_RPC_EBAD_DATA;
+	if (logon) {
+		/* IDL: size_is(1260), length_is((UnitsPerWeek + 7) / 8). */
+		if (ndr_write_int32(dce, 1260) || ndr_write_int32(dce, 0) ||
+		    ndr_write_int32(dce, 21))
+			return KSMBD_RPC_EBAD_DATA;
+		for (i = 0; i < 21; i++)
+			if (ndr_write_int8(dce, 0xff))
+				return KSMBD_RPC_EBAD_DATA;
+	}
+	return KSMBD_RPC_OK;
+}
+
 static int samr_query_user_info_return(struct ksmbd_rpc_pipe *pipe)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
 	struct connect_handle *ch = NULL;
-	char *home_dir;
-	g_autofree char *profile_path = NULL;
-	unsigned int required;
-	int i, ret;
+	unsigned int required, fields;
+	int ret;
 
 	switch (dce->sm_req.level) {
-	case 1:
-	case 6:
-	case 7:
-	case 8:
-	case 9:
-	case 13:
+	case 1: case 6: case 7: case 8: case 9: case 13:
 		required = SAM_USER_READ_GENERAL;
 		break;
-	case 10:
-	case 11:
-	case 12:
-	case 14:
+	case 10: case 11: case 12: case 14:
 		required = SAM_USER_READ_LOGON;
 		break;
 	case 21:
-		required = SAM_USER_READ_ACCOUNT;
+		required = 0; /* At least one of the four read rights is checked below. */
 		break;
 	default:
 		ret = SAMR_STATUS_INVALID_INFO_CLASS;
-		goto invalid;
+		goto out;
 	}
-
 	ch = samr_ch_lookup(pipe, dce->sm_req.handle);
 	ret = samr_handle_access(ch, SAMR_HANDLE_USER, required);
 	if (ret)
-		goto invalid;
+		goto out;
 	if (dce->sm_req.level != 21) {
 		ret = samr_query_user_info_simple(dce, ch);
-		samr_ch_put(ch);
-		return ret;
+		goto out;
 	}
-
-	if (samr_user_paths(ch->user, &home_dir, &profile_path)) {
-		samr_ch_put(ch);
-		return KSMBD_RPC_ENOMEM;
+	fields = samr_user_all_fields(ch->access_mask);
+	if (!fields) {
+		ret = KSMBD_RPC_EACCESS_DENIED;
+		goto out;
 	}
-
-	dce->num_pointers++;
-	ret = ndr_write_int32(dce, dce->num_pointers); // ref pointer
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int16(dce, 0x15); // info
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int16(dce, 0);
-	if (ret)
-		goto out;
-
-	/*
-	 * Last Logon/Logoff/Password change, Acct Expiry,
-	 * Allow Passworkd Change, Force Password Change.
-	 */
-	for (i = 0; i < 6; i++) {
-		ret = ndr_write_int64(dce, 0);
-		if (ret)
-			goto out;
-	}
-
-	/*
-	 * SAMPR_USER_ALL_INFORMATION contains ten RPC_UNICODE_STRING values
-	 * before the password blobs.  Serialize all fixed representations
-	 * together, then emit their deferred bodies in the same order.
-	 */
-	if (samr_write_user_string_rep(dce, ch->user->name) ||
-	    samr_write_user_string_rep(dce, ch->user->name) ||
-	    samr_write_user_string_rep(dce, home_dir) ||
-	    samr_write_null_string_rep(dce) ||
-	    samr_write_null_string_rep(dce) ||
-	    samr_write_user_string_rep(dce, profile_path) ||
-	    samr_write_null_string_rep(dce) ||
-	    samr_write_null_string_rep(dce) ||
-	    samr_write_null_string_rep(dce) ||
-	    samr_write_null_string_rep(dce))
-		goto out;
-
-	/* Lm/Nt OWF passwords and private data are absent. */
-	for (i = 0; i < 3; i++) {
-		ret = ndr_write_int16(dce, 0);
-		if (ret)
-			goto out;
-
-		ret = ndr_write_int16(dce, 0);
-		if (ret)
-			goto out;
-
-		ret = ndr_write_int32(dce, 0);
-		if (ret)
-			goto out;
-	}
-
-	ret = ndr_write_int32(dce, 0); // buf count
-	if (ret)
-		goto out;
-
-	/* Pointer to Buffer */
-	ret = ndr_write_int32(dce, 0);
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int32(dce, ch->user->uid); // rid
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int32(dce, SMB_LOCAL_USERS_RID); // primary gid
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int32(dce, 0x00000010); // Acct Flags : Acb Normal
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int32(dce, 0x00FFFFFF); // Fields Present
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int16(dce, 168); // logon hours units per week
-	if (ret)
-		goto out;
-
-	/* Pointers to Bits */
-	dce->num_pointers++;
-	ret = ndr_write_int32(dce, dce->num_pointers); //ref pointer
-	if (ret)
-		goto out;
-
-	/* Bad Password/Logon Count/Country Code/Code Page */
-	for (i = 0; i < 4; i++) {
-		ret = ndr_write_int16(dce, 0);
-		if (ret)
-			goto out;
-	}
-
-
-	/* Lm/Nt Password Set, Password Expired/etc */
-	ret = ndr_write_int8(dce, 0);
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int8(dce, 0);
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int8(dce, 0);
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int8(dce, 0);
-	if (ret)
-		goto out;
-
-
-	ret = ndr_write_string_data(dce, ch->user->name);
-	if (ret)
-		goto out;
-
-	ret = ndr_write_string_data(dce, ch->user->name);
-	if (ret)
-		goto out;
-
-	ret = ndr_write_string_data(dce, home_dir);
-	if (ret)
-		goto out;
-
-
-	ret = ndr_write_string_data(dce, profile_path);
-	if (ret)
-		goto out;
-
-	/* Logon Hours */
-	/* size_is(1260), length_is((UnitsPerWeek + 7) / 8) */
-	ret = ndr_write_int32(dce, 1260);
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int32(dce, 0);
-	if (ret)
-		goto out;
-
-	ret = ndr_write_int32(dce, 21);
-	if (ret)
-		goto out;
-
-	for (i = 0; i < 21; i++) {
-		ret = ndr_write_int8(dce, 0xff);
-		if (ret)
-			break;
-	}
-
+	ret = samr_write_user_all(dce, ch, fields);
 out:
-	g_free(home_dir);
-	samr_ch_put(ch);
-	return ret ? KSMBD_RPC_EBAD_DATA: KSMBD_RPC_OK;
-
-invalid:
-	if (ndr_write_int32(dce, 0)) {
-		samr_ch_put(ch);
-		return KSMBD_RPC_EBAD_DATA;
-	}
 	samr_ch_put(ch);
 	return ret;
 }
