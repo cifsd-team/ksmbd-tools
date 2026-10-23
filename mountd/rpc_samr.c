@@ -2327,7 +2327,7 @@ static int samr_query_user_info_return(struct ksmbd_rpc_pipe *pipe)
 	if (ret)
 		goto out;
 
-	ret = ndr_write_int32(dce, 168); // logon hours units per week
+	ret = ndr_write_int16(dce, 168); // logon hours units per week
 	if (ret)
 		goto out;
 

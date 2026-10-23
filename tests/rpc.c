@@ -1749,6 +1749,49 @@ static void test_alter_context(void)
 	fixture_destroy();
 }
 
+static void test_user_all_big_endian(void)
+{
+	GByteArray *server, *domain, *user, *stub = g_byte_array_new();
+	struct ksmbd_rpc_command *req, *resp;
+	__u16 value16;
+	__u32 value32;
+
+	fixture_init();
+	open_pipe(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 0xac, 1);
+	server = samr_connect_handle();
+	domain = samr_open_domain(server, local_domain_sid, sizeof(local_domain_sid));
+	user = samr_open_account(domain, 34, 1000);
+	/* A context handle is an opaque 20-byte token, even across byte orders. */
+	g_byte_array_append(stub, user->data, 20);
+	put16(stub, 0x1500);
+	req = request(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 36, stub);
+	req->payload[4] = 0;
+	value16 = htobe16(req->payload_sz);
+	memcpy(req->payload + 8, &value16, 2);
+	value16 = htobe16(36);
+	memcpy(req->payload + 22, &value16, 2);
+	value32 = htobe32(1);
+	memcpy(req->payload + 12, &value32, 4);
+	value32 = htobe32(stub->len);
+	memcpy(req->payload + 16, &value32, 4);
+	resp = command(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 4096);
+	g_assert_cmpint(rpc_ioctl_request(req, resp, 4096), ==, 0);
+	g_assert_cmpuint(resp->payload_sz, >, 212);
+	g_assert_cmpuint(resp->payload[4], ==, 0);
+	g_assert_cmpuint(resp->payload[208], ==, 0);
+	g_assert_cmpuint(resp->payload[209], ==, 168);
+	g_assert_cmpuint(resp->payload[210], ==, 0);
+	g_assert_cmpuint(resp->payload[211], ==, 0);
+	g_assert_cmpuint(get32(resp->payload + resp->payload_sz - 4), ==, 0);
+	g_free(req);
+	g_free(resp);
+	g_byte_array_unref(stub);
+	g_byte_array_unref(user);
+	g_byte_array_unref(domain);
+	g_byte_array_unref(server);
+	fixture_destroy();
+}
+
 static void test_alias_membership_access(void)
 {
 	GByteArray *server, *domain, *stub = g_byte_array_new(), *result;
@@ -1842,5 +1885,6 @@ int main(int argc, char **argv)
 	g_test_add_func("/rpc/alter-context", test_alter_context);
 	g_test_add_func("/rpc/samr/connect-revision", test_connect_revision);
 	g_test_add_func("/rpc/samr/alias-membership-access", test_alias_membership_access);
+	g_test_add_func("/rpc/samr/user-all-big-endian", test_user_all_big_endian);
 	return g_test_run();
 }
