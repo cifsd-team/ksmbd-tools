@@ -1000,9 +1000,13 @@ static int samr_write_enum_entries_response(struct ksmbd_rpc_pipe *pipe,
 	unsigned int start, count, next;
 	unsigned int total_entries = entries ? entries->len : 0;
 
-	start = dce->sm_req.resume_handle;
-	if (start > total_entries)
-		return KSMBD_RPC_EINVALID_PARAMETER;
+	/* The cookie is the next RID, not an index into a mutable snapshot. */
+	for (start = 0; start < total_entries; start++) {
+		struct samr_account_entry *entry = entries->pdata[start];
+
+		if (entry->rid >= dce->sm_req.resume_handle)
+			break;
+	}
 
 	{
 		size_t remaining = dce->sm_req.buf_size;
@@ -1019,11 +1023,17 @@ static int samr_write_enum_entries_response(struct ksmbd_rpc_pipe *pipe,
 	if (start < total_entries && !count)
 		return SAMR_STATUS_BUFFER_TOO_SMALL;
 
-	next = start + count;
+	next = dce->sm_req.resume_handle;
+	if (count) {
+		struct samr_account_entry *last = entries->pdata[start + count - 1];
+
+		/* UINT32_MAX can only be the final entry, ending the session. */
+		next = last->rid == UINT32_MAX ? 0 : last->rid + 1;
+	}
 	dce->sm_req.resume_handle = next;
 	dce->sm_req.enum_start = start;
 	dce->sm_req.enum_count = count;
-	if (next < total_entries)
+	if (start + count < total_entries)
 		dce->sm_req.operation_status = KSMBD_RPC_EMORE_DATA;
 	else
 		dce->sm_req.operation_status = KSMBD_RPC_OK;

@@ -499,7 +499,7 @@ static void test_samr_fragmentation(void)
 	other = exchange(1, flags, 13, stub, 4096);
 	g_assert_cmpmem(result->data, result->len, other->data, other->len);
 	g_assert_cmpuint(result->len, >, UINT16_MAX);
-	g_assert_cmpuint(get32(result->data), ==, users->len);
+	g_assert_cmpuint(get32(result->data), ==, 1000 + users->len);
 	g_assert_cmpuint(get32(result->data + result->len - 4), ==, 0);
 	g_byte_array_unref(result);
 	g_byte_array_unref(other);
@@ -1459,7 +1459,7 @@ static void test_account_namespaces(void)
 		put32(stub, UINT32_MAX);
 		result = exchange(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 11, stub, 128);
 		wire = (struct wire_reader){ .data = result->data, .size = result->len };
-		g_assert_cmpuint(wire32(&wire), ==, i);
+		g_assert_cmpuint(wire32(&wire), ==, i ? 1001 : 0);
 		g_assert_cmpuint(wire32(&wire), !=, 0);
 		g_assert_cmpuint(wire32(&wire), ==, i);
 		if (i) {
@@ -1803,6 +1803,68 @@ static void test_samr_enum_sizes(void)
 	fixture_destroy();
 }
 
+static void fixture_remove_user(unsigned int index)
+{
+	struct ksmbd_user *user = users->pdata[index];
+
+	g_assert_cmpint(user->ref_count, ==, 0);
+	g_ptr_array_remove_index(users, index);
+	g_free(user->name);
+	g_free(user);
+}
+
+static void test_samr_enum_mutation(void)
+{
+	GByteArray *server, *domain, *result;
+	struct ksmbd_user *added;
+	unsigned int cookie;
+
+	fixture_init();
+	while (users->len > 6)
+		fixture_remove_user(users->len - 1);
+	open_pipe(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 0xac, 1);
+	server = samr_connect_handle();
+	domain = samr_open_domain(server, local_domain_sid, sizeof(local_domain_sid));
+	result = samr_enum(domain, 13, 0, 384);
+	g_assert_cmpuint(get32(result->data + 8), ==, 4);
+	g_assert_cmpuint(get32(result->data + 20), ==, 1000);
+	cookie = get32(result->data);
+	g_assert_cmpuint(cookie, ==, 1004);
+	g_byte_array_unref(result);
+	fixture_remove_user(0); /* An already returned account. */
+	fixture_remove_user(users->len - 1); /* An account not yet returned. */
+	added = g_new0(struct ksmbd_user, 1);
+	added->uid = 2000;
+	added->name = g_strdup("new-account");
+	g_ptr_array_add(users, added);
+	result = samr_enum(domain, 13, cookie, 384);
+	g_assert_cmpuint(get32(result->data + 8), ==, 2);
+	g_assert_cmpuint(get32(result->data + 20), ==, 1004);
+	g_assert_cmpuint(get32(result->data + 32), ==, 2000);
+	g_assert_cmpuint(get32(result->data + result->len - 4), ==, 0);
+	g_byte_array_unref(result);
+	/* UID zero must advance, and the last usable UID must not wrap. */
+	while (users->len > 2)
+		fixture_remove_user(users->len - 1);
+	((struct ksmbd_user *)users->pdata[0])->uid = 0;
+	((struct ksmbd_user *)users->pdata[1])->uid = UINT32_MAX - 1;
+	result = samr_enum(domain, 13, 0, 96);
+	g_assert_cmpuint(get32(result->data + 20), ==, 0);
+	g_assert_cmpuint(get32(result->data), ==, 1);
+	g_byte_array_unref(result);
+	result = samr_enum(domain, 13, 1, 96);
+	g_assert_cmpuint(get32(result->data + 20), ==, UINT32_MAX - 1);
+	g_assert_cmpuint(get32(result->data), ==, UINT32_MAX);
+	g_byte_array_unref(result);
+	result = samr_enum(domain, 13, UINT32_MAX, 96);
+	g_assert_cmpuint(get32(result->data + 8), ==, 0);
+	g_assert_cmpuint(get32(result->data + result->len - 4), ==, 0);
+	g_byte_array_unref(result);
+	g_byte_array_unref(domain);
+	g_byte_array_unref(server);
+	fixture_destroy();
+}
+
 static void test_user_path_consistency(void)
 {
 	GByteArray *server, *domain, *user, *stub = g_byte_array_new(), *result;
@@ -2044,5 +2106,6 @@ int main(int argc, char **argv)
 	g_test_add_func("/rpc/unicode-account-names", test_unicode_account_names);
 	g_test_add_func("/rpc/samr/user-path-consistency", test_user_path_consistency);
 	g_test_add_func("/rpc/samr/enum-sizes", test_samr_enum_sizes);
+	g_test_add_func("/rpc/samr/enum-mutation", test_samr_enum_mutation);
 	return g_test_run();
 }
