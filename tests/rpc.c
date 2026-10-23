@@ -1749,6 +1749,39 @@ static void test_alter_context(void)
 	fixture_destroy();
 }
 
+static void test_alias_membership_access(void)
+{
+	GByteArray *server, *domain, *stub = g_byte_array_new(), *result;
+	unsigned int access;
+
+	fixture_init();
+	open_pipe(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 0xac, 1);
+	server = samr_connect_handle();
+	for (access = 0; access <= 0x80; access += 0x80) {
+		g_byte_array_set_size(stub, 0);
+		g_byte_array_append(stub, server->data, 20);
+		put32(stub, access);
+		put32(stub, local_domain_sid[1]);
+		g_byte_array_append(stub, local_domain_sid, sizeof(local_domain_sid));
+		domain = exchange(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 7, stub, 128);
+		g_assert_cmpuint(get32(domain->data + 20), ==, 0);
+		g_byte_array_set_size(stub, 0);
+		g_byte_array_append(stub, domain->data, 20);
+		put32(stub, 0);
+		put32(stub, 0);
+		result = exchange(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 16, stub, 128);
+		g_assert_cmpuint(get32(result->data + result->len - 4), ==,
+				 access ? 0 : KSMBD_NT_STATUS_ACCESS_DENIED);
+		if (access)
+			g_assert_cmpuint(get32(result->data), ==, 0);
+		g_byte_array_unref(result);
+		g_byte_array_unref(domain);
+	}
+	g_byte_array_unref(server);
+	g_byte_array_unref(stub);
+	fixture_destroy();
+}
+
 static void test_connect_revision(void)
 {
 	GByteArray *stub, *result;
@@ -1808,5 +1841,6 @@ int main(int argc, char **argv)
 	g_test_add_func("/rpc/lsarpc/account-names", test_lsa_account_names);
 	g_test_add_func("/rpc/alter-context", test_alter_context);
 	g_test_add_func("/rpc/samr/connect-revision", test_connect_revision);
+	g_test_add_func("/rpc/samr/alias-membership-access", test_alias_membership_access);
 	return g_test_run();
 }

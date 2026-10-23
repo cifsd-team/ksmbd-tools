@@ -2601,8 +2601,7 @@ static int samr_get_alias_membership_return(struct ksmbd_rpc_pipe *pipe)
 
 	ch = samr_ch_lookup(pipe, dce->sm_req.handle);
 	ret = samr_handle_access(ch, SAMR_HANDLE_DOMAIN,
-				 SAM_DOMAIN_GET_ALIAS_MEMBERSHIP |
-				 SAM_DOMAIN_LOOKUP);
+				 SAM_DOMAIN_GET_ALIAS_MEMBERSHIP);
 	if (ret)
 		goto out;
 
