@@ -1959,6 +1959,39 @@ static void test_lsa_ignored_translations(void)
 	fixture_destroy();
 }
 
+static void test_lsa_lookup_scope(void)
+{
+	const unsigned int opnums[] = { 14, 15, 57, 68 };
+	const unsigned int options[] = { 0, 1, 0x80000000, UINT32_MAX };
+	GByteArray *policy, *result;
+	unsigned int i, level, j;
+
+	fixture_init();
+	open_pipe(1, KSMBD_RPC_LSARPC_METHOD_INVOKE, 0xab, 0);
+	policy = open_policy();
+	for (i = 0; i < G_N_ELEMENTS(opnums); i++) {
+		for (level = 0; level <= 8; level++) {
+			result = lsa_lookup_request(policy, opnums[i], 0, 0, level, 0);
+			g_assert_cmpuint(get32(result->data + result->len - 4), ==,
+					 level == 1 ? 0 : KSMBD_NT_STATUS_INVALID_PARAMETER);
+			g_byte_array_unref(result);
+		}
+		for (j = 0; j < G_N_ELEMENTS(options); j++) {
+			result = lsa_lookup_request(policy, opnums[i], 0, 0, 1, options[j]);
+			g_assert_cmpuint(get32(result->data + result->len - 4), ==,
+					 opnums[i] == 68 && (j == 1 || j == 3) ?
+					 KSMBD_NT_STATUS_INVALID_PARAMETER : 0);
+			g_byte_array_unref(result);
+		}
+		result = lsa_lookup_request(policy, opnums[i], 0, 0, 2, 0x80000000);
+		g_assert_cmpuint(get32(result->data + result->len - 4), ==,
+				 KSMBD_NT_STATUS_INVALID_PARAMETER);
+		g_byte_array_unref(result);
+	}
+	g_byte_array_unref(policy);
+	fixture_destroy();
+}
+
 static void test_user_path_consistency(void)
 {
 	GByteArray *server, *domain, *user, *stub = g_byte_array_new(), *result;
@@ -2202,5 +2235,6 @@ int main(int argc, char **argv)
 	g_test_add_func("/rpc/samr/enum-sizes", test_samr_enum_sizes);
 	g_test_add_func("/rpc/samr/enum-mutation", test_samr_enum_mutation);
 	g_test_add_func("/rpc/lsarpc/ignored-translations", test_lsa_ignored_translations);
+	g_test_add_func("/rpc/lsarpc/lookup-scope", test_lsa_lookup_scope);
 	return g_test_run();
 }

@@ -995,9 +995,11 @@ static int lsarpc_read_lookup_tail(struct ksmbd_dcerpc *dce,
 	    (ndr_read_int32(dce, &dce->lr_req.lookup_options) ||
 	     ndr_read_int32(dce, &dce->lr_req.client_revision)))
 		return -EINVAL;
-	if (level < 1 || level > 7)
+	/* This server is a standalone workstation, with no trust/DC lookup scope. */
+	if (level != 1)
 		return -EINVAL;
-	if (dce->lr_req.lookup_options !=
+	/* LookupSids2 reserves LookupOptions and requires it to be ignored. */
+	if (names && dce->lr_req.lookup_options !=
 		    LSA_LOOKUP_OPTION_SEARCH_ISOLATED_NAMES &&
 	    dce->lr_req.lookup_options !=
 		    LSA_LOOKUP_OPTION_SEARCH_ISOLATED_NAMES_LOCAL)
