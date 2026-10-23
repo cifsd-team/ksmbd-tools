@@ -982,6 +982,17 @@ static int samr_ndr_write_account_array(struct ksmbd_dcerpc *dce,
 	return 0;
 }
 
+/* Fixed SAMPR_RID_ENUMERATION plus its deferred UTF-16 varying array. */
+static size_t samr_enum_entry_size(const char *name)
+{
+	glong units;
+	g_autofree gunichar2 *utf16 = g_utf8_to_utf16(name, -1, NULL, &units, NULL);
+
+	if (!utf16 || units > UINT16_MAX / 2)
+		return SIZE_MAX;
+	return 12 + 12 + (((size_t)units * 2 + 3) & ~(size_t)3);
+}
+
 static int samr_write_enum_entries_response(struct ksmbd_rpc_pipe *pipe,
 					    GPtrArray *entries)
 {
@@ -993,11 +1004,18 @@ static int samr_write_enum_entries_response(struct ksmbd_rpc_pipe *pipe,
 	if (start > total_entries)
 		return KSMBD_RPC_EINVALID_PARAMETER;
 
-	count = total_entries - start;
-	if (dce->sm_req.buf_size && count > dce->sm_req.buf_size / 64)
-		count = dce->sm_req.buf_size / 64;
-	if (count > total_entries - start)
-		count = total_entries - start;
+	{
+		size_t remaining = dce->sm_req.buf_size;
+
+		for (count = 0; count < total_entries - start; count++) {
+			struct samr_account_entry *entry = entries->pdata[start + count];
+			size_t size = samr_enum_entry_size(entry->name);
+
+			if (size > remaining)
+				break;
+			remaining -= size;
+		}
+	}
 	if (start < total_entries && !count)
 		return SAMR_STATUS_BUFFER_TOO_SMALL;
 
@@ -1052,11 +1070,17 @@ static int samr_enum_domain_return(struct ksmbd_rpc_pipe *pipe)
 		ret = KSMBD_RPC_EINVALID_PARAMETER;
 		goto out;
 	}
-	count = num_domain_entries - start;
-	if (dce->sm_req.buf_size && count > dce->sm_req.buf_size / 64)
-		count = dce->sm_req.buf_size / 64;
-	if (count > num_domain_entries - start)
-		count = num_domain_entries - start;
+	{
+		size_t remaining = dce->sm_req.buf_size;
+
+		for (count = 0; count < num_domain_entries - start; count++) {
+			size_t size = samr_enum_entry_size(domain_entries->pdata[start + count]);
+
+			if (size > remaining)
+				break;
+			remaining -= size;
+		}
+	}
 	if (start < num_domain_entries && !count) {
 		ret = SAMR_STATUS_BUFFER_TOO_SMALL;
 		goto out;

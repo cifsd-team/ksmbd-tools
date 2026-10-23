@@ -1749,6 +1749,60 @@ static void test_alter_context(void)
 	fixture_destroy();
 }
 
+static GByteArray *samr_enum(GByteArray *handle, unsigned int opnum,
+			    unsigned int cookie, unsigned int size)
+{
+	GByteArray *stub = g_byte_array_new(), *result;
+
+	g_byte_array_append(stub, handle->data, 20);
+	put32(stub, cookie);
+	if (opnum == 13)
+		put32(stub, 0);
+	put32(stub, size);
+	result = exchange(1, KSMBD_RPC_SAMR_METHOD_INVOKE, opnum, stub, 4096);
+	g_byte_array_unref(stub);
+	return result;
+}
+
+static void test_samr_enum_sizes(void)
+{
+	const unsigned int sizes[] = { 0, 1, 95, 96, 191, 192, 256 };
+	GByteArray *server, *domain, *result;
+	unsigned int i;
+
+	fixture_init();
+	open_pipe(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 0xac, 1);
+	server = samr_connect_handle();
+	domain = samr_open_domain(server, local_domain_sid, sizeof(local_domain_sid));
+	for (i = 0; i < G_N_ELEMENTS(sizes); i++) {
+		result = samr_enum(domain, 13, 0, sizes[i]);
+		g_assert_cmpuint(get32(result->data + result->len - 4), ==,
+				 sizes[i] < 96 ? 0xc0000023 : 0x105);
+		if (sizes[i] >= 96) {
+			g_assert_cmpuint(get32(result->data + 8), ==, sizes[i] / 96);
+			g_assert_cmpuint(result->len - 28, ==, sizes[i] / 96 * 96);
+		}
+		g_byte_array_unref(result);
+	}
+	/* UTF-16 code units, rather than UTF-8 bytes or Unicode scalar values. */
+	g_free(((struct ksmbd_user *)users->pdata[0])->name);
+	((struct ksmbd_user *)users->pdata[0])->name = g_strdup("é𐐨é");
+	result = samr_enum(domain, 13, 0, 32);
+	g_assert_cmpuint(get32(result->data + 8), ==, 1);
+	g_assert_cmpuint(result->len - 28, ==, 32);
+	g_byte_array_unref(result);
+	result = samr_enum(server, 6, 0, 0);
+	g_assert_cmpuint(get32(result->data + result->len - 4), ==, 0xc0000023);
+	g_byte_array_unref(result);
+	result = samr_enum(server, 6, 0, UINT32_MAX);
+	g_assert_cmpuint(get32(result->data + 8), ==, 3);
+	g_assert_cmpuint(get32(result->data + result->len - 4), ==, 0);
+	g_byte_array_unref(result);
+	g_byte_array_unref(domain);
+	g_byte_array_unref(server);
+	fixture_destroy();
+}
+
 static void test_user_path_consistency(void)
 {
 	GByteArray *server, *domain, *user, *stub = g_byte_array_new(), *result;
@@ -1989,5 +2043,6 @@ int main(int argc, char **argv)
 	g_test_add_func("/rpc/samr/user-all-big-endian", test_user_all_big_endian);
 	g_test_add_func("/rpc/unicode-account-names", test_unicode_account_names);
 	g_test_add_func("/rpc/samr/user-path-consistency", test_user_path_consistency);
+	g_test_add_func("/rpc/samr/enum-sizes", test_samr_enum_sizes);
 	return g_test_run();
 }
