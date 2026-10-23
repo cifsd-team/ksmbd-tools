@@ -997,7 +997,7 @@ static void test_full_sid_range(void)
 		}
 		result = exchange(1, flags, version ? 57 : 15, stub, 4096);
 		g_assert_cmpuint(get32(result->data + 4), ==, 20480);
-		g_assert_cmpuint(result->len, ==, 24 + 20480 * (version ? 20 : 16));
+		g_assert_cmpuint(result->len, ==, 24 + 20480 * (84 + (version ? 20 : 16)));
 		g_assert_cmpuint(get32(result->data + result->len - 8), ==, 0);
 		g_assert_cmpuint(get32(result->data + result->len - 4), ==,
 				 KSMBD_NT_STATUS_NONE_MAPPED);
@@ -1992,6 +1992,85 @@ static void test_lsa_lookup_scope(void)
 	fixture_destroy();
 }
 
+static void test_lsa_unmapped_sids(void)
+{
+	const guint8 foreign[] = { 1, 2, 0, 0, 0, 0, 0, 5,
+		0x0f, 0x27, 0, 0, 42, 0, 0, 0 };
+	GByteArray *policy, *result, *stub = g_byte_array_new();
+	unsigned int version, mixed, i, count;
+	struct wire_reader wire;
+
+	fixture_init();
+	open_pipe(1, KSMBD_RPC_LSARPC_METHOD_INVOKE, 0xab, 0);
+	policy = open_policy();
+	for (version = 0; version < 2; version++) {
+		for (mixed = 0; mixed < 2; mixed++) {
+			g_autofree char *domain_name = NULL;
+			GByteArray *domain_sid;
+
+			count = 2 + mixed;
+			g_byte_array_set_size(stub, 0);
+			g_byte_array_append(stub, policy->data, 20);
+			put32(stub, count);
+			put32(stub, 1);
+			put32(stub, count);
+			for (i = 0; i < count; i++)
+				put32(stub, 1);
+			put_local_user_sid(stub, 777777);
+			put32(stub, 2);
+			g_byte_array_append(stub, foreign, sizeof(foreign));
+			if (mixed)
+				put_local_user_sid(stub, 1000);
+			put32(stub, 0);
+			put32(stub, 0);
+			put16(stub, 1);
+			put32(stub, 0);
+			if (version) {
+				put32(stub, 0);
+				put32(stub, 1);
+			}
+			result = exchange(1, KSMBD_RPC_LSARPC_METHOD_INVOKE,
+					  version ? 57 : 15, stub, 4096);
+			wire = (struct wire_reader){ .data = result->data, .size = result->len };
+			g_assert_cmpuint(wire32(&wire), !=, 0);
+			g_assert_cmpuint(wire32(&wire), ==, 1);
+			wire_skip(&wire, 12 + 8 + 4);
+			domain_name = wire_string(&wire);
+			domain_sid = wire_sid(&wire);
+			g_assert_cmpmem(domain_sid->data, domain_sid->len,
+					local_domain_sid, sizeof(local_domain_sid));
+			g_byte_array_unref(domain_sid);
+			g_assert_cmpuint(wire32(&wire), ==, count);
+			g_assert_cmpuint(wire32(&wire), !=, 0);
+			g_assert_cmpuint(wire32(&wire), ==, count);
+			for (i = 0; i < count; i++) {
+				g_assert_cmpuint(wire16(&wire), ==, i == 2 ? 1 : 8);
+				wire_align(&wire, 4);
+				wire_skip(&wire, 4);
+				g_assert_cmpuint(wire32(&wire), !=, 0);
+				g_assert_cmpuint(wire32(&wire), ==, i == 1 ? UINT32_MAX : 0);
+				if (version)
+					g_assert_cmpuint(wire32(&wire), ==, 0);
+			}
+			for (i = 0; i < count; i++) {
+				g_autofree char *name = wire_string(&wire);
+
+				g_assert_cmpstr(name, ==, i == 0 ? "0xBDE31" :
+						i == 1 ? "S-1-5-9999-42" :
+						((struct ksmbd_user *)users->pdata[0])->name);
+			}
+			g_assert_cmpuint(wire32(&wire), ==, mixed);
+			g_assert_cmpuint(wire32(&wire), ==,
+					 mixed ? 0x107 : KSMBD_NT_STATUS_NONE_MAPPED);
+			g_assert_cmpuint(wire.offset, ==, wire.size);
+			g_byte_array_unref(result);
+		}
+	}
+	g_byte_array_unref(policy);
+	g_byte_array_unref(stub);
+	fixture_destroy();
+}
+
 static void test_user_path_consistency(void)
 {
 	GByteArray *server, *domain, *user, *stub = g_byte_array_new(), *result;
@@ -2236,5 +2315,6 @@ int main(int argc, char **argv)
 	g_test_add_func("/rpc/samr/enum-mutation", test_samr_enum_mutation);
 	g_test_add_func("/rpc/lsarpc/ignored-translations", test_lsa_ignored_translations);
 	g_test_add_func("/rpc/lsarpc/lookup-scope", test_lsa_lookup_scope);
+	g_test_add_func("/rpc/lsarpc/unmapped-sids", test_lsa_unmapped_sids);
 	return g_test_run();
 }

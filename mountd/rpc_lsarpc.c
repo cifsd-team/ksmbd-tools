@@ -787,8 +787,11 @@ static int lsarpc_resolve_sid(struct lsarpc_names_info *ni)
 			      sizeof(ni->domain_str), &ni->type);
 	if (ret && ret != -ENOENT)
 		return ret;
-	if (ret == -ENOENT)
-		return 0;
+	if (ret == -ENOENT) {
+		ni->resolved_name = g_strdup(ni->domain_str);
+		return ni->resolved_name ? 0 : -ENOMEM;
+	}
+	ni->domain_known = 1;
 
 	switch (ni->type) {
 	case SID_TYPE_DOMAIN:
@@ -822,8 +825,11 @@ static int lsarpc_resolve_sid(struct lsarpc_names_info *ni)
 		return 0;
 	}
 
-	if (!ni->resolved_name)
-		return 0;
+	if (!ni->resolved_name) {
+		rid = ni->sid.sub_auth[ni->sid.num_subauth - 1];
+		ni->resolved_name = g_strdup_printf("0x%X", rid);
+		return ni->resolved_name ? 0 : -ENOMEM;
+	}
 	ni->mapped = 1;
 	return 0;
 }
@@ -1191,9 +1197,9 @@ static int lsarpc_lookup_sid2_return(struct ksmbd_rpc_pipe *pipe)
 		int domain_index = -1;
 
 		ni = g_ptr_array_index(pipe->entries, i);
-		if (!ni->mapped)
+		mapped += !!ni->mapped;
+		if (!ni->domain_known)
 			continue;
-		mapped++;
 		for (j = 0; j < domains->len; j++) {
 			struct lsarpc_names_info *domain;
 
@@ -1275,7 +1281,7 @@ static int lsarpc_lookup_sid2_return(struct ksmbd_rpc_pipe *pipe)
 				goto out;
 			}
 			auto_align_offset(dce);
-			if (ni->mapped && ni->resolved_name) {
+			if (ni->resolved_name) {
 				if (ndr_write_string_rep(dce,
 							 ni->resolved_name)) {
 					rc = KSMBD_RPC_EBAD_DATA;
@@ -1287,7 +1293,7 @@ static int lsarpc_lookup_sid2_return(struct ksmbd_rpc_pipe *pipe)
 				rc = KSMBD_RPC_EBAD_DATA;
 				goto out;
 			}
-			if (ndr_write_int32(dce, ni->mapped ? ni->index : -1) ||
+			if (ndr_write_int32(dce, ni->domain_known ? ni->index : -1) ||
 			    ndr_write_int32(dce, 0)) {
 				rc = KSMBD_RPC_EBAD_DATA;
 				goto out;
@@ -1297,7 +1303,7 @@ static int lsarpc_lookup_sid2_return(struct ksmbd_rpc_pipe *pipe)
 			struct lsarpc_names_info *ni;
 
 			ni = g_ptr_array_index(pipe->entries, i);
-			if (ni->mapped && ni->resolved_name &&
+			if (ni->resolved_name &&
 			    ndr_write_string_data(dce, ni->resolved_name)) {
 				rc = KSMBD_RPC_EBAD_DATA;
 				goto out;
@@ -1364,9 +1370,9 @@ static int lsarpc_lookup_sid_return(struct ksmbd_rpc_pipe *pipe)
 		int domain_index = -1;
 
 		ni = g_ptr_array_index(pipe->entries, i);
-		if (!ni->mapped)
+		mapped += !!ni->mapped;
+		if (!ni->domain_known)
 			continue;
-		mapped++;
 		for (j = 0; j < domains->len; j++) {
 			struct lsarpc_names_info *domain;
 
@@ -1448,7 +1454,7 @@ static int lsarpc_lookup_sid_return(struct ksmbd_rpc_pipe *pipe)
 				goto out;
 			}
 			auto_align_offset(dce);
-			if (ni->mapped && ni->resolved_name) {
+			if (ni->resolved_name) {
 				if (ndr_write_string_rep(dce, ni->resolved_name)) {
 					rc = KSMBD_RPC_EBAD_DATA;
 					goto out;
@@ -1459,7 +1465,7 @@ static int lsarpc_lookup_sid_return(struct ksmbd_rpc_pipe *pipe)
 				rc = KSMBD_RPC_EBAD_DATA;
 				goto out;
 			}
-			if (ndr_write_int32(dce, ni->mapped ? ni->index : -1)) {
+			if (ndr_write_int32(dce, ni->domain_known ? ni->index : -1)) {
 				rc = KSMBD_RPC_EBAD_DATA;
 				goto out;
 			}
@@ -1468,7 +1474,7 @@ static int lsarpc_lookup_sid_return(struct ksmbd_rpc_pipe *pipe)
 			struct lsarpc_names_info *ni;
 
 			ni = g_ptr_array_index(pipe->entries, i);
-			if (ni->mapped && ni->resolved_name &&
+			if (ni->resolved_name &&
 			    ndr_write_string_data(dce, ni->resolved_name)) {
 				rc = KSMBD_RPC_EBAD_DATA;
 				goto out;

@@ -39,6 +39,7 @@ struct lsarpc_names_info {
 	struct ksmbd_user *user;
 	char *resolved_name;
 	int mapped;
+	int domain_known;
 };
 
 int rpc_lsarpc_read_request(struct ksmbd_rpc_pipe *pipe,
