@@ -2570,6 +2570,153 @@ static void test_user_all_access_fields(void)
 	fixture_destroy();
 }
 
+static GByteArray *samr_security_info(GByteArray *handle, unsigned int secinfo)
+{
+	GByteArray *stub = g_byte_array_new(), *result;
+
+	g_byte_array_append(stub, handle->data, 20);
+	put32(stub, secinfo);
+	result = exchange(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 3, stub, 4096);
+	g_byte_array_unref(stub);
+	return result;
+}
+
+static void check_samr_sd(GByteArray *result, unsigned int mask,
+			  unsigned int public_access)
+{
+	const guint8 system[] = { 1, 1, 0, 0, 0, 0, 0, 5, 18, 0, 0, 0 };
+	const guint8 world[] = { 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0 };
+	const guint8 anonymous[] = { 1, 1, 0, 0, 0, 0, 0, 5, 7, 0, 0, 0 };
+	unsigned int size = 20 + (mask & 1 ? 12 : 0) +
+		(mask & 2 ? 12 : 0) + (mask & 4 ? 48 : 0);
+	const guint8 *sd;
+	struct wire_reader wire;
+	unsigned int owner, group, dacl, i;
+
+	g_assert_cmpuint(result->len, ==, 16 + size + 4);
+	g_assert_cmpuint(get32(result->data), !=, 0);
+	g_assert_cmpuint(get32(result->data + 4), ==, size);
+	g_assert_cmpuint(get32(result->data + 8), !=, 0);
+	g_assert_cmpuint(get32(result->data + 12), ==, size);
+	g_assert_cmpuint(get32(result->data + result->len - 4), ==, 0);
+	sd = result->data + 16;
+	wire = (struct wire_reader){ .data = sd, .size = size, .offset = 2 };
+	g_assert_cmpuint(sd[0], ==, 1);
+	g_assert_cmpuint(sd[1], ==, 0);
+	g_assert_cmpuint(wire16(&wire), ==, 0x8000 | (mask & 4 ? 4 : 0));
+	owner = wire32(&wire);
+	group = wire32(&wire);
+	g_assert_cmpuint(wire32(&wire), ==, 0); /* No SACL. */
+	dacl = wire32(&wire);
+	g_assert_cmpuint(!!owner, ==, !!(mask & 1));
+	g_assert_cmpuint(!!group, ==, !!(mask & 2));
+	g_assert_cmpuint(!!dacl, ==, !!(mask & 4));
+	if (owner) {
+		g_assert_cmpuint(owner + sizeof(system), <=, size);
+		g_assert_cmpmem(sd + owner, sizeof(system), system, sizeof(system));
+	}
+	if (group) {
+		g_assert_cmpuint(group + sizeof(world), <=, size);
+		g_assert_cmpmem(sd + group, sizeof(world), world, sizeof(world));
+	}
+	if (dacl) {
+		g_assert_cmpuint(dacl + 48, ==, size);
+		wire.offset = dacl;
+		g_assert_cmpuint(wire16(&wire), ==, 2);
+		g_assert_cmpuint(wire16(&wire), ==, 48);
+		g_assert_cmpuint(wire16(&wire), ==, 2);
+		g_assert_cmpuint(wire16(&wire), ==, 0);
+		for (i = 0; i < 2; i++) {
+			g_assert_cmpuint(wire16(&wire), ==, 0); /* ALLOW, flags zero. */
+			g_assert_cmpuint(wire16(&wire), ==, 20);
+			g_assert_cmpuint(wire32(&wire), ==, public_access);
+			wire_skip(&wire, 12);
+			g_assert_cmpmem(sd + wire.offset - 12, 12,
+					i ? anonymous : world, 12);
+		}
+		g_assert_cmpuint(wire.offset, ==, size);
+	}
+}
+
+static void test_samr_security_descriptor(void)
+{
+	const unsigned int grants[] = { 0x20031, 0x20385, 0x2031b, 0x20011, 0x2000c };
+	GByteArray *handles[5], *groups, *result, *limited;
+	unsigned int i, mask;
+
+	fixture_init();
+	((struct ksmbd_user *)users->pdata[0])->gid = 1000;
+	open_pipe(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 0xac, 1);
+	handles[0] = samr_connect_handle();
+	handles[1] = samr_open_domain(handles[0], local_domain_sid, sizeof(local_domain_sid));
+	handles[2] = samr_open_account(handles[1], 34, 1000);
+	handles[3] = samr_open_account(handles[1], 19, UINT32_MAX);
+	groups = samr_open_domain(handles[0], unix_group_sid, sizeof(unix_group_sid));
+	handles[4] = samr_open_account(groups, 27, 1000);
+	for (i = 0; i < G_N_ELEMENTS(handles); i++) {
+		for (mask = 0; mask < 16; mask++) {
+			result = samr_security_info(handles[i], mask);
+			if (mask & 8) {
+				g_assert_cmpuint(result->len, ==, 8);
+				g_assert_cmpuint(get32(result->data), ==, 0);
+				g_assert_cmpuint(get32(result->data + 4), ==,
+						 KSMBD_NT_STATUS_ACCESS_DENIED);
+			} else {
+				check_samr_sd(result, mask, grants[i]);
+			}
+			g_byte_array_unref(result);
+		}
+		result = samr_security_info(handles[i], 0x80000004);
+		check_samr_sd(result, 4, grants[i]);
+		g_byte_array_unref(result);
+	}
+	limited = samr_open_account_access(handles[1], 34, 1000, 0);
+	result = samr_security_info(limited, 0);
+	check_samr_sd(result, 0, grants[2]);
+	g_byte_array_unref(result);
+	result = samr_security_info(limited, 1);
+	g_assert_cmpuint(get32(result->data + result->len - 4), ==,
+			 KSMBD_NT_STATUS_ACCESS_DENIED);
+	g_byte_array_unref(result);
+	g_byte_array_unref(limited);
+	/* The descriptor bytes remain little endian inside a big-endian RPC. */
+	{
+		GByteArray *stub = g_byte_array_new();
+		struct ksmbd_rpc_command *req, *resp;
+		__u16 value16;
+		__u32 value32;
+
+		result = samr_security_info(handles[2], 7);
+		g_byte_array_append(stub, handles[2]->data, 20);
+		put32(stub, 0x07000000);
+		req = request(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 3, stub);
+		req->payload[4] = 0;
+		value16 = htobe16(req->payload_sz);
+		memcpy(req->payload + 8, &value16, 2);
+		value16 = htobe16(3);
+		memcpy(req->payload + 22, &value16, 2);
+		value32 = htobe32(1);
+		memcpy(req->payload + 12, &value32, 4);
+		value32 = htobe32(stub->len);
+		memcpy(req->payload + 16, &value32, 4);
+		resp = command(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 4096);
+		g_assert_cmpint(rpc_ioctl_request(req, resp, 4096), ==, 0);
+		g_assert_cmpuint(resp->payload[4], ==, 0);
+		g_assert_cmpuint(resp->payload_sz, ==, 24 + result->len);
+		memcpy(&value32, resp->payload + 28, 4);
+		g_assert_cmpuint(be32toh(value32), ==, 92);
+		g_assert_cmpmem(resp->payload + 40, 92, result->data + 16, 92);
+		g_byte_array_unref(result);
+		g_byte_array_unref(stub);
+		g_free(req);
+		g_free(resp);
+	}
+	g_byte_array_unref(groups);
+	for (i = 0; i < G_N_ELEMENTS(handles); i++)
+		g_byte_array_unref(handles[i]);
+	fixture_destroy();
+}
+
 static void test_user_path_consistency(void)
 {
 	GByteArray *server, *domain, *user, *stub = g_byte_array_new(), *result;
@@ -2819,5 +2966,6 @@ int main(int argc, char **argv)
 	g_test_add_func("/rpc/samr/group-alias-membership", test_group_alias_membership);
 	g_test_add_func("/rpc/handle-grants", test_handle_grants);
 	g_test_add_func("/rpc/samr/user-all-access-fields", test_user_all_access_fields);
+	g_test_add_func("/rpc/samr/security-descriptor", test_samr_security_descriptor);
 	return g_test_run();
 }

@@ -2388,76 +2388,93 @@ static int samr_query_security_invoke(struct ksmbd_rpc_pipe *pipe)
 		return KSMBD_RPC_EINVALID_PARAMETER;
 	if (ndr_read_int32(dce, &dce->sm_req.security_secinfo))
 		return KSMBD_RPC_EINVALID_PARAMETER;
-	if (!dce->sm_req.security_secinfo ||
-	    dce->sm_req.security_secinfo & ~0x0000000F)
-		return KSMBD_RPC_EINVALID_PARAMETER;
+	/* MS-SAMR requires unrecognized SecurityInformation bits to be ignored. */
+	dce->sm_req.security_secinfo &= 0x0000000f;
 
 	return ndr_request_end(dce) ? KSMBD_RPC_EINVALID_PARAMETER :
 				      KSMBD_RPC_OK;
+}
+
+static int samr_write_object_sd(struct ksmbd_dcerpc *dce,
+				unsigned int secinfo, unsigned int public_access)
+{
+	const struct smb_sid system = { 1, 1, { 0, 0, 0, 0, 0, 5 }, { 18 } };
+	const struct smb_sid readers[] = {
+		{ 1, 1, { 0, 0, 0, 0, 0, 1 }, { 0 } }, /* Everyone */
+		{ 1, 1, { 0, 0, 0, 0, 0, 5 }, { 7 } }, /* Anonymous Logon */
+	};
+	unsigned char buffer[92] = { 0 };
+	struct ksmbd_dcerpc sd = {
+		.payload = (char *)buffer, .payload_sz = sizeof(buffer), .offset = 20,
+		.flags = KSMBD_DCERPC_LITTLE_ENDIAN | KSMBD_DCERPC_ALIGN4 |
+			 KSMBD_DCERPC_FIXED_PAYLOAD_SZ,
+	};
+	unsigned int owner = 0, group = 0, dacl = 0, length, i;
+
+	/* A self-relative descriptor is an opaque little-endian octet array. */
+	if (secinfo & 1) {
+		owner = sd.offset;
+		if (smb_write_sid(&sd, &system))
+			return KSMBD_RPC_EBAD_DATA;
+	}
+	if (secinfo & 2) {
+		group = sd.offset;
+		if (smb_write_sid(&sd, &readers[0]))
+			return KSMBD_RPC_EBAD_DATA;
+	}
+	if (secinfo & 4) {
+		dacl = sd.offset;
+		if (ndr_write_int8(&sd, 2) || ndr_write_int8(&sd, 0) ||
+		    ndr_write_int16(&sd, 48) || ndr_write_int16(&sd, 2) ||
+		    ndr_write_int16(&sd, 0))
+			return KSMBD_RPC_EBAD_DATA;
+		for (i = 0; i < G_N_ELEMENTS(readers); i++) {
+			if (ndr_write_int8(&sd, ACCESS_ALLOWED) || ndr_write_int8(&sd, 0) ||
+			    ndr_write_int16(&sd, 20) || ndr_write_int32(&sd, public_access) ||
+			    smb_write_sid(&sd, &readers[i]))
+				return KSMBD_RPC_EBAD_DATA;
+		}
+	}
+	length = sd.offset;
+	sd.offset = 0;
+	if (ndr_write_int8(&sd, 1) || ndr_write_int8(&sd, 0) ||
+	    ndr_write_int16(&sd, SELF_RELATIVE | (dacl ? DACL_PRESENT : 0)) ||
+	    ndr_write_int32(&sd, owner) || ndr_write_int32(&sd, group) ||
+	    ndr_write_int32(&sd, 0) || ndr_write_int32(&sd, dacl))
+		return KSMBD_RPC_EBAD_DATA;
+
+	dce->num_pointers++;
+	if (ndr_write_int32(dce, dce->num_pointers) || ndr_write_int32(dce, length))
+		return KSMBD_RPC_EBAD_DATA;
+	dce->num_pointers++;
+	if (ndr_write_int32(dce, dce->num_pointers) || ndr_write_int32(dce, length) ||
+	    ndr_write_bytes(dce, buffer, length))
+		return KSMBD_RPC_EBAD_DATA;
+	return KSMBD_RPC_OK;
 }
 
 static int samr_query_security_return(struct ksmbd_rpc_pipe *pipe)
 {
 	struct ksmbd_dcerpc *dce = pipe->dce;
 	struct connect_handle *ch;
-	int sec_desc_len, curr_offset, payload_offset, ret;
-	int rid = 0;
+	unsigned int secinfo = dce->sm_req.security_secinfo, required = 0;
+	int ret;
 
 	ch = samr_ch_lookup(pipe, dce->sm_req.handle);
 	if (!ch) {
 		ret = SAMR_STATUS_INVALID_HANDLE;
 		goto out;
 	}
-	ret = samr_handle_access(ch, ch->type, SAM_READ_CONTROL);
-	if (ret)
-		goto out;
-	if (ch->type == SAMR_HANDLE_USER) {
-		if (!ch->user) {
-			ret = SAMR_STATUS_INVALID_HANDLE;
-			goto out;
-		}
-		rid = ch->user->uid;
-	} else if (ch->type == SAMR_HANDLE_GROUP ||
-		   ch->type == SAMR_HANDLE_ALIAS) {
-		rid = ch->rid;
-	}
-
-	curr_offset = dce->offset;
-	dce->offset += 16;
-	if (build_sec_desc(dce, &sec_desc_len, rid)) {
-		ret = KSMBD_RPC_EBAD_DATA;
-		goto out;
-	}
-
-	payload_offset = dce->offset;
-	dce->offset = curr_offset + 12;
-	if (ndr_write_int32(dce, sec_desc_len)) {
-		ret = KSMBD_RPC_EBAD_DATA;
-		goto out;
-	}
-
-	dce->offset = curr_offset;
-	dce->num_pointers++;
-	if (ndr_write_int32(dce, dce->num_pointers))
-		goto bad_data;
-	if (ndr_write_int32(dce, sec_desc_len))
-		goto bad_data;
-
-	dce->num_pointers++;
-	if (ndr_write_int32(dce, dce->num_pointers))
-		goto bad_data;
-
-	if (ndr_write_int32(dce, sec_desc_len))
-		goto bad_data;
-
-	dce->offset = payload_offset;
-	ret = KSMBD_RPC_OK;
+	if (secinfo & 7)
+		required |= SAM_READ_CONTROL;
+	if (secinfo & 8)
+		required |= 0x01000000; /* ACCESS_SYSTEM_SECURITY */
+	ret = samr_handle_access(ch, ch->type, required);
+	if (!ret)
+		ret = samr_write_object_sd(dce, secinfo, samr_public_access(ch->type));
 out:
 	samr_ch_put(ch);
 	return ret;
-bad_data:
-	ret = KSMBD_RPC_EBAD_DATA;
-	goto out;
 }
 
 static int samr_get_group_for_user_invoke(struct ksmbd_rpc_pipe *pipe)
