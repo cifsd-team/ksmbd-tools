@@ -2967,6 +2967,45 @@ static void test_samr_large_group(void)
 	fixture_destroy();
 }
 
+static void test_samr_enum_filters(void)
+{
+	const struct {
+		unsigned int filter, count;
+	} cases[] = {
+		{ 0, 2 }, { 0x10, 2 }, { 1, 0 }, { 0x11, 0 },
+		{ 0x80, 0 }, { 0x90, 0 }, { 0x200, 0 }, { 0x210, 0 },
+		{ 0x400, 2 }, { 0x20000, 2 }, { 0x20400, 2 },
+		{ 0x20410, 2 }, { 0x20411, 0 }, { UINT32_MAX, 0 },
+	};
+	GByteArray *server, *domain, *result, *stub = g_byte_array_new();
+	unsigned int i;
+
+	fixture_init();
+	open_pipe(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 0xac, 1);
+	server = samr_connect_handle();
+	domain = samr_open_domain(server, local_domain_sid, sizeof(local_domain_sid));
+	for (i = 0; i < G_N_ELEMENTS(cases); i++) {
+		g_byte_array_set_size(stub, 0);
+		g_byte_array_append(stub, domain->data, 20);
+		put32(stub, 0);
+		put32(stub, cases[i].filter);
+		put32(stub, 256);
+		result = exchange(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 13, stub, 128);
+		g_assert_cmpuint(get32(result->data + 8), ==, cases[i].count);
+		g_assert_cmpuint(get32(result->data + result->len - 4), ==,
+				 cases[i].count ? KSMBD_NT_STATUS_MORE_ENTRIES : 0);
+		if (cases[i].count) {
+			g_assert_cmpuint(get32(result->data + 20), ==, 1000);
+			g_assert_cmpuint(get32(result->data + 32), ==, 1001);
+		}
+		g_byte_array_unref(result);
+	}
+	g_byte_array_unref(stub);
+	g_byte_array_unref(domain);
+	g_byte_array_unref(server);
+	fixture_destroy();
+}
+
 static void put_be32(GByteArray *stub, unsigned int value)
 {
 	put32(stub, GUINT32_SWAP_LE_BE(value));
@@ -3115,6 +3154,7 @@ int main(int argc, char **argv)
 	g_test_add_func("/rpc/samr/user-all-access-fields", test_user_all_access_fields);
 	g_test_add_func("/rpc/samr/security-descriptor", test_samr_security_descriptor);
 	g_test_add_func("/rpc/samr/large-group", test_samr_large_group);
+	g_test_add_func("/rpc/samr/enum-filters", test_samr_enum_filters);
 	g_test_add_func("/rpc/srvsvc/descriptor-big-endian", test_share_descriptor_big_endian);
 	return g_test_run();
 }

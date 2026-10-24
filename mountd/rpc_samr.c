@@ -75,6 +75,8 @@
 #define SAM_GENERIC_ALL		0x10000000U
 #define SAM_MAXIMUM_ALLOWED		0x02000000
 #define SAMR_USER_ACCOUNT_CONTROL_NORMAL 0x00000010
+#define SAMR_USER_ACCOUNT_CONTROL_AUTO_LOCKED 0x00000400
+#define SAMR_USER_ACCOUNT_CONTROL_PASSWORD_EXPIRED 0x00020000
 
 #define SAMR_STATUS_INVALID_HANDLE	(-1001)
 #define SAMR_STATUS_NO_SUCH_DOMAIN	(-1002)
@@ -680,8 +682,10 @@ static GPtrArray *samr_collect_user_entries(__u32 user_account_control)
 	if (!entries)
 		return NULL;
 
-	if (user_account_control &&
-	    !(user_account_control & SAMR_USER_ACCOUNT_CONTROL_NORMAL))
+	/* MS-SAMR ignores these two filter bits; all other bits must match. */
+	user_account_control &= ~(SAMR_USER_ACCOUNT_CONTROL_AUTO_LOCKED |
+				  SAMR_USER_ACCOUNT_CONTROL_PASSWORD_EXPIRED);
+	if (user_account_control & ~SAMR_USER_ACCOUNT_CONTROL_NORMAL)
 		return entries;
 
 	ctx.entries = entries;
