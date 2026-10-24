@@ -1586,15 +1586,27 @@ static void test_account_namespaces(void)
 	fixture_destroy();
 }
 
-static GByteArray *lsa_lookup_name(GByteArray *policy, const char *name,
-				   unsigned int version)
+static GByteArray *lsa_lookup_names(GByteArray *policy, const char *const *names,
+				    unsigned int count, unsigned int version)
 {
 	GByteArray *stub = g_byte_array_new(), *result;
+	unsigned int i;
 
 	g_byte_array_append(stub, policy->data, 20);
-	put32(stub, 1);
-	put32(stub, 1);
-	put_rpc_string(stub, name);
+	put32(stub, count);
+	put32(stub, count);
+	for (i = 0; i < count; i++) {
+		glong length;
+		g_autofree gunichar2 *utf16 =
+			g_utf8_to_utf16(names[i], -1, NULL, &length, NULL);
+
+		g_assert_nonnull(utf16);
+		put16(stub, length * 2);
+		put16(stub, length * 2);
+		put32(stub, i + 1);
+	}
+	for (i = 0; i < count; i++)
+		put_string(stub, names[i], 0);
 	put32(stub, 0);
 	put32(stub, 0);
 	put16(stub, 1);
@@ -1608,16 +1620,22 @@ static GByteArray *lsa_lookup_name(GByteArray *policy, const char *name,
 	return result;
 }
 
+static GByteArray *lsa_lookup_name(GByteArray *policy, const char *name,
+				   unsigned int version)
+{
+	return lsa_lookup_names(policy, &name, 1, version);
+}
+
 static void check_lsa_name_rid(GByteArray *result, unsigned int version,
 			       unsigned int type, const guint8 *domain, size_t domain_size,
 			       unsigned int rid)
 {
 	struct wire_reader wire = { .data = result->data, .size = result->len };
 	GByteArray *sid;
-	unsigned int ref, mapped = type != 8;
+	unsigned int ref, mapped = type != 8, known = mapped || domain;
 
 	ref = wire32(&wire);
-	g_assert_cmpuint(!!ref, ==, mapped);
+	g_assert_cmpuint(!!ref, ==, known);
 	if (ref) {
 		g_autofree char *name = NULL;
 
@@ -1641,7 +1659,7 @@ static void check_lsa_name_rid(GByteArray *result, unsigned int version,
 		g_assert_cmpuint(!!ref, ==, mapped);
 	else
 		g_assert_cmpuint(ref, ==, mapped ? rid : 0);
-	g_assert_cmpuint(wire32(&wire), ==, mapped ? 0 : UINT32_MAX);
+	g_assert_cmpuint(wire32(&wire), ==, known ? 0 : UINT32_MAX);
 	if (version) {
 		g_assert_cmpuint(wire32(&wire), ==, 0);
 		if (mapped) {
@@ -1695,7 +1713,8 @@ static void test_lsa_account_names(void)
 
 			result = lsa_lookup_name(policy, name, version);
 			check_lsa_name(result, version, i < 3 ? 1 : 8,
-					local_domain_sid, sizeof(local_domain_sid));
+					i < 3 ? local_domain_sid : NULL,
+					i < 3 ? sizeof(local_domain_sid) : 0);
 			g_byte_array_unref(result);
 		}
 		result = lsa_lookup_name(policy, "SERVER\\unmapped-uid-account", version);
@@ -3189,6 +3208,80 @@ static void test_lsa_group_casefold(void)
 	fixture_destroy();
 }
 
+static void test_lsa_unmapped_name_domains(void)
+{
+	const guint8 nt_authority[] = { 1, 0, 0, 0, 0, 0, 0, 5 };
+	const guint8 *sids[] = { local_domain_sid, unix_group_sid, nt_authority };
+	const size_t lengths[] = { sizeof(local_domain_sid), sizeof(unix_group_sid),
+				   sizeof(nt_authority) };
+	const char *names[] = { NULL, "SERVER\\missing", "Unix Group\\missing",
+				"NT Authority\\missing", "FOREIGN\\missing" };
+	GByteArray *policy, *result;
+	unsigned int version, mixed, i;
+
+	fixture_init();
+	names[0] = ((struct ksmbd_user *)users->pdata[0])->name;
+	open_pipe(1, KSMBD_RPC_LSARPC_METHOD_INVOKE, 0xab, 0);
+	policy = open_policy();
+	for (version = 0; version < 2; version++) {
+		for (mixed = 0; mixed < 2; mixed++) {
+			unsigned int count = 4 + mixed;
+			struct wire_reader wire;
+
+			result = lsa_lookup_names(policy, names + !mixed, count, version);
+			wire = (struct wire_reader){ .data = result->data, .size = result->len };
+			g_assert_cmpuint(wire32(&wire), !=, 0);
+			g_assert_cmpuint(wire32(&wire), ==, 3);
+			g_assert_cmpuint(wire32(&wire), !=, 0);
+			g_assert_cmpuint(wire32(&wire), >=, 3);
+			g_assert_cmpuint(wire32(&wire), ==, 3);
+			for (i = 0; i < 3; i++) {
+				wire_skip(&wire, 8);
+				g_assert_cmpuint(wire32(&wire), !=, 0);
+			}
+			for (i = 0; i < 3; i++) {
+				g_autofree char *name = wire_string(&wire);
+				GByteArray *sid = wire_sid(&wire);
+
+				g_assert_cmpmem(sid->data, sid->len, sids[i], lengths[i]);
+				g_byte_array_unref(sid);
+			}
+			g_assert_cmpuint(wire32(&wire), ==, count);
+			g_assert_cmpuint(wire32(&wire), !=, 0);
+			g_assert_cmpuint(wire32(&wire), ==, count);
+			for (i = 0; i < count; i++) {
+				unsigned int mapped = mixed && !i;
+				unsigned int index = mapped ? 0 : i - mixed;
+				unsigned int value;
+
+				g_assert_cmpuint(wire16(&wire), ==, mapped ? 1 : 8);
+				value = wire32(&wire);
+				if (version)
+					g_assert_cmpuint(!!value, ==, mapped);
+				else
+					g_assert_cmpuint(value, ==, mapped ? 1000 : 0);
+				g_assert_cmpuint(wire32(&wire), ==,
+						 index < 3 ? index : UINT32_MAX);
+				if (version)
+					g_assert_cmpuint(wire32(&wire), ==, 0);
+			}
+			if (version && mixed) {
+				GByteArray *sid = wire_sid(&wire);
+
+				g_assert_cmpuint(get32(sid->data + sid->len - 4), ==, 1000);
+				g_byte_array_unref(sid);
+			}
+			g_assert_cmpuint(wire32(&wire), ==, mixed);
+			g_assert_cmpuint(wire32(&wire), ==, mixed ?
+					 KSMBD_NT_STATUS_SOME_NOT_MAPPED : KSMBD_NT_STATUS_NONE_MAPPED);
+			g_assert_cmpuint(wire.offset, ==, wire.size);
+			g_byte_array_unref(result);
+		}
+	}
+	g_byte_array_unref(policy);
+	fixture_destroy();
+}
+
 int main(int argc, char **argv)
 {
 	g_test_init(&argc, &argv, NULL);
@@ -3231,5 +3324,6 @@ int main(int argc, char **argv)
 	g_test_add_func("/rpc/samr/enum-filters", test_samr_enum_filters);
 	g_test_add_func("/rpc/srvsvc/descriptor-big-endian", test_share_descriptor_big_endian);
 	g_test_add_func("/rpc/lsarpc/group-casefold", test_lsa_group_casefold);
+	g_test_add_func("/rpc/lsarpc/unmapped-name-domains", test_lsa_unmapped_name_domains);
 	return g_test_run();
 }
