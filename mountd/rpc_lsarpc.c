@@ -75,6 +75,7 @@
 static GHashTable	*ph_table;
 static GRWLock		ph_table_lock;
 static gchar		*domain_name;
+static GMutex		group_lookup_lock;
 
 static void lsarpc_request_cleanup(struct ksmbd_rpc_pipe *pipe);
 
@@ -737,6 +738,34 @@ static void lsarpc_init_unix_domain_sid(struct smb_sid *sid, __u32 rid)
 	sid->sub_auth[0] = rid;
 }
 
+static int lsarpc_lookup_group_casefold(const char *name, __u32 *gid,
+				       char **resolved)
+{
+	struct group *result;
+	int ret = -ENOENT;
+
+	/* Protect the NSS cursor and copy the static result before unlocking. */
+	g_mutex_lock(&group_lookup_lock);
+	setgrent();
+	for (;;) {
+		errno = 0;
+		result = getgrent();
+		if (!result) {
+			ret = errno ? -errno : -ENOENT;
+			break;
+		}
+		if (ksmbd_name_compare(name, result->gr_name))
+			continue;
+		*gid = result->gr_gid;
+		*resolved = g_strdup(result->gr_name);
+		ret = *resolved ? 0 : -ENOMEM;
+		break;
+	}
+	endgrent();
+	g_mutex_unlock(&group_lookup_lock);
+	return ret;
+}
+
 static int lsarpc_lookup_group(const char *name, __u32 *gid, char **resolved)
 {
 	struct group group, *result;
@@ -760,6 +789,8 @@ static int lsarpc_lookup_group(const char *name, __u32 *gid, char **resolved)
 			size *= 2;
 			continue;
 		}
+		if (name && (ret == ENOENT || (!ret && !result)))
+			return lsarpc_lookup_group_casefold(name, gid, resolved);
 		if (ret || !result)
 			return ret ? -ret : -ENOENT;
 		*gid = result->gr_gid;

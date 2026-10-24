@@ -20,6 +20,9 @@ static GPtrArray *users;
 static GPtrArray *shares;
 static unsigned int receive_limit;
 static size_t group_buffer_min;
+static const char *test_group_name;
+static unsigned int group_cursor;
+static char *group_buffer;
 
 /* Keep group identity tests independent of the host's NSS database. */
 static int mock_group(gid_t gid, struct group *group, char *buf, size_t size,
@@ -33,7 +36,7 @@ static int mock_group(gid_t gid, struct group *group, char *buf, size_t size,
 	if (gid == 0)
 		name = "root";
 	else if (gid == 1000)
-		name = "test-group";
+		name = test_group_name;
 	else
 		return 0;
 	if (strlen(name) + 1 > size)
@@ -57,10 +60,47 @@ int getgrnam_r(const char *name, struct group *group, char *buf, size_t size,
 {
 	if (!strcmp(name, "root"))
 		return mock_group(0, group, buf, size, result);
-	if (!strcmp(name, "test-group"))
+	if (!strcmp(name, test_group_name))
 		return mock_group(1000, group, buf, size, result);
 	*result = NULL;
 	return 0;
+}
+
+void setgrent(void)
+{
+	group_cursor = 0;
+}
+
+void endgrent(void)
+{
+	group_cursor = 0;
+	g_clear_pointer(&group_buffer, g_free);
+}
+
+struct group *getgrent(void)
+{
+	const gid_t gids[] = { 0, 1000 };
+	static struct group group;
+	struct group *result;
+	size_t size = MAX(group_buffer_min, 128);
+	char *next;
+	int ret;
+
+	if (group_cursor == G_N_ELEMENTS(gids))
+		return NULL;
+	next = g_try_realloc(group_buffer, size);
+	if (!next) {
+		errno = ENOMEM;
+		return NULL;
+	}
+	group_buffer = next;
+	ret = mock_group(gids[group_cursor], &group, group_buffer, size, &result);
+	if (ret) {
+		errno = ret;
+		return NULL;
+	}
+	group_cursor++;
+	return result;
 }
 
 void __pr_log(int level, const char *fmt, ...)
@@ -370,7 +410,8 @@ static void fixture_init(void)
 {
 	unsigned int i;
 
-	group_buffer_min = 0;
+	group_buffer_min = group_cursor = 0;
+	test_group_name = "test-group";
 	memset(&global_conf, 0, sizeof(global_conf));
 	global_conf.netbios_name = "SERVER";
 	global_conf.work_group = "WORKGROUP";
@@ -3115,6 +3156,39 @@ static void test_share_descriptor_big_endian(void)
 	fixture_destroy();
 }
 
+static void test_lsa_group_casefold(void)
+{
+	const char *names[] = { "Unix Group\\ROOT", "Unix Group\\TEST-GROUP",
+				"Unix Group\\TeSt-GrOuP", "TEST-GROUP" };
+	GByteArray *policy, *result;
+	long suggested = sysconf(_SC_GETGR_R_SIZE_MAX);
+	unsigned int version, i;
+
+	fixture_init();
+	group_buffer_min = 2 * (size_t)(suggested > 1024 ? suggested : 1024);
+	open_pipe(1, KSMBD_RPC_LSARPC_METHOD_INVOKE, 0xab, 0);
+	policy = open_policy();
+	for (version = 0; version < 2; version++) {
+		for (i = 0; i < G_N_ELEMENTS(names); i++) {
+			result = lsa_lookup_name(policy, names[i], version);
+			check_lsa_name_rid(result, version, 4, unix_group_sid,
+					   sizeof(unix_group_sid), i ? 1000 : 0);
+			g_byte_array_unref(result);
+		}
+	}
+	test_group_name = "tést-group";
+	for (version = 0; version < 2; version++) {
+		result = lsa_lookup_name(policy, "uNiX gRoUp\\TÉST-GROUP", version);
+		check_lsa_name(result, version, 4, unix_group_sid, sizeof(unix_group_sid));
+		g_byte_array_unref(result);
+		result = lsa_lookup_name(policy, "Unix Group\\MISSING", version);
+		check_lsa_name(result, version, 8, unix_group_sid, sizeof(unix_group_sid));
+		g_byte_array_unref(result);
+	}
+	g_byte_array_unref(policy);
+	fixture_destroy();
+}
+
 int main(int argc, char **argv)
 {
 	g_test_init(&argc, &argv, NULL);
@@ -3156,5 +3230,6 @@ int main(int argc, char **argv)
 	g_test_add_func("/rpc/samr/large-group", test_samr_large_group);
 	g_test_add_func("/rpc/samr/enum-filters", test_samr_enum_filters);
 	g_test_add_func("/rpc/srvsvc/descriptor-big-endian", test_share_descriptor_big_endian);
+	g_test_add_func("/rpc/lsarpc/group-casefold", test_lsa_group_casefold);
 	return g_test_run();
 }
