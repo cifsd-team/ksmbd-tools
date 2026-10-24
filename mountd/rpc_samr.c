@@ -621,20 +621,27 @@ static int samr_add_group_gid(GPtrArray *entries, GHashTable *seen, gid_t gid)
 	g_autofree char *buf = NULL;
 	g_autofree char *group_name = NULL;
 	g_autofree char *gid_name = NULL;
-	long buflen;
+	size_t buflen;
+	long suggested;
 	int rc;
 
 	if (gid == (gid_t)KSMBD_SHARE_INVALID_GID)
 		return 0;
 
-	buflen = sysconf(_SC_GETGR_R_SIZE_MAX);
-	if (buflen < 1024)
-		buflen = 1024;
-	buf = g_try_malloc0(buflen);
-	if (!buf)
-		return -ENOMEM;
-
-	rc = getgrgid_r(gid, &grp, buf, buflen, &result);
+	suggested = sysconf(_SC_GETGR_R_SIZE_MAX);
+	buflen = suggested > 1024 ? suggested : 1024;
+	for (;;) {
+		g_free(buf);
+		buf = g_try_malloc(buflen);
+		if (!buf)
+			return -ENOMEM;
+		rc = getgrgid_r(gid, &grp, buf, buflen, &result);
+		if (rc != ERANGE)
+			break;
+		if (buflen > G_MAXSIZE / 2)
+			return -ENOMEM;
+		buflen *= 2;
+	}
 	if (!rc && result && result->gr_name && result->gr_name[0])
 		group_name = g_strdup(result->gr_name);
 	else if (rc && rc != ENOENT)

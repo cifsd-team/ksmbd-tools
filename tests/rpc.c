@@ -19,6 +19,7 @@ int log_level = -1;
 static GPtrArray *users;
 static GPtrArray *shares;
 static unsigned int receive_limit;
+static size_t group_buffer_min;
 
 /* Keep group identity tests independent of the host's NSS database. */
 static int mock_group(gid_t gid, struct group *group, char *buf, size_t size,
@@ -27,6 +28,8 @@ static int mock_group(gid_t gid, struct group *group, char *buf, size_t size,
 	const char *name;
 
 	*result = NULL;
+	if (size < group_buffer_min)
+		return ERANGE;
 	if (gid == 0)
 		name = "root";
 	else if (gid == 1000)
@@ -367,6 +370,7 @@ static void fixture_init(void)
 {
 	unsigned int i;
 
+	group_buffer_min = 0;
 	memset(&global_conf, 0, sizeof(global_conf));
 	global_conf.netbios_name = "SERVER";
 	global_conf.work_group = "WORKGROUP";
@@ -2929,6 +2933,32 @@ static void test_connect_revision(void)
 	fixture_destroy();
 }
 
+static void test_samr_large_group(void)
+{
+	GByteArray *server, *domain, *result;
+	long suggested = sysconf(_SC_GETGR_R_SIZE_MAX);
+
+	fixture_init();
+	((struct ksmbd_user *)users->pdata[0])->gid = 1000;
+	/* Force a normal NSS ERANGE reply before the complete group is available. */
+	group_buffer_min = 2 * (size_t)(suggested > 1024 ? suggested : 1024);
+	open_pipe(1, KSMBD_RPC_SAMR_METHOD_INVOKE, 0xac, 1);
+	server = samr_connect_handle();
+	domain = samr_open_domain(server, unix_group_sid, sizeof(unix_group_sid));
+	result = samr_enum(domain, 15, 0, UINT32_MAX);
+	g_assert_cmpuint(get32(result->data + 8), ==, 2);
+	g_assert_cmpuint(get32(result->data + result->len - 4), ==, 0);
+	g_byte_array_unref(result);
+	samr_check_name(domain, "TEST-GROUP", 1000, 4);
+	samr_check_rid(domain, 1000, "test-group", 4);
+	result = samr_open_account(domain, 27, 1000);
+	g_assert_cmpuint(get32(result->data + 20), ==, 0);
+	g_byte_array_unref(result);
+	g_byte_array_unref(domain);
+	g_byte_array_unref(server);
+	fixture_destroy();
+}
+
 int main(int argc, char **argv)
 {
 	g_test_init(&argc, &argv, NULL);
@@ -2967,5 +2997,6 @@ int main(int argc, char **argv)
 	g_test_add_func("/rpc/handle-grants", test_handle_grants);
 	g_test_add_func("/rpc/samr/user-all-access-fields", test_user_all_access_fields);
 	g_test_add_func("/rpc/samr/security-descriptor", test_samr_security_descriptor);
+	g_test_add_func("/rpc/samr/large-group", test_samr_large_group);
 	return g_test_run();
 }
