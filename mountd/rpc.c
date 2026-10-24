@@ -176,15 +176,62 @@ static void __rpc_pipe_free(struct ksmbd_rpc_pipe *pipe)
 	g_free(pipe);
 }
 
-static void rpc_pipe_free(struct ksmbd_rpc_pipe *pipe)
+static void rpc_pipe_unref(struct ksmbd_rpc_pipe *pipe)
 {
+	if (g_atomic_int_dec_and_test(&pipe->refcount)) {
+		g_mutex_clear(&pipe->lock);
+		__rpc_pipe_free(pipe);
+	}
+}
+
+static void rpc_pipe_put(struct ksmbd_rpc_pipe *pipe)
+{
+	if (!pipe)
+		return;
+
+	g_mutex_unlock(&pipe->lock);
+	rpc_pipe_unref(pipe);
+}
+
+/*
+ * Pin a pipe and hold its lock until rpc_pipe_put(). The table read
+ * lock only guards the lookup and the reference increment, so a close
+ * can remove the entry while an operation is still using the pipe. The
+ * operation keeps its reference, and the final free is deferred until
+ * the last reference is dropped.
+ */
+static struct ksmbd_rpc_pipe *rpc_pipe_get(unsigned int id)
+{
+	struct ksmbd_rpc_pipe *pipe;
+
+	g_rw_lock_reader_lock(&pipes_table_lock);
+	pipe = g_hash_table_lookup(pipes_table, &id);
+	if (pipe)
+		g_atomic_int_inc(&pipe->refcount);
+	g_rw_lock_reader_unlock(&pipes_table_lock);
+
+	if (pipe)
+		g_mutex_lock(&pipe->lock);
+	return pipe;
+}
+
+static gboolean rpc_pipe_remove(struct ksmbd_rpc_pipe *pipe)
+{
+	gboolean removed = FALSE;
+
 	if (pipe->id != (unsigned int)-1) {
 		g_rw_lock_writer_lock(&pipes_table_lock);
-		g_hash_table_remove(pipes_table, &(pipe->id));
+		if (g_hash_table_lookup(pipes_table, &pipe->id) == pipe)
+			removed = g_hash_table_remove(pipes_table, &pipe->id);
 		g_rw_lock_writer_unlock(&pipes_table_lock);
 	}
+	return removed;
+}
 
-	__rpc_pipe_free(pipe);
+static void rpc_pipe_free(struct ksmbd_rpc_pipe *pipe)
+{
+	rpc_pipe_remove(pipe);
+	rpc_pipe_unref(pipe);
 }
 
 static struct ksmbd_rpc_pipe *rpc_pipe_alloc(void)
@@ -196,6 +243,8 @@ static struct ksmbd_rpc_pipe *rpc_pipe_alloc(void)
 		return NULL;
 
 	pipe->id = -1;
+	g_mutex_init(&pipe->lock);
+	g_atomic_int_set(&pipe->refcount, 1);
 	pipe->entries = g_ptr_array_new();
 	return pipe;
 }
@@ -228,7 +277,7 @@ static void __clear_pipes_table(void)
 
 	g_rw_lock_writer_lock(&pipes_table_lock);
 	ghash_for_each_remove(pipe, pipes_table, iter)
-		__rpc_pipe_free(pipe);
+		rpc_pipe_unref(pipe);
 	g_rw_lock_writer_unlock(&pipes_table_lock);
 }
 
@@ -1243,32 +1292,40 @@ int rpc_restricted_context(struct ksmbd_rpc_command *req)
 	return req->flags & KSMBD_RPC_RESTRICTED_CONTEXT;
 }
 
+static int __rpc_write_request(struct ksmbd_rpc_pipe *pipe,
+			       struct ksmbd_rpc_command *req,
+			       struct ksmbd_rpc_command *resp);
+static int __rpc_read_request(struct ksmbd_rpc_pipe *pipe,
+			      struct ksmbd_rpc_command *req,
+			      struct ksmbd_rpc_command *resp,
+			      int max_resp_sz);
+
 int rpc_ioctl_request(struct ksmbd_rpc_command *req,
 		      struct ksmbd_rpc_command *resp,
 		      int max_resp_sz)
 {
+	struct ksmbd_rpc_pipe *pipe;
 	int ret;
 
-	ret = rpc_write_request(req, resp);
+	pipe = rpc_pipe_get(req->handle);
+	if (!pipe)
+		return KSMBD_RPC_ENOMEM;
+
+	ret = __rpc_write_request(pipe, req, resp);
 	if (ret == KSMBD_RPC_OK)
-		return rpc_read_request(req, resp, max_resp_sz);
+		ret = __rpc_read_request(pipe, req, resp, max_resp_sz);
+
+	rpc_pipe_put(pipe);
 	return ret;
 }
 
-int rpc_read_request(struct ksmbd_rpc_command *req,
-		     struct ksmbd_rpc_command *resp,
-		     int max_resp_sz)
+static int __rpc_read_request(struct ksmbd_rpc_pipe *pipe,
+			      struct ksmbd_rpc_command *req,
+			      struct ksmbd_rpc_command *resp,
+			      int max_resp_sz)
 {
 	int ret = KSMBD_RPC_ENOTIMPLEMENTED;
-	struct ksmbd_rpc_pipe *pipe;
 	struct ksmbd_dcerpc *dce;
-
-	pipe = rpc_pipe_lookup(req->handle);
-	if (!pipe || !pipe->dce) {
-		pr_err("RPC: no pipe or pipe has no associated DCE [%d]\n",
-			req->handle);
-		return KSMBD_RPC_EBAD_FID;
-	}
 
 	dce = pipe->dce;
 	dce->flags &= ~KSMBD_DCERPC_RETURN_READY;
@@ -1297,15 +1354,32 @@ int rpc_read_request(struct ksmbd_rpc_command *req,
 	return ret;
 }
 
-int rpc_write_request(struct ksmbd_rpc_command *req,
-		      struct ksmbd_rpc_command *resp)
+int rpc_read_request(struct ksmbd_rpc_command *req,
+		     struct ksmbd_rpc_command *resp,
+		     int max_resp_sz)
 {
 	struct ksmbd_rpc_pipe *pipe;
-	struct ksmbd_dcerpc *dce;
+	int ret;
 
-	pipe = rpc_pipe_lookup(req->handle);
-	if (!pipe)
-		return KSMBD_RPC_ENOMEM;
+	pipe = rpc_pipe_get(req->handle);
+	if (!pipe || !pipe->dce) {
+		if (pipe)
+			rpc_pipe_put(pipe);
+		pr_err("RPC: no pipe or pipe has no associated DCE [%d]\n",
+			req->handle);
+		return KSMBD_RPC_EBAD_FID;
+	}
+
+	ret = __rpc_read_request(pipe, req, resp, max_resp_sz);
+	rpc_pipe_put(pipe);
+	return ret;
+}
+
+static int __rpc_write_request(struct ksmbd_rpc_pipe *pipe,
+			       struct ksmbd_rpc_command *req,
+			       struct ksmbd_rpc_command *resp)
+{
+	struct ksmbd_dcerpc *dce;
 
 	if (pipe->dce->flags & KSMBD_DCERPC_RETURN_READY)
 		return KSMBD_RPC_OK;
@@ -1356,6 +1430,21 @@ int rpc_write_request(struct ksmbd_rpc_command *req,
 	return KSMBD_RPC_ENOTIMPLEMENTED;
 }
 
+int rpc_write_request(struct ksmbd_rpc_command *req,
+		      struct ksmbd_rpc_command *resp)
+{
+	struct ksmbd_rpc_pipe *pipe;
+	int ret;
+
+	pipe = rpc_pipe_get(req->handle);
+	if (!pipe)
+		return KSMBD_RPC_ENOMEM;
+
+	ret = __rpc_write_request(pipe, req, resp);
+	rpc_pipe_put(pipe);
+	return ret;
+}
+
 int rpc_open_request(struct ksmbd_rpc_command *req,
 		     struct ksmbd_rpc_command *resp)
 {
@@ -1387,9 +1476,11 @@ int rpc_close_request(struct ksmbd_rpc_command *req,
 {
 	struct ksmbd_rpc_pipe *pipe;
 
-	pipe = rpc_pipe_lookup(req->handle);
+	pipe = rpc_pipe_get(req->handle);
 	if (pipe) {
-		rpc_pipe_free(pipe);
+		if (rpc_pipe_remove(pipe))
+			rpc_pipe_unref(pipe);
+		rpc_pipe_put(pipe);
 		return 0;
 	}
 

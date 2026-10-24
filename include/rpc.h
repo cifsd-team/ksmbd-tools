@@ -293,6 +293,9 @@ struct ksmbd_dcerpc {
 struct ksmbd_rpc_pipe {
 	unsigned int		id;
 
+	GMutex			lock;
+	gint			refcount;
+
 	int			num_entries;
 	int			num_processed;
 	GPtrArray		*entries;
