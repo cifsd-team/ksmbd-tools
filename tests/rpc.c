@@ -1069,6 +1069,7 @@ struct wire_reader {
 	const guint8 *data;
 	size_t size;
 	size_t offset;
+	int big_endian;
 };
 
 static void wire_skip(struct wire_reader *wire, size_t size)
@@ -1090,14 +1091,17 @@ static unsigned int wire16(struct wire_reader *wire)
 	wire_align(wire, 2);
 	wire_skip(wire, 2);
 	memcpy(&value, wire->data + wire->offset - 2, 2);
-	return le16toh(value);
+	return wire->big_endian ? be16toh(value) : le16toh(value);
 }
 
 static unsigned int wire32(struct wire_reader *wire)
 {
+	__u32 value;
+
 	wire_align(wire, 4);
 	wire_skip(wire, 4);
-	return get32(wire->data + wire->offset - 4);
+	memcpy(&value, wire->data + wire->offset - 4, 4);
+	return wire->big_endian ? be32toh(value) : le32toh(value);
 }
 
 static char *wire_string(struct wire_reader *wire)
@@ -1111,7 +1115,8 @@ static char *wire_string(struct wire_reader *wire)
 	g_assert_cmpuint(actual, <=, max);
 	wire_skip(wire, (size_t)actual * 2);
 	value = g_convert((const char *)wire->data + wire->offset - actual * 2,
-			  actual * 2, "UTF-8", "UTF-16LE", NULL, NULL, NULL);
+			  actual * 2, "UTF-8", wire->big_endian ? "UTF-16BE" : "UTF-16LE",
+			  NULL, NULL, NULL);
 	g_assert_nonnull(value);
 	wire_align(wire, 4);
 	return value;
@@ -1299,18 +1304,21 @@ static GByteArray *share_get_info(unsigned int level, size_t capacity)
 	return result;
 }
 
-static void check_share_descriptor(struct wire_reader *wire, unsigned int size)
+static const guint8 *check_share_descriptor(struct wire_reader *wire, unsigned int size)
 {
 	unsigned int i;
+	const guint8 *sd;
 
 	for (i = 0; i < 4; i++) {
 		g_autofree char *value = wire_string(wire);
 	}
 	g_assert_cmpuint(size, >, 20);
 	g_assert_cmpuint(wire32(wire), ==, size);
+	sd = wire->data + wire->offset;
 	wire_skip(wire, size);
-	g_assert_cmpuint(wire->data[wire->offset - size], ==, 1);
+	g_assert_cmpuint(sd[0], ==, 1);
 	wire_align(wire, 4);
+	return sd;
 }
 
 static void test_share_security_descriptor(void)
@@ -2959,6 +2967,115 @@ static void test_samr_large_group(void)
 	fixture_destroy();
 }
 
+static void put_be32(GByteArray *stub, unsigned int value)
+{
+	put32(stub, GUINT32_SWAP_LE_BE(value));
+}
+
+static GByteArray *share_descriptor_blobs(GByteArray *result, int enumerate,
+					 int big_endian)
+{
+	struct wire_reader wire = {
+		.data = result->data, .size = result->len, .big_endian = big_endian,
+	};
+	unsigned int sizes[3], count = enumerate ? 3 : 1, i;
+	GByteArray *blobs = g_byte_array_new();
+
+	g_assert_cmpuint(wire32(&wire), ==, 502);
+	if (enumerate)
+		g_assert_cmpuint(wire32(&wire), ==, 502);
+	g_assert_cmpuint(wire32(&wire), !=, 0);
+	if (enumerate) {
+		g_assert_cmpuint(wire32(&wire), ==, count);
+		g_assert_cmpuint(wire32(&wire), !=, 0);
+		g_assert_cmpuint(wire32(&wire), ==, count);
+	}
+	for (i = 0; i < count; i++) {
+		wire_skip(&wire, 8 * 4);
+		sizes[i] = wire32(&wire);
+		g_assert_cmpuint(wire32(&wire), !=, 0);
+	}
+	for (i = 0; i < count; i++) {
+		const guint8 *sd = check_share_descriptor(&wire, sizes[i]);
+
+		g_assert_cmpuint(get32(sd + 16), ==, 20); /* LE DACL offset. */
+		g_byte_array_append(blobs, sd, sizes[i]);
+	}
+	if (enumerate) {
+		g_assert_cmpuint(wire32(&wire), ==, count);
+		g_assert_cmpuint(wire32(&wire), !=, 0);
+		g_assert_cmpuint(wire32(&wire), ==, 0);
+	}
+	g_assert_cmpuint(wire32(&wire), ==, 0);
+	g_assert_cmpuint(wire.offset, ==, wire.size);
+	return blobs;
+}
+
+static void test_share_descriptor_big_endian(void)
+{
+	const unsigned int flags = KSMBD_RPC_SRVSVC_METHOD_INVOKE;
+	unsigned int enumerate, i;
+
+	fixture_init();
+	open_pipe(1, flags, 0, 3);
+	for (enumerate = 0; enumerate < 2; enumerate++) {
+		GByteArray *stub = g_byte_array_new(), *result, *expected, *actual;
+		struct ksmbd_rpc_command *req, *resp = command(1, flags, 4096);
+		__u16 value16;
+		__u32 value32;
+		unsigned int opnum = enumerate ? 15 : 16;
+
+		result = enumerate ? share_enum(502, UINT32_MAX, 0) :
+				     share_get_info(502, 4096);
+		expected = share_descriptor_blobs(result, enumerate, 0);
+		g_byte_array_unref(result);
+		put32(stub, 0);
+		if (enumerate) {
+			put_be32(stub, 502);
+			put_be32(stub, 502);
+			put_be32(stub, 1);
+			put32(stub, 0);
+			put32(stub, 0);
+			put32(stub, UINT32_MAX);
+			put_be32(stub, 1);
+			put32(stub, 0);
+		} else {
+			put_be32(stub, 7);
+			put32(stub, 0);
+			put_be32(stub, 7);
+			for (i = 0; i < sizeof("share0"); i++)
+				put16(stub, GUINT16_SWAP_LE_BE("share0"[i]));
+			put_be32(stub, 502);
+		}
+		req = request(1, flags, opnum, stub);
+		req->payload[4] = 0;
+		value16 = htobe16(req->payload_sz);
+		memcpy(req->payload + 8, &value16, 2);
+		value16 = htobe16(opnum);
+		memcpy(req->payload + 22, &value16, 2);
+		value32 = htobe32(1);
+		memcpy(req->payload + 12, &value32, 4);
+		value32 = htobe32(stub->len);
+		memcpy(req->payload + 16, &value32, 4);
+		g_assert_cmpint(rpc_ioctl_request(req, resp, 4096), ==, 0);
+		g_assert_cmpuint(resp->payload[2], ==, DCERPC_PTYPE_RPC_RESPONSE);
+		g_assert_cmpuint(resp->payload[4], ==, 0);
+		g_assert_cmpuint(resp->payload[3], ==, 3);
+		result = g_byte_array_new();
+		g_byte_array_append(result, (void *)(resp->payload + 24),
+				    resp->payload_sz - 24);
+		actual = share_descriptor_blobs(result, enumerate, 1);
+		g_assert_cmpmem(actual->data, actual->len, expected->data, expected->len);
+		g_byte_array_unref(actual);
+		g_byte_array_unref(expected);
+		g_byte_array_unref(result);
+		g_byte_array_unref(stub);
+		g_free(req);
+		g_free(resp);
+	}
+	fixture_destroy();
+}
+
 int main(int argc, char **argv)
 {
 	g_test_init(&argc, &argv, NULL);
@@ -2998,5 +3115,6 @@ int main(int argc, char **argv)
 	g_test_add_func("/rpc/samr/user-all-access-fields", test_user_all_access_fields);
 	g_test_add_func("/rpc/samr/security-descriptor", test_samr_security_descriptor);
 	g_test_add_func("/rpc/samr/large-group", test_samr_large_group);
+	g_test_add_func("/rpc/srvsvc/descriptor-big-endian", test_share_descriptor_big_endian);
 	return g_test_run();
 }

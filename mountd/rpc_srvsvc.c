@@ -215,8 +215,7 @@ static int __share_entry_rep_ctr502(struct ksmbd_dcerpc *dce,
 {
 	struct ksmbd_share *share = entry;
 	struct ksmbd_dcerpc descriptor = {
-		.flags = dce->flags & (KSMBD_DCERPC_LITTLE_ENDIAN |
-				       KSMBD_DCERPC_ALIGN4),
+		.flags = KSMBD_DCERPC_LITTLE_ENDIAN | KSMBD_DCERPC_ALIGN4,
 	};
 	__u32 sec_desc_len;
 	int ret;
@@ -272,13 +271,19 @@ static int __share_entry_data_ctr2(struct ksmbd_dcerpc *dce, gpointer entry)
 static int __share_write_security_descriptor(struct ksmbd_dcerpc *dce)
 {
 	size_t length_offset, data_offset, end_offset;
+	unsigned int flags = dce->flags;
 	__u32 sec_desc_len;
+	int ret;
 
 	length_offset = dce->offset;
 	if (ndr_write_int32(dce, 0))
 		return -EINVAL;
 	data_offset = dce->offset;
-	if (build_sec_desc(dce, &sec_desc_len, 0))
+	/* The descriptor is an opaque little-endian blob inside the NDR array. */
+	dce->flags |= KSMBD_DCERPC_LITTLE_ENDIAN;
+	ret = build_sec_desc(dce, &sec_desc_len, 0);
+	dce->flags = flags;
+	if (ret)
 		return -EINVAL;
 	end_offset = dce->offset;
 	if (end_offset < data_offset ||
