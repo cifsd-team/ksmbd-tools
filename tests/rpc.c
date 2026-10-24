@@ -1664,9 +1664,10 @@ static void check_lsa_name_rid(GByteArray *result, unsigned int version,
 		g_assert_cmpuint(wire32(&wire), ==, 0);
 		if (mapped) {
 			sid = wire_sid(&wire);
-			g_assert_cmpuint(sid->len, ==, domain_size + 4);
+			g_assert_cmpuint(sid->len, ==, domain_size + (type == 3 ? 0 : 4));
 			g_assert_cmpmem(sid->data + 2, domain_size - 2, domain + 2, domain_size - 2);
-			g_assert_cmpuint(get32(sid->data + sid->len - 4), ==, rid);
+			if (type != 3)
+				g_assert_cmpuint(get32(sid->data + sid->len - 4), ==, rid);
 			g_byte_array_unref(sid);
 		}
 	}
@@ -3282,6 +3283,39 @@ static void test_lsa_unmapped_name_domains(void)
 	fixture_destroy();
 }
 
+static void test_lsa_domain_names(void)
+{
+	char hostname[256] = { 0 };
+	const char *names[] = { hostname, "SERVER", "sErVeR", "Unix Group", "uNiX gRoUp" };
+	GByteArray *policy, *result;
+	unsigned int version, i;
+
+	g_assert_cmpint(gethostname(hostname, sizeof(hostname) - 1), ==, 0);
+	fixture_init();
+	open_pipe(1, KSMBD_RPC_LSARPC_METHOD_INVOKE, 0xab, 0);
+	policy = open_policy();
+	for (version = 0; version < 2; version++) {
+		for (i = 0; i < G_N_ELEMENTS(names); i++) {
+			struct wire_reader wire;
+			g_autofree char *canonical = NULL;
+			g_autofree char *expected = i < 3 ? g_ascii_strup(hostname, -1) :
+								 g_strdup("Unix Group");
+
+			result = lsa_lookup_name(policy, names[i], version);
+			check_lsa_name_rid(result, version, 3,
+					   i < 3 ? local_domain_sid : unix_group_sid,
+					   i < 3 ? sizeof(local_domain_sid) : sizeof(unix_group_sid), 0);
+			wire = (struct wire_reader){ .data = result->data, .size = result->len };
+			wire_skip(&wire, 32);
+			canonical = wire_string(&wire);
+			g_assert_cmpstr(canonical, ==, expected);
+			g_byte_array_unref(result);
+		}
+	}
+	g_byte_array_unref(policy);
+	fixture_destroy();
+}
+
 int main(int argc, char **argv)
 {
 	g_test_init(&argc, &argv, NULL);
@@ -3325,5 +3359,6 @@ int main(int argc, char **argv)
 	g_test_add_func("/rpc/srvsvc/descriptor-big-endian", test_share_descriptor_big_endian);
 	g_test_add_func("/rpc/lsarpc/group-casefold", test_lsa_group_casefold);
 	g_test_add_func("/rpc/lsarpc/unmapped-name-domains", test_lsa_unmapped_name_domains);
+	g_test_add_func("/rpc/lsarpc/domain-names", test_lsa_domain_names);
 	return g_test_run();
 }

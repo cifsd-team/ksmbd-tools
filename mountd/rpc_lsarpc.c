@@ -1066,6 +1066,12 @@ static int lsarpc_resolve_name(struct lsarpc_names_info *ni, const char *input)
 		/* A known domain survives even when its account cannot be mapped. */
 		qualifier = g_strndup(input, separator - input);
 		lsarpc_find_domain(ni, qualifier);
+	} else if (lsarpc_find_domain(ni, input)) {
+		smb_copy_sid(&ni->sid, &ni->domain_sid);
+		ni->type = SID_TYPE_DOMAIN;
+		ni->mapped = 1;
+		ni->resolved_name = g_strdup(ni->domain_str);
+		return ni->resolved_name ? 0 : -ENOMEM;
 	}
 	ret = lsarpc_extract_account_name(input, &name, &type);
 	if (ret)
