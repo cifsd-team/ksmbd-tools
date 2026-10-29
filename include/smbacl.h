@@ -17,7 +17,16 @@
 
 #define SID_TYPE_USER		1
 #define SID_TYPE_GROUP		2
+#define SID_TYPE_DOMAIN		3
+#define SID_TYPE_ALIAS		4
+#define SID_TYPE_WELL_KNOWN_GROUP 5
+#define SID_TYPE_LABEL		10
 #define SID_TYPE_UNKNOWN	8
+
+/* Linux reserves (uid_t)-1, so this domain RID cannot alias a user UID. */
+#define SMB_LOCAL_USERS_RID	0xffffffffU
+
+#define SMB_UNIX_GROUP_DOMAIN	"Unix Group"
 
 struct smb_sid {
 	__u8 revision; /* revision level */
@@ -26,7 +35,10 @@ struct smb_sid {
 	__u32 sub_auth[SID_MAX_SUB_AUTHORITIES]; /* sub_auth[num_subauth] */
 };
 
+int smb_valid_user_rid(__u32 rid);
+char *smb_local_users_name(void);
 void smb_init_domain_sid(struct smb_sid *sid);
+void smb_init_unix_group_sid(struct smb_sid *sid);
 void smb_copy_sid(struct smb_sid *dst, const struct smb_sid *src);
 int smb_compare_sids(const struct smb_sid *ctsid, const struct smb_sid *cwsid);
 int set_domain_name(struct smb_sid *sid, char *domain, size_t domain_len, int *type);

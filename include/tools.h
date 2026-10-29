@@ -29,6 +29,19 @@
 #include <config.h>
 #endif
 
+/* Non-DC SAM names are compared after Unicode uppercasing (MS-SAMR). */
+static inline int ksmbd_name_compare(const char *a, const char *b)
+{
+	g_autofree char *upper_a = NULL, *upper_b = NULL;
+
+	/* Preserve deterministic comparisons for legacy non-UTF-8 configuration. */
+	if (!g_utf8_validate(a, -1, NULL) || !g_utf8_validate(b, -1, NULL))
+		return g_ascii_strcasecmp(a, b);
+	upper_a = g_utf8_strup(a, -1);
+	upper_b = g_utf8_strup(b, -1);
+	return strcmp(upper_a, upper_b);
+}
+
 struct smbconf_global {
 	int			flags;
 	int			map_to_guest;

@@ -3,7 +3,7 @@ AM_CFLAGS = -DSYSCONFDIR='"${sysconfdir}"' -DRUNSTATEDIR='"${runstatedir}"' \
             $(LIBDCERPC_CFLAGS) -fno-common
 
 noinst_LIBRARIES = libmountd.a
-libmountd_a_SOURCES = worker.c ipc.c rpc.c rpc_srvsvc.c rpc_wkssvc.c mountd.c \
+libmountd_a_SOURCES = worker.c quota.c ipc.c rpc.c rpc_srvsvc.c rpc_wkssvc.c mountd.c \
                       smbacl.c rpc_samr.c rpc_lsarpc.c
 
 EXTRA_DIST = ksmbd.mountd.8.in \

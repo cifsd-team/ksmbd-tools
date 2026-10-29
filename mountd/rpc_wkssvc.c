@@ -19,51 +19,76 @@
 #include <dcerpc/server.h>
 #include <dcerpc/wkssvc.h>
 
+#include <management/session.h>
+
 #include <rpc.h>
 #include <rpc_wkssvc.h>
 #include <tools.h>
 
-#define WKSSVC_PLATFORM_ID_NT		500
-
 #define WKSSVC_VERSION_MAJOR		0x2
 #define WKSSVC_VERSION_MINOR		0x1
 
-/*
- * NetrWkstaGetInfo, level 100 only: 101 and 102 need an administrator
- * on Windows, and nothing asks ksmbd for them.
- */
+/* The name the client called us by, without the leading backslashes */
+static const char *called_name(const char *server_name)
+{
+	const char *name = server_name ? server_name : "";
+
+	while (*name == '\\')
+		name++;
+	return name;
+}
+
+/* NetrWkstaGetInfo, levels 100, 101 and 102 */
 static int wkssvc_wksta_get_info_stub(struct dcerpc_context *dce,
 				      struct dcerpc_pdu *pdu,
 				      void *reqv, void *repv)
 {
 	struct wkssvc_NetrWkstaGetInfo_req *req = reqv;
 	struct wkssvc_NetrWkstaGetInfo_rep *rep = repv;
-	struct wkssvc_WKSTA_INFO_100 *info = &rep->WkstaInfo.WkstaInfo100;
+	struct wkssvc_WKSTA_INFO_102 info;
 	const char *name = global_conf.netbios_name;
 
 	if (rpc_pipe_restricted(rpc_pipe_of_pdu(pdu))) {
 		rep->status = KSMBD_RPC_EACCESS_DENIED;
 		return 0;
 	}
-	if (req->Level != 100) {
+	if (req->Level != 100 && req->Level != 101 && req->Level != 102) {
 		rep->status = KSMBD_RPC_EINVALID_LEVEL;
 		return 0;
 	}
 
 	/* Without a netbios name, the name the client called us by */
-	if (!name || !name[0]) {
-		name = req->ServerName ? req->ServerName : "";
-		while (*name == '\\')
-			name++;
-	}
+	if (!name || !name[0])
+		name = called_name(req->ServerName);
 
-	info->PlatformId = WKSSVC_PLATFORM_ID_NT;
-	info->ComputerName = rpc_pdu_strdup(pdu, name);
-	info->LanGroup = rpc_pdu_strdup(pdu, global_conf.work_group ?: "");
-	info->VerMajor = WKSSVC_VERSION_MAJOR;
-	info->VerMinor = WKSSVC_VERSION_MINOR;
-	if (!info->ComputerName || !info->LanGroup)
+	/*
+	 * The levels are prefixes of one another: fill a 102 and copy the
+	 * prefix the level asks for into the union's arm.
+	 */
+	memset(&info, 0, sizeof(info));
+	info.PlatformId = WKSSVC_PLATFORM_ID_NT;
+	info.ComputerName = rpc_pdu_strdup(pdu, name);
+	info.LanGroup = rpc_pdu_strdup(pdu, global_conf.work_group ?: "");
+	info.VerMajor = WKSSVC_VERSION_MAJOR;
+	info.VerMinor = WKSSVC_VERSION_MINOR;
+	info.LanRoot = rpc_pdu_strdup(pdu, global_conf.root_dir ?: "");
+	info.LoggedOnUsers = sm_session_count();
+	if (!info.ComputerName || !info.LanGroup || !info.LanRoot)
 		return -1;
+
+	switch (req->Level) {
+	case 100:
+		memcpy(&rep->WkstaInfo.WkstaInfo100, &info,
+		       sizeof(rep->WkstaInfo.WkstaInfo100));
+		break;
+	case 101:
+		memcpy(&rep->WkstaInfo.WkstaInfo101, &info,
+		       sizeof(rep->WkstaInfo.WkstaInfo101));
+		break;
+	default:
+		rep->WkstaInfo.WkstaInfo102 = info;
+		break;
+	}
 	rep->status = KSMBD_RPC_OK;
 	return 0;
 }

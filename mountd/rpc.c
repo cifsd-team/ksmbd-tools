@@ -140,13 +140,6 @@ static const struct {
 	{ KSMBD_RPC_SAMR_METHOD_INVOKE, rpc_samr_endpoint },
 };
 
-/*
- * The kernel answers FSCTL_PIPE_TRANSCEIVE with at most
- * KSMBD_IPC_MAX_PAYLOAD (4096) bytes of our reply and drops the rest, so
- * no fragment may be larger than that. A READ takes the whole reply.
- */
-#define LIBDCERPC_MAX_FRAG	4096
-
 char *rpc_pdu_strdup(struct dcerpc_pdu *pdu, const char *s)
 {
 	size_t len;
@@ -176,6 +169,33 @@ int rpc_pipe_restricted(struct ksmbd_rpc_pipe *pipe)
 		return 0;
 
 	return !pipe || pipe->req_flags & KSMBD_RPC_RESTRICTED_CONTEXT;
+}
+
+/*
+ * The current kernel IPC supplies no authenticated caller token. RPC
+ * objects therefore grant only their public ACL, independent of caller
+ * identity. Never infer an administrator or retain generic or
+ * MAXIMUM_ALLOWED bits in a handle.
+ */
+int rpc_grant_access(unsigned int desired, unsigned int public_access,
+		     const struct rpc_generic_mapping *mapping,
+		     unsigned int *granted)
+{
+	unsigned int concrete = desired & ~0xf2000000U;
+
+	*granted = 0;
+	if (desired & 0x80000000U)
+		concrete |= mapping->read;
+	if (desired & 0x40000000U)
+		concrete |= mapping->write;
+	if (desired & 0x20000000U)
+		concrete |= mapping->execute;
+	if (desired & 0x10000000U)
+		concrete |= mapping->all;
+	if (concrete & ~public_access)
+		return KSMBD_RPC_EACCESS_DENIED;
+	*granted = desired & 0x02000000U ? public_access : concrete;
+	return KSMBD_RPC_OK;
 }
 
 struct rpc_handle {
@@ -290,7 +310,8 @@ static int libdcerpc_pipe_open(struct ksmbd_rpc_pipe *pipe,
 
 	pipe->srv = libdcerpc_services[i].endpoint();
 	if (!pipe->srv ||
-	    dcerpc_server_set_max_xmit_frag(pipe->srv, LIBDCERPC_MAX_FRAG))
+	    dcerpc_server_set_max_xmit_frag(pipe->srv,
+					    KSMBD_RPC_MAX_FRAGMENT_SIZE))
 		return -ENOMEM;
 	/* the hex dumps and YAML of debug only with -v */
 	dcerpc_server_set_log(pipe->srv,
@@ -321,12 +342,16 @@ static int libdcerpc_pipe_write(struct ksmbd_rpc_pipe *pipe,
 	return ret;
 }
 
-/* The next fragment for the client, or an empty reply if there is none */
+/*
+ * The next fragment for the client, into the max_resp_sz bytes of
+ * resp->payload; an error if there is none, as a read of a pipe with
+ * nothing to read is.
+ */
 static int libdcerpc_pipe_read(struct ksmbd_rpc_pipe *pipe,
 			       struct ksmbd_rpc_command *resp,
 			       int max_resp_sz)
 {
-	size_t max = max_resp_sz - sizeof(struct ksmbd_rpc_command);
+	size_t max = max_resp_sz > 0 ? max_resp_sz : 0;
 	int more;
 
 	g_mutex_lock(&pipe->lock);
@@ -336,6 +361,10 @@ static int libdcerpc_pipe_read(struct ksmbd_rpc_pipe *pipe,
 	if (more)
 		pr_err("RPC: pipe %u: fragment larger than %zu\n",
 		       pipe->id, max);
+	if (!resp->payload_sz) {
+		pr_debug("RPC: pipe %u: nothing to read\n", pipe->id);
+		return KSMBD_RPC_EBAD_DATA;
+	}
 	return KSMBD_RPC_OK;
 }
 

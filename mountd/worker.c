@@ -13,6 +13,7 @@
 #include <worker.h>
 #include <ipc.h>
 #include <rpc.h>
+#include <quota.h>
 
 #include <management/user.h>
 #include <management/share.h>
@@ -21,6 +22,7 @@
 
 #define MAX_WORKER_THREADS	4
 static GThreadPool *pool;
+static GThreadPool *quota_pool;
 
 #define VALID_IPC_MSG(m, t)					\
 	({							\
@@ -159,7 +161,8 @@ static int spnego_authen_request(struct ksmbd_ipc_msg *msg)
 	resp->session_key_len = auth_out.key_len;
 	memcpy(resp->payload, auth_out.sess_key, auth_out.key_len);
 	resp->spnego_blob_len = auth_out.blob_len;
-	resp->session_expiry = auth_out.session_expiry;
+	resp->login_response.session_expiry_lo = auth_out.session_expiry;
+	resp->login_response.session_expiry_hi = auth_out.session_expiry >> 32;
 	memcpy(resp->payload + auth_out.key_len, auth_out.spnego_blob,
 			auth_out.blob_len);
 out_free_auth:
@@ -275,6 +278,8 @@ static int rpc_request(struct ksmbd_ipc_msg *msg)
 		goto out;
 
 	req = (struct ksmbd_rpc_command *)msg->payload;
+	if (req->payload_sz > msg->sz - sizeof(*req))
+		goto out;
 	if (req->flags & KSMBD_RPC_METHOD_RETURN)
 		resp_msg = ipc_msg_alloc(KSMBD_IPC_MAX_MESSAGE_SIZE -
 				sizeof(struct ksmbd_rpc_command));
@@ -292,12 +297,14 @@ static int rpc_request(struct ksmbd_ipc_msg *msg)
 		ret = rpc_open_request(req, resp);
 	} else if (req->flags & KSMBD_RPC_CLOSE_METHOD) {
 		ret = rpc_close_request(req, resp);
-	} else if (req->flags & KSMBD_RPC_IOCTL_METHOD) {
-		ret = rpc_ioctl_request(req, resp, resp_msg->sz);
+	} else if ((req->flags & KSMBD_RPC_IOCTL_METHOD) ==
+		   KSMBD_RPC_IOCTL_METHOD) {
+		ret = rpc_ioctl_request(req, resp, resp_msg->sz - sizeof(*resp));
 	} else if (req->flags & KSMBD_RPC_WRITE_METHOD) {
 		ret = rpc_write_request(req, resp);
-	} else if (req->flags & KSMBD_RPC_READ_METHOD) {
-		ret = rpc_read_request(req, resp, resp_msg->sz);
+	} else if ((req->flags & KSMBD_RPC_READ_METHOD) ==
+		   KSMBD_RPC_READ_METHOD) {
+		ret = rpc_read_request(req, resp, resp_msg->sz - sizeof(*resp));
 	} else {
 		pr_err("Unknown RPC method: %x\n", req->flags);
 		ret = KSMBD_RPC_ENOTIMPLEMENTED;
@@ -311,6 +318,21 @@ static int rpc_request(struct ksmbd_ipc_msg *msg)
 	ipc_msg_send(resp_msg);
 out:
 	ipc_msg_free(resp_msg);
+	return 0;
+}
+
+static int quota_request(struct ksmbd_ipc_msg *msg)
+{
+	struct ksmbd_ipc_msg *reply;
+
+	reply = ipc_msg_alloc(sizeof(struct ksmbd_quota_response));
+	if (!reply)
+		return -ENOMEM;
+	reply->type = KSMBD_EVENT_QUOTA_RESPONSE;
+	quota_handle_request((void *)msg->payload, msg->sz,
+			     (void *)reply->payload);
+	ipc_msg_send(reply);
+	ipc_msg_free(reply);
 	return 0;
 }
 
@@ -351,6 +373,10 @@ static void worker_pool_fn(gpointer event, gpointer user_data)
 		spnego_authen_request(msg);
 		break;
 
+	case KSMBD_EVENT_QUOTA_REQUEST:
+		quota_request(msg);
+		break;
+
 	case KSMBD_EVENT_LOGIN_REQUEST_EXT:
 		login_request_ext(msg);
 		break;
@@ -365,11 +391,18 @@ static void worker_pool_fn(gpointer event, gpointer user_data)
 
 int wp_ipc_msg_push(struct ksmbd_ipc_msg *msg)
 {
+	/* Quota syscalls can wait for a transaction or a filesystem thaw. */
+	if (msg->type == KSMBD_EVENT_QUOTA_REQUEST)
+		return g_thread_pool_push(quota_pool, msg, NULL);
 	return g_thread_pool_push(pool, msg, NULL);
 }
 
 void wp_destroy(void)
 {
+	if (quota_pool) {
+		g_thread_pool_free(quota_pool, 1, 1);
+		quota_pool = NULL;
+	}
 	if (pool) {
 		g_thread_pool_free(pool, 1, 1);
 		pool = NULL;
@@ -378,6 +411,8 @@ void wp_destroy(void)
 
 void wp_init(void)
 {
+	if (!quota_pool)
+		quota_pool = g_thread_pool_new(worker_pool_fn, NULL, 2, 0, NULL);
 	if (!pool)
 		pool = g_thread_pool_new(
 			worker_pool_fn,

@@ -177,3 +177,5 @@ subdir('adduser')
 subdir('control')
 subdir('mountd')
 subdir('tools')
+
+subdir('tests')

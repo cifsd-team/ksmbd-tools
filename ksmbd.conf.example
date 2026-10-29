@@ -70,3 +70,8 @@
 	comment = read only /tmp access
 	path = /tmp
 	; smb3 encryption = mandatory
+
+# Btrfs user quota mapping; configure existing qgroups for user subvolumes.
+# [homes]
+# path = /srv/homes
+# btrfs quota map = 1000:0/256 1001:0/257

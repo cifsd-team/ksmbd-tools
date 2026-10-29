@@ -1,6 +1,6 @@
 ACLOCAL_AMFLAGS = -I m4
 
-SUBDIRS = subprojects addshare adduser control mountd tools
+SUBDIRS = subprojects addshare adduser control mountd tools tests
 
 EXTRA_DIST = include \
              README.md \

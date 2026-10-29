@@ -29,14 +29,23 @@ static void __prompt_password_stdin(char *password, size_t *sz)
 	struct termios term, raw_term;
 	char buf[LINE_MAX];
 	size_t buflen;
+	int is_tty;
 
 	pr_info("Prompting for password\n");
 
-	tcgetattr(STDIN_FILENO, &term);
+	/*
+	 * stdin can be a pipe, e.g. when a program passes the password
+	 * without putting it on the command line. There is no terminal
+	 * to configure then, and term would be left uninitialized.
+	 */
+	memset(&term, 0, sizeof(term));
+	is_tty = !tcgetattr(STDIN_FILENO, &term);
 	raw_term = term;
 
-	raw_term.c_lflag &= ~(ECHO | ICANON);
-	tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_term);
+	if (is_tty) {
+		raw_term.c_lflag &= ~(ECHO | ICANON);
+		tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_term);
+	}
 
 	for (*sz = (size_t)-1,
 	     buflen = 0, password[buflen] = buf[buflen] = 0x00;;) {
@@ -82,7 +91,7 @@ static void __prompt_password_stdin(char *password, size_t *sz)
 			break;
 		}
 
-		if (c == raw_term.c_cc[VERASE]) {
+		if (is_tty && c == raw_term.c_cc[VERASE]) {
 			char *u8c;
 			size_t clen;
 
@@ -103,7 +112,8 @@ static void __prompt_password_stdin(char *password, size_t *sz)
 
 	printf("\eD" "\r" "\e[2K");
 
-	tcsetattr(STDIN_FILENO, TCSAFLUSH, &term);
+	if (is_tty)
+		tcsetattr(STDIN_FILENO, TCSAFLUSH, &term);
 }
 
 static int __is_valid_password_len(size_t len)
