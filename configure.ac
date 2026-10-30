@@ -166,25 +166,24 @@ krb5_error_code krb5_auth_con_getauthenticator(krb5_context, krb5_auth_context, 
 
 AM_CONDITIONAL(HAVE_LIBKRB5, [test "x$enable_krb5" != xno])
 
-dnl libdcerpc, from the libsmb2 submodule: only its coders and server
-dnl runtime (no libsmb2 transport), built in subprojects/ and linked
-dnl statically into mountd. It is not installed.
-libdcerpc_dir=subprojects/libsmb2/libdcerpc
-AS_IF([test ! -f "$srcdir/$libdcerpc_dir/configure.ac"], [
-	AC_MSG_ERROR([$libdcerpc_dir is missing: run "git submodule update --init"])
+dnl libdcerpc, a copy of libsmb2's libdcerpc/ (see
+dnl libdcerpc/README.ksmbd-tools): only its coders and server runtime, no
+dnl libsmb2 transport, linked statically into ksmbd.tools. The coders are
+dnl generated from IDL at build time by its idlcomp.py.
+AC_PATH_PROG([PYTHON3], [python3])
+AS_IF([test -z "$PYTHON3"], [
+	AC_MSG_ERROR([python3 is required to generate the libdcerpc coders])
 ])
-ac_configure_args="$ac_configure_args --without-libsmb2 --disable-shared --enable-static --with-pic"
-AC_CONFIG_SUBDIRS([subprojects/libsmb2/libdcerpc])
-LIBDCERPC_CFLAGS="-I\$(top_srcdir)/$libdcerpc_dir/include"
-for iface in srvsvc wkssvc winreg lsa samr dssetup epm; do
-	LIBDCERPC_CFLAGS="$LIBDCERPC_CFLAGS -I\$(top_builddir)/$libdcerpc_dir/$iface"
-done
-AC_SUBST([LIBDCERPC_CFLAGS])
-AC_SUBST([LIBDCERPC_LIBS], ["\$(top_builddir)/$libdcerpc_dir/libdcerpc.la"])
+AC_CHECK_HEADERS([arpa/inet.h fcntl.h inttypes.h netinet/in.h poll.h \
+                  stdint.h stdlib.h string.h sys/poll.h sys/socket.h \
+                  sys/stat.h sys/types.h sys/unistd.h unistd.h])
+AC_SUBST([LIBDCERPC_CFLAGS],
+         ["-I\$(top_srcdir)/libdcerpc/include -I\$(top_builddir)/libdcerpc"])
+AC_SUBST([LIBDCERPC_LIBS], ["\$(top_builddir)/libdcerpc/libdcerpc.a"])
 
 AC_CONFIG_FILES([
 	Makefile
-	subprojects/Makefile
+	libdcerpc/Makefile
 	addshare/Makefile
 	adduser/Makefile
 	control/Makefile

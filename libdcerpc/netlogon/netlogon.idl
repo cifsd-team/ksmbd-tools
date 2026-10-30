@@ -1,0 +1,431 @@
+/* SPDX-License-Identifier: BSD-2-Clause */
+
+/*
+ * Netlogon Remote Protocol, [MS-NRPC].
+ * NetrServerReqChallenge and NetrServerAuthenticate3 set up a secure
+ * channel and do not themselves use one. The later calls do: a caller
+ * signs and seals the PDU, and fills the authenticators, before sending
+ * them. Function names drop the "Netr" prefix.
+ */
+[
+  uuid(12345678-1234-abcd-ef00-01234567cffb),
+  version(1.0),
+  helpstring("Netlogon"),
+  endpoint("ncacn_np:[\\pipe\\netlogon]"),
+  pointer_default(unique)
+]
+interface netlogon
+{
+
+/* [MS-NRPC] 2.2.1.3.4 */
+typedef struct {
+	uint8_t Data[8];
+} NETLOGON_CREDENTIAL, *PNETLOGON_CREDENTIAL;
+
+/* [MS-NRPC] 2.2.1.3.13: a plain enum, so 16 bits in NDR32 */
+typedef enum {
+	NullSecureChannel = 0,
+	MsvApSecureChannel = 1,
+	WorkstationSecureChannel = 2,
+	TrustedDnsDomainSecureChannel = 3,
+	TrustedDomainSecureChannel = 4,
+	UasServerSecureChannel = 5,
+	ServerSecureChannel = 6,
+	CdcServerSecureChannel = 7
+} NETLOGON_SECURE_CHANNEL_TYPE;
+
+/*
+ * NegotiateFlags, [MS-NRPC] 3.1.4.2. The spec names them by letter; these
+ * are the names Samba uses (NETLOGON_NEG_* in C).
+ */
+typedef [bitmap32bit] bitmap {
+	NEG_ACCOUNT_LOCKOUT            = 0x00000001,
+	NEG_PERSISTENT_SAMREPL         = 0x00000002,
+	NEG_ARCFOUR                    = 0x00000004,
+	NEG_PROMOTION_COUNT            = 0x00000008,
+	NEG_CHANGELOG_BDC              = 0x00000010,
+	NEG_FULL_SYNC_REPL             = 0x00000020,
+	NEG_MULTIPLE_SIDS              = 0x00000040,
+	NEG_REDO                       = 0x00000080,
+	NEG_PASSWORD_CHANGE_REFUSAL    = 0x00000100,
+	NEG_SEND_PASSWORD_INFO_PDC     = 0x00000200,
+	NEG_GENERIC_PASSTHROUGH        = 0x00000400,
+	NEG_CONCURRENT_RPC             = 0x00000800,
+	NEG_AVOID_ACCOUNT_DB_REPL      = 0x00001000,
+	NEG_AVOID_SECURITYAUTH_DB_REPL = 0x00002000,
+	NEG_STRONG_KEYS                = 0x00004000,
+	NEG_TRANSITIVE_TRUSTS          = 0x00008000,
+	NEG_DNS_DOMAIN_TRUSTS          = 0x00010000,
+	NEG_PASSWORD_SET2              = 0x00020000,
+	NEG_GETDOMAININFO              = 0x00040000,
+	NEG_CROSS_FOREST_TRUSTS        = 0x00080000,
+	NEG_NEUTRALIZE_NT4_EMULATION   = 0x00100000,
+	NEG_RODC_PASSTHROUGH           = 0x00200000,
+	NEG_SUPPORTS_AES_SHA2          = 0x00400000,
+	NEG_SUPPORTS_AES               = 0x01000000,
+	NEG_AUTHENTICATED_RPC_LSASS    = 0x20000000,
+	NEG_AUTHENTICATED_RPC          = 0x40000000
+} NETLOGON_NEG_FLAGS;
+
+/*
+ * Function: 0x04  (NetrServerReqChallenge)
+ */
+	[opnum(0x04)]
+	NTSTATUS ServerReqChallenge(
+		[in,unique,string,charset(UTF16)] uint16_t *PrimaryName,
+		[in,ref,string,charset(UTF16)] uint16_t *ComputerName,
+		[in] PNETLOGON_CREDENTIAL ClientChallenge,
+		[out] PNETLOGON_CREDENTIAL ServerChallenge
+	);
+
+/*
+ * Function: 0x1a  (NetrServerAuthenticate3)
+ */
+	[opnum(0x1a)]
+	NTSTATUS ServerAuthenticate3(
+		[in,unique,string,charset(UTF16)] uint16_t *PrimaryName,
+		[in,ref,string,charset(UTF16)] uint16_t *AccountName,
+		[in] NETLOGON_SECURE_CHANNEL_TYPE SecureChannelType,
+		[in,ref,string,charset(UTF16)] uint16_t *ComputerName,
+		[in] PNETLOGON_CREDENTIAL ClientCredential,
+		[out] PNETLOGON_CREDENTIAL ServerCredential,
+		[in,out,ref] NETLOGON_NEG_FLAGS *NegotiateFlags,
+		[out,ref] uint32_t *AccountRid
+	);
+
+/*
+ * [MS-NRPC] 2.2.1.1.5. Timestamp is the seconds the client adds into
+ * the credential chain for this call.
+ */
+typedef struct {
+	NETLOGON_CREDENTIAL Credential;
+	uint32_t Timestamp;
+} NETLOGON_AUTHENTICATOR, *PNETLOGON_AUTHENTICATOR;
+
+/*
+ * [MS-NRPC] 2.2.1.2.2. QueryLevel 1 returns the flags the server
+ * negotiated; level 2 returns the flags the client asked for.
+ */
+typedef [switch_type(uint32_t)] union {
+	[case(1)] NETLOGON_NEG_FLAGS ServerCapabilities;
+	[case(2)] NETLOGON_NEG_FLAGS RequestedFlags;
+} NETLOGON_CAPABILITIES, *PNETLOGON_CAPABILITIES;
+
+/*
+ * Function: 0x15  (NetrLogonGetCapabilities)
+ * Confirms the flags negotiated by ServerAuthenticate3. The secure
+ * channel has to be up: the DC rejects a call that is not signed.
+ */
+	[opnum(0x15)]
+	NTSTATUS LogonGetCapabilities(
+		[in,ref,string,charset(UTF16)] uint16_t *ServerName,
+		[in,unique,string,charset(UTF16)] uint16_t *ComputerName,
+		[in,ref] NETLOGON_AUTHENTICATOR *Authenticator,
+		[in,out,ref] NETLOGON_AUTHENTICATOR *ReturnAuthenticator,
+		[in] uint32_t QueryLevel,
+		[out,ref,switch_is(QueryLevel)] NETLOGON_CAPABILITIES *Capabilities
+	);
+
+/*
+ * [MS-NRPC] 2.2.1.3.7. Buffer is 256 UTF-16 units, carried as bytes:
+ * the caller encrypts the whole structure with the session key before
+ * it is coded. Length is the password length in bytes. In the clear
+ * buffer the password sits at offset (512 - Length) and the bytes in
+ * front of it are random.
+ */
+typedef struct {
+	uint8_t Buffer[512];
+	uint32_t Length;
+} NL_TRUST_PASSWORD, *PNL_TRUST_PASSWORD;
+
+/*
+ * Function: 0x1e  (NetrServerPasswordSet2)
+ * Replaces the machine-account password on the secure channel.
+ * ReturnAuthenticator is produced by the server, so it is absent from
+ * the request. The DC rejects a call that is not signed.
+ */
+	[opnum(0x1e)]
+	NTSTATUS ServerPasswordSet2(
+		[in,unique,string,charset(UTF16)] uint16_t *PrimaryName,
+		[in,ref,string,charset(UTF16)] uint16_t *AccountName,
+		[in] NETLOGON_SECURE_CHANNEL_TYPE SecureChannelType,
+		[in,ref,string,charset(UTF16)] uint16_t *ComputerName,
+		[in,ref] NETLOGON_AUTHENTICATOR *Authenticator,
+		[out,ref] NETLOGON_AUTHENTICATOR *ReturnAuthenticator,
+		[in,ref] NL_TRUST_PASSWORD *ClearNewPassword
+	);
+
+/* [MS-DTYP] GUID. No built-in; four fields, aligned as a uint32. */
+typedef struct {
+	uint32_t Data1;
+	uint16_t Data2;
+	uint16_t Data3;
+	uint8_t Data4[8];
+} GUID, *PGUID;
+
+/*
+ * [MS-NRPC] 2.2.1.3.16. LsaPolicy is the raw policy blob. An empty
+ * policy is a zero length and a NULL buffer.
+ */
+typedef struct {
+	uint32_t LsaPolicySize;
+	[size_is(LsaPolicySize)] uint8_t *LsaPolicy;
+} NETLOGON_LSA_POLICY_INFO, *PNETLOGON_LSA_POLICY_INFO;
+
+/*
+ * [MS-NRPC] 2.2.1.3.15. The four counted strings are RPC_UNICODE_STRING
+ * (length, maximum length, unique UTF-16 buffer). DomainSid may be NULL.
+ */
+typedef struct {
+	RPC_UNICODE_STRING DomainName;
+	RPC_UNICODE_STRING DnsDomainName;
+	RPC_UNICODE_STRING DnsForestName;
+	GUID DomainGuid;
+	RPC_SID *DomainSid;
+	RPC_UNICODE_STRING TrustExtension;
+	RPC_UNICODE_STRING DummyString2;
+	RPC_UNICODE_STRING DummyString3;
+	RPC_UNICODE_STRING DummyString4;
+	uint32_t DummyLong1;
+	uint32_t DummyLong2;
+	uint32_t DummyLong3;
+	uint32_t DummyLong4;
+} NETLOGON_ONE_DOMAIN_INFO, *PNETLOGON_ONE_DOMAIN_INFO;
+
+/* [MS-NRPC] 2.2.1.3.12. TrustedDomains is NULL when the count is 0. */
+typedef struct {
+	NETLOGON_ONE_DOMAIN_INFO PrimaryDomain;
+	uint32_t TrustedDomainCount;
+	[size_is(TrustedDomainCount)] NETLOGON_ONE_DOMAIN_INFO **TrustedDomains;
+	NETLOGON_LSA_POLICY_INFO LsaPolicy;
+	RPC_UNICODE_STRING DnsHostNameInDs;
+	RPC_UNICODE_STRING DummyString2;
+	RPC_UNICODE_STRING DummyString3;
+	RPC_UNICODE_STRING DummyString4;
+	uint32_t WorkstationFlags;
+	uint32_t SupportedEncTypes;
+	uint32_t DummyLong3;
+	uint32_t DummyLong4;
+} NETLOGON_DOMAIN_INFO, *PNETLOGON_DOMAIN_INFO;
+
+typedef [switch_type(uint32_t)] union {
+	[case(1)] PNETLOGON_DOMAIN_INFO DomainInfo;
+	[case(2)] PNETLOGON_LSA_POLICY_INFO LsaPolicyInfo;
+} NETLOGON_DOMAIN_INFORMATION, *PNETLOGON_DOMAIN_INFORMATION;
+
+/*
+ * [MS-NRPC] 2.2.1.3.14. The wchar_t strings are unique and may be NULL.
+ * OsVersion and OsName are counted strings, not an OSVERSIONINFOEX.
+ */
+typedef struct {
+	NETLOGON_LSA_POLICY_INFO LsaPolicy;
+	[unique,string,charset(UTF16)] uint16_t *DnsHostName;
+	[unique,string,charset(UTF16)] uint16_t *SiteName;
+	[unique,string,charset(UTF16)] uint16_t *Dummy1;
+	[unique,string,charset(UTF16)] uint16_t *Dummy2;
+	[unique,string,charset(UTF16)] uint16_t *Dummy3;
+	[unique,string,charset(UTF16)] uint16_t *Dummy4;
+	RPC_UNICODE_STRING OsVersion;
+	RPC_UNICODE_STRING OsName;
+	RPC_UNICODE_STRING DummyString3;
+	RPC_UNICODE_STRING DummyString4;
+	uint32_t WorkstationFlags;
+	uint32_t KerberosSupportedEncryptionTypes;
+	uint32_t DummyLong3;
+	uint32_t DummyLong4;
+} NETLOGON_WORKSTATION_INFO, *PNETLOGON_WORKSTATION_INFO;
+
+typedef [switch_type(uint32_t)] union {
+	[case(1)] PNETLOGON_WORKSTATION_INFO WorkstationInfo;
+	[case(2)] PNETLOGON_WORKSTATION_INFO LsaPolicyInfo;
+} NETLOGON_WORKSTATION_INFORMATION, *PNETLOGON_WORKSTATION_INFORMATION;
+
+/*
+ * Function: 0x1d  (NetrLogonGetDomainInfo)
+ * Level 1 sends workstation info and receives the domain info a member
+ * uses after it joins. The DC rejects a call that is not signed.
+ */
+	[opnum(0x1d)]
+	NTSTATUS LogonGetDomainInfo(
+		[in,ref,string,charset(UTF16)] uint16_t *ServerName,
+		[in,unique,string,charset(UTF16)] uint16_t *ComputerName,
+		[in,ref] NETLOGON_AUTHENTICATOR *Authenticator,
+		[in,out,ref] NETLOGON_AUTHENTICATOR *ReturnAuthenticator,
+		[in] uint32_t Level,
+		[in,ref,switch_is(Level)] NETLOGON_WORKSTATION_INFORMATION *WkstaBuffer,
+		[out,ref,switch_is(Level)] NETLOGON_DOMAIN_INFORMATION *DomBuffer
+	);
+
+/*
+ * [MS-NRPC] 2.2.1.3.1, the same shape as [MS-SAMR] 2.2.2.2. Two 32-bit
+ * halves, so the value is 4-aligned. A uint64 would align to 8.
+ */
+typedef struct {
+	uint32_t LowPart;
+	int32_t HighPart;
+} OLD_LARGE_INTEGER;
+
+/*
+ * Counted byte buffer. Length and MaximumLength are in bytes. An empty
+ * buffer is length 0 and a NULL pointer.
+ */
+typedef struct {
+	uint16_t Length;
+	uint16_t MaximumLength;
+	[size_is(MaximumLength), length_is(Length)] uint8_t *Buffer;
+} STRING;
+
+/* [MS-NRPC] 2.2.1.4.15 */
+typedef struct {
+	RPC_UNICODE_STRING LogonDomainName;
+	uint32_t ParameterControl;
+	OLD_LARGE_INTEGER Reserved;
+	RPC_UNICODE_STRING UserName;
+	RPC_UNICODE_STRING Workstation;
+} NETLOGON_LOGON_IDENTITY_INFO, *PNETLOGON_LOGON_IDENTITY_INFO;
+
+/* [MS-NRPC] 2.2.1.3.3. Eight bytes of challenge. */
+typedef struct {
+	uint8_t Data[8];
+} LM_CHALLENGE;
+
+/*
+ * [MS-NRPC] 2.2.1.4.5. The challenge responses are the NTLM material
+ * the member passes through; they are not encrypted by the coder.
+ */
+typedef struct {
+	NETLOGON_LOGON_IDENTITY_INFO Identity;
+	LM_CHALLENGE LmChallenge;
+	STRING NtChallengeResponse;
+	STRING LmChallengeResponse;
+} NETLOGON_NETWORK_INFO, *PNETLOGON_NETWORK_INFO;
+
+/* [MS-NRPC] 2.2.1.4.16. A plain enum, so 16 bits in NDR32. */
+typedef enum {
+	NetlogonInteractiveInformation = 1,
+	NetlogonNetworkInformation = 2,
+	NetlogonServiceInformation = 3,
+	NetlogonGenericInformation = 4,
+	NetlogonInteractiveTransitiveInformation = 5,
+	NetlogonNetworkTransitiveInformation = 6,
+	NetlogonServiceTransitiveInformation = 7,
+	NetlogonTicketLogonInformation = 8
+} NETLOGON_LOGON_INFO_CLASS;
+
+/*
+ * Only the network arm is implemented. That is the level a member uses
+ * for NTLM pass-through. The other levels share this union.
+ */
+typedef [switch_type(NETLOGON_LOGON_INFO_CLASS)] union {
+	[case(NetlogonNetworkInformation)] PNETLOGON_NETWORK_INFO LogonNetwork;
+} NETLOGON_LEVEL, *PNETLOGON_LEVEL;
+
+/* [MS-NRPC] 2.2.1.4.17 / [MS-SAMR] 2.2.3.5 */
+typedef struct {
+	uint32_t RelativeId;
+	uint32_t Attributes;
+} GROUP_MEMBERSHIP, *PGROUP_MEMBERSHIP;
+
+/* [MS-NRPC] 2.2.1.3.5. Sixteen bytes of session key. */
+typedef struct {
+	uint8_t Data[16];
+} USER_SESSION_KEY;
+
+/* [MS-NRPC] 2.2.1.4.18. Sid may be NULL. */
+typedef struct {
+	RPC_SID *Sid;
+	uint32_t Attributes;
+} NETLOGON_SID_AND_ATTRIBUTES, *PNETLOGON_SID_AND_ATTRIBUTES;
+
+/*
+ * [MS-NRPC] 2.2.1.4.14, validation level 6. Reserved4 is a one-element
+ * array in the specification; one uint32 has the same encoding. GroupIds
+ * and ExtraSids are NULL when their counts are 0.
+ */
+typedef struct {
+	OLD_LARGE_INTEGER LogonTime;
+	OLD_LARGE_INTEGER LogoffTime;
+	OLD_LARGE_INTEGER KickOffTime;
+	OLD_LARGE_INTEGER PasswordLastSet;
+	OLD_LARGE_INTEGER PasswordCanChange;
+	OLD_LARGE_INTEGER PasswordMustChange;
+	RPC_UNICODE_STRING EffectiveName;
+	RPC_UNICODE_STRING FullName;
+	RPC_UNICODE_STRING LogonScript;
+	RPC_UNICODE_STRING ProfilePath;
+	RPC_UNICODE_STRING HomeDirectory;
+	RPC_UNICODE_STRING HomeDirectoryDrive;
+	uint16_t LogonCount;
+	uint16_t BadPasswordCount;
+	uint32_t UserId;
+	uint32_t PrimaryGroupId;
+	uint32_t GroupCount;
+	[size_is(GroupCount)] PGROUP_MEMBERSHIP GroupIds;
+	uint32_t UserFlags;
+	USER_SESSION_KEY UserSessionKey;
+	RPC_UNICODE_STRING LogonServer;
+	RPC_UNICODE_STRING LogonDomainName;
+	RPC_SID *LogonDomainId;
+	uint8_t LMKey[8];
+	uint32_t UserAccountControl;
+	uint32_t SubAuthStatus;
+	OLD_LARGE_INTEGER LastSuccessfulILogon;
+	OLD_LARGE_INTEGER LastFailedILogon;
+	uint32_t FailedILogonCount;
+	uint32_t Reserved4;
+	uint32_t SidCount;
+	[size_is(SidCount)] PNETLOGON_SID_AND_ATTRIBUTES ExtraSids;
+	RPC_UNICODE_STRING DnsLogonDomainName;
+	RPC_UNICODE_STRING Upn;
+	RPC_UNICODE_STRING ExpansionString1;
+	RPC_UNICODE_STRING ExpansionString2;
+	RPC_UNICODE_STRING ExpansionString3;
+	RPC_UNICODE_STRING ExpansionString4;
+	RPC_UNICODE_STRING ExpansionString5;
+	RPC_UNICODE_STRING ExpansionString6;
+	RPC_UNICODE_STRING ExpansionString7;
+	RPC_UNICODE_STRING ExpansionString8;
+	RPC_UNICODE_STRING ExpansionString9;
+	RPC_UNICODE_STRING ExpansionString10;
+} NETLOGON_VALIDATION_SAM_INFO4, *PNETLOGON_VALIDATION_SAM_INFO4;
+
+/* [MS-NRPC] 2.2.1.4.19. A plain enum, so 16 bits in NDR32. */
+typedef enum {
+	NetlogonValidationUasInfo = 1,
+	NetlogonValidationSamInfo = 2,
+	NetlogonValidationSamInfo2 = 3,
+	NetlogonValidationGenericInfo = 4,
+	NetlogonValidationGenericInfo2 = 5,
+	NetlogonValidationSamInfo4 = 6,
+	NetlogonValidationTicketLogon = 7
+} NETLOGON_VALIDATION_INFO_CLASS;
+
+/*
+ * Only SamInfo4 is implemented. A member asks for that level so the
+ * reply carries the user's SIDs.
+ */
+typedef [switch_type(NETLOGON_VALIDATION_INFO_CLASS)] union {
+	[case(NetlogonValidationSamInfo4)]
+		PNETLOGON_VALIDATION_SAM_INFO4 ValidationSam4;
+} NETLOGON_VALIDATION, *PNETLOGON_VALIDATION;
+
+/*
+ * Function: 0x27  (NetrLogonSamLogonEx)
+ * Passes an NTLM network logon to the DC and returns the validation
+ * info. There is no authenticator argument: the secure channel signs
+ * the PDU. The DC rejects a call that is not signed. Authoritative and
+ * ExtraFlags are [ref], so they are inline.
+ */
+	[opnum(0x27)]
+	NTSTATUS LogonSamLogonEx(
+		[in,unique,string,charset(UTF16)] uint16_t *LogonServer,
+		[in,unique,string,charset(UTF16)] uint16_t *ComputerName,
+		[in] NETLOGON_LOGON_INFO_CLASS LogonLevel,
+		[in,ref,switch_is(LogonLevel)] NETLOGON_LEVEL *LogonInformation,
+		[in] NETLOGON_VALIDATION_INFO_CLASS ValidationLevel,
+		[out,ref,switch_is(ValidationLevel)] NETLOGON_VALIDATION *ValidationInformation,
+		[out,ref] uint8_t *Authoritative,
+		[in,out,ref] uint32_t *ExtraFlags
+	);
+
+}

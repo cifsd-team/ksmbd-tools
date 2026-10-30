@@ -29,6 +29,7 @@ BuildRequires:  libnl3-devel
 BuildRequires:  autoconf
 BuildRequires:  automake
 BuildRequires:  libtool
+BuildRequires:  python3
 BuildRequires:  systemd-rpm-macros
 
 Requires(pre):	kernel-default >= 5.15

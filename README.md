@@ -23,12 +23,12 @@ Otherwise, follow these instructions to build it yourself. Either the GNU
 Autotools or Meson build system can be used.
 
 Dependencies for Debian and its derivatives: `git` `gcc` `pkgconf` `autoconf`  
-`automake` `libtool` `make` `meson` `ninja-build` `gawk` `libnl-3-dev`  
-`libnl-genl-3-dev` `libglib2.0-dev`
+`automake` `libtool` `make` `meson` `ninja-build` `gawk` `python3`  
+`libnl-3-dev` `libnl-genl-3-dev` `libglib2.0-dev`
 
 Dependencies for RHEL and its derivatives: `git` `gcc` `pkgconf` `autoconf`  
-`automake` `libtool` `make` `meson` `ninja-build` `gawk` `libnl3-devel`  
-`glib2-devel`
+`automake` `libtool` `make` `meson` `ninja-build` `gawk` `python3`  
+`libnl3-devel` `glib2-devel`
 
 ### Kerberos 5 support
 

@@ -1,0 +1,30 @@
+This directory is a copy of libdcerpc, which lives in the libsmb2
+repository (https://github.com/sahlberg/libsmb2, directory libdcerpc/).
+It was taken from commit f55a0e286adb7b4c7cacf0b132bb9f9344171ad5.
+
+ksmbd-tools uses the coders for srvsvc, wkssvc, lsarpc, samr and dssetup
+and the server runtime, <dcerpc/server.h>, which does BIND, fragments
+and NDR32/NDR64 in either byte order on the bytes mountd gets from the
+kernel. It is built the way libsmb2 builds it with --without-libsmb2
+(HAVE_LIBSMB2 undefined): coders and server runtime only, no transport,
+no client side. It is linked statically into ksmbd.tools and nothing
+from it is installed.
+
+Copied unchanged from libsmb2/libdcerpc/:
+
+  dcerpc.c dcerpc-dtyp.c dcerpc-epm.c dcerpc-server.c dcerpc-unicode.c
+  dcerpc-private.h include/dcerpc/*.h idlcomp.py <iface>/<iface>.idl
+  COPYING README
+
+The coders are generated from the IDL at build time by idlcomp.py, so
+python3 is needed to build. All eight interfaces are kept, also winreg,
+netlogon and epm which ksmbd-tools does not serve, because
+dcerpc_create_context() registers every coder.
+
+Left out: dcerpcd/, utils/, examples/, tests/, dcerpc-examples/,
+packaging/, libdcerpc.syms, schannel.c (the Netlogon secure channel,
+used only by the client side) and libdcerpc's own build files, which
+meson.build, include/dcerpc/meson.build and Makefile.am here replace.
+
+To update, copy the files listed above from a newer libsmb2 and change
+the commit at the top. Fixes belong upstream in libsmb2, not here.

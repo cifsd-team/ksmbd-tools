@@ -36,26 +36,33 @@ krb5_dep = dependency(
   required: get_option('krb5'),
 )
 
-# libdcerpc, from the libsmb2 submodule: only its coders and server
-# runtime (no libsmb2 transport), linked statically into mountd.
-fs = import('fs')
-if not fs.is_file('subprojects/libsmb2/libdcerpc/CMakeLists.txt')
-  error('subprojects/libsmb2 is missing: run "git submodule update --init"')
-endif
-cmake = import('cmake')
-libdcerpc_opts = cmake.subproject_options()
-libdcerpc_opts.add_cmake_defines({
-  'LIBDCERPC_ONLY': true,
-  'BUILD_SHARED_LIBS': false,
-})
-libdcerpc_dep = cmake.subproject(
-  'libsmb2',
-  options: libdcerpc_opts,
-).dependency('dcerpc')
 asn1_lib = []
 
 config_h_data = configuration_data()
 cc = meson.get_compiler('c')
+
+# libdcerpc's sources ask config.h which of these headers there are.
+foreach h : [
+  'arpa/inet.h',
+  'fcntl.h',
+  'inttypes.h',
+  'netinet/in.h',
+  'poll.h',
+  'stdint.h',
+  'stdlib.h',
+  'string.h',
+  'sys/poll.h',
+  'sys/socket.h',
+  'sys/stat.h',
+  'sys/types.h',
+  'sys/unistd.h',
+  'unistd.h',
+]
+  config_h_data.set(
+    'HAVE_' + h.underscorify().to_upper(),
+    cc.has_header(h),
+  )
+endforeach
 
 pthread_lib = dependency(
   'threads',
@@ -175,6 +182,7 @@ configure_file(
 subdir('addshare')
 subdir('adduser')
 subdir('control')
+subdir('libdcerpc')
 subdir('mountd')
 subdir('tools')
 
